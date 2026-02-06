@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gradbot Voice Chat</title>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --danger: #ef4444;
+            --danger-hover: #dc2626;
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --text: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 0.5rem;
+            font-size: 2rem;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+        }
+
+        label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .voice-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 0.75rem;
+        }
+
+        .voice-option {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem;
+            background: var(--bg);
+            border: 2px solid var(--border);
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .voice-option:hover {
+            border-color: var(--primary);
+        }
+
+        .voice-option.selected {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.1);
+        }
+
+        .voice-option input {
+            display: none;
+        }
+
+        .flag {
+            font-size: 1.25rem;
+        }
+
+        .voice-name {
+            font-weight: 500;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 1rem;
+            background: var(--bg);
+            border: 2px solid var(--border);
+            border-radius: 0.5rem;
+            color: var(--text);
+            font-size: 1rem;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        textarea.pending {
+            border-color: var(--danger);
+        }
+
+        textarea.sent {
+            border-color: #22c55e;
+        }
+
+        .button-container {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+
+        button {
+            padding: 1rem 2.5rem;
+            font-size: 1.125rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-chat {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-chat:hover:not(:disabled) {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-chat:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-stop {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-stop:hover:not(:disabled) {
+            background: var(--danger-hover);
+        }
+
+        .btn-stop:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .status {
+            text-align: center;
+            padding: 1rem;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        .status.active {
+            color: #22c55e;
+        }
+
+        .status.error {
+            color: var(--danger);
+        }
+
+        .transcript {
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 1rem;
+            background: var(--bg);
+            border-radius: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .transcript-item {
+            margin-bottom: 0.75rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.5rem;
+        }
+
+        .transcript-item.user {
+            background: rgba(99, 102, 241, 0.2);
+            margin-left: 2rem;
+        }
+
+        .transcript-item.assistant {
+            background: rgba(34, 197, 94, 0.2);
+            margin-right: 2rem;
+        }
+
+        .transcript-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+        }
+
+        .transcript-text {
+            line-height: 1.4;
+        }
+
+        .visualizer {
+            height: 60px;
+            background: var(--bg);
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .visualizer canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 1; }
+        }
+
+        .listening-indicator {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 0.25rem;
+        }
+
+        .listening-indicator.active {
+            display: flex;
+        }
+
+        .listening-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--primary);
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        .listening-dot:nth-child(2) { animation-delay: 0.2s; }
+        .listening-dot:nth-child(3) { animation-delay: 0.4s; }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 0;
+        }
+
+        .toggle-label {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .toggle-label span {
+            font-weight: 500;
+            color: var(--text);
+        }
+
+        .toggle-label small {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 48px;
+            height: 26px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--border);
+            transition: 0.3s;
+            border-radius: 26px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: var(--primary);
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(22px);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Gradbot Voice Chat</h1>
+        <p class="subtitle">Real-time voice conversation with AI</p>
+
+        <div class="card">
+            <label>Select Voice</label>
+            <div class="voice-grid" id="voiceGrid">
+                <!-- Populated by JavaScript -->
+            </div>
+        </div>
+
+        <div class="card">
+            <label>System Prompt</label>
+            <textarea id="prompt" placeholder="Enter instructions for the AI...">I am a robot from the future</textarea>
+        </div>
+
+        <div class="card">
+            <label>Audio Settings</label>
+            <div class="toggle-row">
+                <div class="toggle-label">
+                    <span>Echo Cancellation</span>
+                    <small>Disable if using headphones for better quality</small>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="echoCancellation" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="button-container">
+                <button class="btn-chat" id="chatBtn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                        <line x1="12" y1="19" x2="12" y2="23"/>
+                        <line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                    Chat
+                </button>
+                <button class="btn-stop" id="stopBtn" disabled>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="6" y="6" width="12" height="12" rx="2"/>
+                    </svg>
+                    Stop
+                </button>
+            </div>
+
+            <div class="visualizer">
+                <div class="listening-indicator" id="listeningIndicator">
+                    <span class="listening-dot"></span>
+                    <span class="listening-dot"></span>
+                    <span class="listening-dot"></span>
+                </div>
+                <canvas id="visualizer"></canvas>
+            </div>
+
+            <p class="status" id="status">Click Chat to start a conversation</p>
+        </div>
+
+        <div class="card">
+            <label>Transcript</label>
+            <div class="transcript" id="transcript">
+                <p style="color: var(--text-muted); text-align: center;">
+                    Conversation will appear here...
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio processor scripts -->
+    <script src="/static/js/opus-encoder.js"></script>
+    <script src="/static/js/audio-processor.js"></script>
+    <script src="/static/js/synced-audio-player.js"></script>
+
+    <script>
+        // Language to flag emoji mapping
+        const FLAGS = {
+            en: '🇬🇧',
+            fr: '🇫🇷',
+            de: '🇩🇪',
+            es: '🇪🇸',
+            pt: '🇧🇷'
+        };
+
+        // State
+        let voices = [];
+        let selectedVoice = null;
+        let ws = null;
+        let player = null; // SyncedAudioPlayer
+        let isRecording = false;
+        let turnBubbles = {}; // Map of turn_idx -> bubble element
+
+        // DOM elements
+        const voiceGrid = document.getElementById('voiceGrid');
+        const promptInput = document.getElementById('prompt');
+        const chatBtn = document.getElementById('chatBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const status = document.getElementById('status');
+        const transcript = document.getElementById('transcript');
+        const listeningIndicator = document.getElementById('listeningIndicator');
+        const visualizerCanvas = document.getElementById('visualizer');
+        const echoCancellationToggle = document.getElementById('echoCancellation');
+
+        // Fetch and display voices
+        async function loadVoices() {
+            try {
+                const response = await fetch('/api/voices');
+                const data = await response.json();
+                voices = data.voices;
+                renderVoices();
+            } catch (error) {
+                console.error('Failed to load voices:', error);
+                status.textContent = 'Failed to load voices';
+                status.className = 'status error';
+            }
+        }
+
+        function renderVoices() {
+            voiceGrid.innerHTML = voices.map((voice, index) => `
+                <label class="voice-option ${index === 0 ? 'selected' : ''}" data-voice="${voice.name}">
+                    <input type="radio" name="voice" value="${voice.name}" ${index === 0 ? 'checked' : ''}>
+                    <span class="flag">${FLAGS[voice.language] || '🌐'}</span>
+                    <span class="voice-name">${voice.name}</span>
+                </label>
+            `).join('');
+
+            // Set default selection
+            if (voices.length > 0) {
+                selectedVoice = voices[0].name;
+            }
+
+            // Add click handlers
+            voiceGrid.querySelectorAll('.voice-option').forEach(option => {
+                option.addEventListener('click', () => {
+                    voiceGrid.querySelectorAll('.voice-option').forEach(o => o.classList.remove('selected'));
+                    option.classList.add('selected');
+                    const newVoice = option.dataset.voice;
+                    if (selectedVoice !== newVoice) {
+                        selectedVoice = newVoice;
+                        // If currently chatting, send config update (no restart needed)
+                        if (isRecording) {
+                            sendConfigUpdate();
+                        }
+                    }
+                });
+            });
+        }
+
+        // Send config update mid-conversation
+        function sendConfigUpdate() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'config',
+                    voice_name: selectedVoice,
+                    prompt: promptInput.value
+                }));
+                console.log('Config update sent:', selectedVoice);
+                // Show green border to indicate sent
+                promptInput.classList.remove('pending');
+                promptInput.classList.add('sent');
+                // Clear green border after 2 seconds
+                setTimeout(() => {
+                    promptInput.classList.remove('sent');
+                }, 2000);
+            }
+        }
+
+        // Get or create bubble for a turn
+        let userBubble = null; // Current user bubble
+        let hadAssistantBubble = false; // Track if assistant spoke since last user bubble
+        function getBubbleForTurn(turnIdx, isUser) {
+            if (isUser) {
+                // Reuse current user bubble if no assistant bubble was created since
+                if (userBubble && !hadAssistantBubble) {
+                    return userBubble;
+                }
+                // New user turn - create bubble
+                hadAssistantBubble = false;
+                userBubble = document.createElement('div');
+                userBubble.className = 'transcript-item user';
+                userBubble.innerHTML = `
+                    <div class="transcript-label">You</div>
+                    <div class="transcript-text"></div>
+                `;
+                transcript.appendChild(userBubble);
+                return userBubble;
+            }
+
+            // Assistant message
+            let bubble = turnBubbles[turnIdx];
+            if (!bubble) {
+                // New assistant bubble - mark that assistant spoke
+                hadAssistantBubble = true;
+                bubble = document.createElement('div');
+                bubble.className = 'transcript-item assistant';
+                bubble.innerHTML = `
+                    <div class="transcript-label">Assistant</div>
+                    <div class="transcript-text"></div>
+                `;
+                transcript.appendChild(bubble);
+                turnBubbles[turnIdx] = bubble;
+            }
+            return bubble;
+        }
+
+        // Handle text from SyncedAudioPlayer
+        function handleText({ text, turnIdx, isUser }) {
+            const bubble = getBubbleForTurn(turnIdx, isUser);
+            const textDiv = bubble.querySelector('.transcript-text');
+            textDiv.textContent += text + ' ';
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        // Start chat
+        async function startChat() {
+            if (!selectedVoice) {
+                status.textContent = 'Please select a voice';
+                status.className = 'status error';
+                return;
+            }
+
+            // Clear transcript and reset state
+            transcript.innerHTML = '';
+            turnBubbles = {};
+
+            // Create SyncedAudioPlayer
+            player = new SyncedAudioPlayer({
+                basePath: '/static/js',
+                sampleRate: 24000,
+                echoCancellation: echoCancellationToggle.checked,
+                onEncodedAudio: (opusData) => {
+                    if (isRecording && ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(opusData);
+                    }
+                },
+                onText: handleText,
+                onEvent: (eventType, msg) => {
+                    console.log('Event:', eventType, msg);
+                    if (eventType === 'demo_mode') {
+                        status.textContent = 'Demo mode - ' + (msg.message || 'Limited functionality');
+                        status.className = 'status';
+                    }
+                },
+                onError: (error) => {
+                    console.error('Player error:', error);
+                    status.textContent = 'Error: ' + error.message;
+                    status.className = 'status error';
+                }
+            });
+
+            try {
+                await player.start();
+            } catch (error) {
+                console.error('Failed to setup audio:', error);
+                status.textContent = 'Microphone access denied';
+                status.className = 'status error';
+                return;
+            }
+
+            // Connect WebSocket
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws/chat`);
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({
+                    type: 'start',
+                    voice_name: selectedVoice,
+                    prompt: promptInput.value
+                }));
+
+                isRecording = true;
+                chatBtn.disabled = true;
+                stopBtn.disabled = false;
+                status.textContent = 'Listening...';
+                status.className = 'status active';
+                listeningIndicator.classList.add('active');
+            };
+
+            ws.onmessage = (event) => {
+                player.handleMessage(event.data);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                status.textContent = 'Connection error';
+                status.className = 'status error';
+            };
+
+            ws.onclose = () => {
+                isRecording = false;
+                chatBtn.disabled = false;
+                stopBtn.disabled = true;
+                listeningIndicator.classList.remove('active');
+                if (status.textContent === 'Listening...') {
+                    status.textContent = 'Disconnected';
+                    status.className = 'status';
+                }
+            };
+        }
+
+        // Stop chat
+        function stopChat() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'stop' }));
+                ws.close();
+            }
+            ws = null;
+            isRecording = false;
+            chatBtn.disabled = false;
+            stopBtn.disabled = true;
+            status.textContent = 'Chat ended';
+            status.className = 'status';
+            listeningIndicator.classList.remove('active');
+
+            if (player) {
+                player.stop();
+                player = null;
+            }
+        }
+
+        // Event listeners
+        chatBtn.addEventListener('click', startChat);
+        stopBtn.addEventListener('click', stopChat);
+
+        // Send config update on prompt change (if currently chatting)
+        let promptTimeout;
+        promptInput.addEventListener('input', () => {
+            if (isRecording) {
+                // Show red border to indicate pending change
+                promptInput.classList.remove('sent');
+                promptInput.classList.add('pending');
+                clearTimeout(promptTimeout);
+                promptTimeout = setTimeout(() => {
+                    sendConfigUpdate();
+                }, 3000);
+            }
+        });
+
+        // Initialize
+        loadVoices();
+    </script>
+</body>
+</html>

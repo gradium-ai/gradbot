@@ -1,0 +1,13 @@
+[project]
+name = "egg-timer-demo"
+version = "0.1.0"
+description = "Egg timer demo with voice changing and timer functionality"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pygradbot",
+]
+
+[tool.uv.sources]
+pygradbot = { path = "../../pygradbot" }

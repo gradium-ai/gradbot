@@ -1,0 +1,15 @@
+log_dir = "$HOME/tmp/tts-logs"
+instance_name = "gradbot"
+addr = "0.0.0.0"
+port = 8000
+
+gradium_api_key = "$GRADIUM_API_KEY"
+gradium_base_url = "https://api.gradium.ai/api"
+
+llm_base_url = "$LLM_BASE_URL"
+
+log_sessions = true
+transport = "twilio"
+
+[twilio]
+system_prompt = "You are a phone operator who wants to help."

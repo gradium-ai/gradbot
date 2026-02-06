@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Changer Demo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 0.5rem;
+            font-size: 2rem;
+            background: linear-gradient(90deg, #e94560, #0f3460);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 2rem;
+        }
+
+        .voice-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .voice-card.active {
+            border-color: #e94560;
+            box-shadow: 0 0 30px rgba(233, 69, 96, 0.3);
+        }
+
+        .voice-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .voice-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #e94560, #0f3460);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .voice-info h2 {
+            font-size: 1.5rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .voice-meta {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .voice-description {
+            color: #ccc;
+            font-style: italic;
+            line-height: 1.5;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .btn {
+            padding: 1rem 2rem;
+            border: none;
+            border-radius: 50px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: linear-gradient(90deg, #e94560, #0f3460);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 30px rgba(233, 69, 96, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .status {
+            text-align: center;
+            padding: 0.5rem;
+            margin-bottom: 1rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+
+        .status.connecting {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+        }
+
+        .status.connected {
+            background: rgba(76, 175, 80, 0.2);
+            color: #4caf50;
+        }
+
+        .status.disconnected {
+            background: rgba(244, 67, 54, 0.2);
+            color: #f44336;
+        }
+
+        .transcript-container {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            padding: 1rem;
+            height: 300px;
+            overflow-y: auto;
+            margin-bottom: 1rem;
+        }
+
+        .transcript-entry {
+            margin-bottom: 0.75rem;
+            padding: 0.75rem;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+
+        .transcript-entry.user {
+            background: rgba(15, 52, 96, 0.5);
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .transcript-entry.assistant {
+            background: rgba(233, 69, 96, 0.3);
+        }
+
+        .transcript-entry.system {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+            text-align: center;
+            max-width: 100%;
+            font-style: italic;
+        }
+
+        .transcript-speaker {
+            font-size: 0.75rem;
+            color: #888;
+            margin-bottom: 0.25rem;
+        }
+
+        .voice-selector {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .voice-option {
+            padding: 0.75rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s ease;
+        }
+
+        .voice-option:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .voice-option.selected {
+            border-color: #e94560;
+            background: rgba(233, 69, 96, 0.2);
+        }
+
+        .voice-option .name {
+            font-weight: bold;
+            margin-bottom: 0.25rem;
+        }
+
+        .voice-option .meta {
+            font-size: 0.75rem;
+            color: #888;
+        }
+
+        .section-title {
+            font-size: 0.9rem;
+            color: #888;
+            margin-bottom: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .recording .btn-primary {
+            animation: pulse 1.5s infinite;
+            background: linear-gradient(90deg, #f44336, #e91e63);
+        }
+
+        .settings-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .toggle-label {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .toggle-label span {
+            font-weight: 500;
+            color: #fff;
+        }
+
+        .toggle-label small {
+            color: #888;
+            font-size: 0.75rem;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 48px;
+            height: 26px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.2);
+            transition: 0.3s;
+            border-radius: 26px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background: linear-gradient(90deg, #e94560, #0f3460);
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(22px);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Voice Changer Demo</h1>
+        <p class="subtitle">Talk to AI personas that can switch voices mid-conversation</p>
+
+        <div class="voice-card active" id="currentVoice">
+            <div class="voice-header">
+                <div class="voice-avatar" id="voiceAvatar">E</div>
+                <div class="voice-info">
+                    <h2 id="voiceName">Emma</h2>
+                    <div class="voice-meta" id="voiceMeta">Feminine - United States</div>
+                </div>
+            </div>
+            <p class="voice-description" id="voiceDescription">Loading...</p>
+        </div>
+
+        <div class="section-title">Choose starting voice</div>
+        <div class="voice-selector" id="voiceSelector">
+            <!-- Populated by JS -->
+        </div>
+
+        <div class="settings-card">
+            <div class="toggle-row">
+                <div class="toggle-label">
+                    <span>Echo Cancellation</span>
+                    <small>Disable if using headphones</small>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="echoCancellation" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="controls" id="controls">
+            <button class="btn btn-primary" id="startBtn">Start Conversation</button>
+            <button class="btn btn-secondary" id="stopBtn" style="display: none;">Stop</button>
+        </div>
+
+        <div class="status disconnected" id="status">Not connected</div>
+
+        <div class="transcript-container" id="transcript">
+            <!-- Transcripts appear here -->
+        </div>
+    </div>
+
+    <!-- Audio processor scripts -->
+    <script src="/static/js/opus-encoder.js"></script>
+    <script src="/static/js/audio-processor.js"></script>
+    <script src="/static/js/synced-audio-player.js"></script>
+
+    <script>
+        // State
+        let voices = [];
+        let selectedVoice = 'Emma';
+        let currentVoice = 'Emma';
+        let ws = null;
+        let player = null; // SyncedAudioPlayer
+        let isRecording = false;
+        let turnBubbles = {}; // Map of turn_idx -> bubble element
+
+        // Transcript accumulation
+        let currentBubble = null;
+        let currentSpeaker = null;
+
+        // DOM elements
+        const voiceSelector = document.getElementById('voiceSelector');
+        const voiceName = document.getElementById('voiceName');
+        const voiceMeta = document.getElementById('voiceMeta');
+        const voiceDescription = document.getElementById('voiceDescription');
+        const voiceAvatar = document.getElementById('voiceAvatar');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const status = document.getElementById('status');
+        const transcript = document.getElementById('transcript');
+        const controls = document.getElementById('controls');
+        const echoCancellationToggle = document.getElementById('echoCancellation');
+
+        // Fetch voices on load
+        async function loadVoices() {
+            try {
+                const response = await fetch('/api/voices');
+                const data = await response.json();
+                voices = data.voices;
+                renderVoiceSelector();
+                updateCurrentVoice(selectedVoice);
+            } catch (e) {
+                console.error('Failed to load voices:', e);
+            }
+        }
+
+        function renderVoiceSelector() {
+            voiceSelector.innerHTML = voices.map(v => `
+                <div class="voice-option ${v.name === selectedVoice ? 'selected' : ''}"
+                     onclick="selectVoice('${v.name}')">
+                    <div class="name">${v.name}</div>
+                    <div class="meta">${v.gender} - ${v.country.toUpperCase()}</div>
+                </div>
+            `).join('');
+        }
+
+        function selectVoice(name) {
+            if (isRecording) return; // Can't change while recording
+            selectedVoice = name;
+            renderVoiceSelector();
+            updateCurrentVoice(name);
+        }
+
+        function updateCurrentVoice(name) {
+            const voice = voices.find(v => v.name === name);
+            if (!voice) return;
+
+            currentVoice = name;
+            voiceName.textContent = voice.name;
+            voiceMeta.textContent = `${voice.gender} - ${voice.country_name}`;
+            voiceDescription.textContent = voice.description;
+            voiceAvatar.textContent = voice.name[0];
+        }
+
+        function setStatus(text, type) {
+            status.textContent = text;
+            status.className = 'status ' + type;
+        }
+
+        // Get or create bubble for a turn
+        let userBubble = null; // Current user bubble
+        let hadAssistantBubble = false; // Track if assistant spoke since last user bubble
+        function getBubbleForTurn(turnIdx, isUser) {
+            if (isUser) {
+                // Reuse current user bubble if no assistant bubble was created since
+                if (userBubble && !hadAssistantBubble) {
+                    return userBubble;
+                }
+                // New user turn - create bubble
+                hadAssistantBubble = false;
+                currentSpeaker = 'user';
+                userBubble = document.createElement('div');
+                userBubble.className = 'transcript-entry user';
+                const speakerEl = document.createElement('div');
+                speakerEl.className = 'transcript-speaker';
+                speakerEl.textContent = 'You';
+                userBubble.appendChild(speakerEl);
+                const textEl = document.createElement('span');
+                textEl.className = 'transcript-text';
+                userBubble.appendChild(textEl);
+                transcript.appendChild(userBubble);
+                return userBubble;
+            }
+
+            // Assistant message
+            let bubble = turnBubbles[turnIdx];
+            if (!bubble) {
+                // New assistant bubble - mark that assistant spoke
+                hadAssistantBubble = true;
+                currentSpeaker = 'assistant';
+                bubble = document.createElement('div');
+                bubble.className = 'transcript-entry assistant';
+                const speakerEl = document.createElement('div');
+                speakerEl.className = 'transcript-speaker';
+                speakerEl.textContent = currentVoice;
+                bubble.appendChild(speakerEl);
+                const textEl = document.createElement('span');
+                textEl.className = 'transcript-text';
+                bubble.appendChild(textEl);
+                transcript.appendChild(bubble);
+                turnBubbles[turnIdx] = bubble;
+                currentBubble = bubble;
+            }
+            return bubble;
+        }
+
+        // Handle text from SyncedAudioPlayer
+        function handleText({ text, turnIdx, isUser }) {
+            const bubble = getBubbleForTurn(turnIdx, isUser);
+            const textEl = bubble.querySelector('.transcript-text');
+            textEl.textContent += text + ' ';
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        function addSystemMessage(text) {
+            // System messages always get their own bubble
+            currentSpeaker = null;
+            currentBubble = null;
+
+            const entry = document.createElement('div');
+            entry.className = 'transcript-entry system';
+            entry.textContent = text;
+            transcript.appendChild(entry);
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        async function startRecording() {
+            try {
+                // Reset state
+                turnBubbles = {};
+                currentBubble = null;
+                currentSpeaker = null;
+
+                setStatus('Connecting...', 'connecting');
+
+                // Create SyncedAudioPlayer
+                player = new SyncedAudioPlayer({
+                    basePath: '/static/js',
+                    sampleRate: 24000,
+                    echoCancellation: echoCancellationToggle.checked,
+                    onEncodedAudio: (opusData) => {
+                        if (isRecording && ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(opusData);
+                        }
+                    },
+                    onText: handleText,
+                    onEvent: (eventType, msg) => {
+                        console.log('Event:', eventType, msg);
+                        handleMessage(msg);
+                    },
+                    onError: (error) => {
+                        console.error('Player error:', error);
+                        setStatus('Error: ' + error.message, 'disconnected');
+                    }
+                });
+
+                try {
+                    await player.start();
+                } catch (e) {
+                    console.error('Audio setup failed:', e);
+                    setStatus('Microphone access denied', 'disconnected');
+                    return;
+                }
+
+                // Connect WebSocket
+                const wsUrl = `ws://${window.location.host}/ws/chat`;
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    setStatus('Connected - Speak now!', 'connected');
+                    // Clear transcript state
+                    transcript.innerHTML = '';
+                    currentBubble = null;
+                    currentSpeaker = null;
+
+                    ws.send(JSON.stringify({
+                        type: 'start',
+                        voice_name: selectedVoice,
+                    }));
+                    isRecording = true;
+                    controls.classList.add('recording');
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = 'inline-block';
+                    voiceSelector.style.pointerEvents = 'none';
+                    voiceSelector.style.opacity = '0.5';
+                };
+
+                ws.onmessage = (event) => {
+                    player.handleMessage(event.data);
+                };
+
+                ws.onclose = () => {
+                    setStatus('Disconnected', 'disconnected');
+                    stopRecording();
+                };
+
+                ws.onerror = (e) => {
+                    console.error('WebSocket error:', e);
+                    setStatus('Connection error', 'disconnected');
+                    stopRecording();
+                };
+
+            } catch (e) {
+                console.error('Failed to start recording:', e);
+                setStatus('Connection failed', 'disconnected');
+            }
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'voice_change':
+                    updateCurrentVoice(msg.voice_name);
+                    // Reset speaker so next transcript creates new bubble
+                    currentSpeaker = null;
+                    currentBubble = null;
+                    addSystemMessage(`Voice switched to ${msg.voice_name}`);
+                    break;
+                case 'error':
+                    addSystemMessage(`Error: ${msg.message}`);
+                    break;
+                case 'event':
+                    console.log('Event:', msg.event);
+                    break;
+            }
+        }
+
+        function stopRecording() {
+            isRecording = false;
+            controls.classList.remove('recording');
+            startBtn.style.display = 'inline-block';
+            stopBtn.style.display = 'none';
+            voiceSelector.style.pointerEvents = 'auto';
+            voiceSelector.style.opacity = '1';
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'stop' }));
+                ws.close();
+            }
+            ws = null;
+
+            if (player) {
+                player.stop();
+                player = null;
+            }
+        }
+
+        // Event listeners
+        startBtn.addEventListener('click', startRecording);
+        stopBtn.addEventListener('click', stopRecording);
+
+        // Initialize
+        loadVoices();
+    </script>
+</body>
+</html>

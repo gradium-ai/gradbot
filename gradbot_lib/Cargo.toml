@@ -1,0 +1,22 @@
+[package]
+name = "gradbot_lib"
+version.workspace = true
+edition.workspace = true
+description = "Core library for gradbot voice AI multiplexing"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+async-openai = { workspace = true }
+byteorder = { workspace = true }
+futures = { workspace = true }
+gradium = { workspace = true }
+kaudio = { workspace = true }
+rubato = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

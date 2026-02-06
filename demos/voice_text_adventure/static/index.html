@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Text Adventure</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            background: linear-gradient(180deg, #0a1628 0%, #1a2744 50%, #0a1628 100%);
+            min-height: 100vh;
+            color: #33ff33;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+
+        /* Header */
+        .game-header {
+            text-align: center;
+            padding: 1rem;
+            background: linear-gradient(180deg, rgba(51, 255, 51, 0.1) 0%, transparent 100%);
+            border-bottom: 2px solid #33ff33;
+            margin-bottom: 1rem;
+        }
+
+        .game-header h1 {
+            font-size: 2rem;
+            color: #33ff33;
+            text-shadow: 0 0 10px #33ff33;
+            margin-bottom: 0.25rem;
+            letter-spacing: 3px;
+        }
+
+        .game-header .subtitle {
+            color: #22aa22;
+            font-style: italic;
+        }
+
+        /* Game layout */
+        .game-layout {
+            display: grid;
+            grid-template-columns: 220px 1fr;
+            gap: 1rem;
+        }
+
+        /* Side panel */
+        .side-panel {
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px solid #33ff33;
+            border-radius: 4px;
+            padding: 1rem;
+        }
+
+        .panel-title {
+            color: #33ff33;
+            font-size: 0.9rem;
+            border-bottom: 1px solid #22aa22;
+            padding-bottom: 0.5rem;
+            margin-bottom: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            padding: 0.25rem 0;
+        }
+
+        .stat-label {
+            color: #22aa22;
+        }
+
+        .stat-value {
+            color: #33ff33;
+            font-weight: bold;
+        }
+
+        /* Game select */
+        .game-select {
+            width: 100%;
+            padding: 0.5rem;
+            background: #0a1628;
+            border: 1px solid #33ff33;
+            color: #33ff33;
+            font-family: inherit;
+            font-size: 0.9rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            cursor: pointer;
+        }
+
+        .game-select:focus {
+            outline: none;
+            box-shadow: 0 0 5px #33ff33;
+        }
+
+        /* Valid commands */
+        .commands-list {
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 0.8rem;
+            line-height: 1.4;
+        }
+
+        .command-item {
+            background: rgba(51, 255, 51, 0.1);
+            padding: 0.25rem 0.5rem;
+            margin-bottom: 0.25rem;
+            border-radius: 2px;
+            border-left: 2px solid #33ff33;
+        }
+
+        /* Main panel */
+        .main-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        /* Game description */
+        .description-panel {
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px solid #33ff33;
+            border-radius: 4px;
+            padding: 1rem;
+            min-height: 150px;
+            max-height: 250px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+
+        .description-panel .prompt {
+            color: #ffff33;
+            font-weight: bold;
+        }
+
+        /* Transcript */
+        .transcript-panel {
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px solid #33ff33;
+            border-radius: 4px;
+            padding: 1rem;
+            height: 200px;
+            overflow-y: auto;
+        }
+
+        .transcript-entry {
+            margin-bottom: 0.75rem;
+            padding: 0.5rem;
+            border-radius: 4px;
+            max-width: 85%;
+        }
+
+        .transcript-entry.user {
+            background: rgba(100, 149, 237, 0.2);
+            margin-left: auto;
+            border: 1px solid rgba(100, 149, 237, 0.5);
+            color: #87ceeb;
+        }
+
+        .transcript-entry.narrator {
+            background: rgba(51, 255, 51, 0.1);
+            border: 1px solid rgba(51, 255, 51, 0.3);
+        }
+
+        .transcript-entry.system {
+            background: rgba(255, 255, 51, 0.1);
+            border: 1px solid rgba(255, 255, 51, 0.3);
+            text-align: center;
+            max-width: 100%;
+            color: #ffff33;
+            font-style: italic;
+        }
+
+        .transcript-speaker {
+            font-size: 0.7rem;
+            color: #22aa22;
+            margin-bottom: 0.25rem;
+            text-transform: uppercase;
+        }
+
+        .transcript-text {
+            line-height: 1.4;
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 0.75rem 2rem;
+            font-size: 1rem;
+            font-family: inherit;
+            border: 2px solid;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .btn-primary {
+            background: transparent;
+            border-color: #33ff33;
+            color: #33ff33;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: rgba(51, 255, 51, 0.2);
+            box-shadow: 0 0 10px #33ff33;
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .btn-danger {
+            background: transparent;
+            border-color: #ff3333;
+            color: #ff3333;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: rgba(255, 51, 51, 0.2);
+            box-shadow: 0 0 10px #ff3333;
+        }
+
+        .status {
+            text-align: center;
+            padding: 0.5rem;
+            color: #22aa22;
+            font-style: italic;
+        }
+
+        .status.active {
+            color: #33ff33;
+            text-shadow: 0 0 5px #33ff33;
+        }
+
+        .status.error {
+            color: #ff3333;
+        }
+
+        /* Recording indicator */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .recording-indicator {
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+            color: #33ff33;
+        }
+
+        .recording-indicator.active {
+            display: flex;
+        }
+
+        .recording-dot {
+            width: 12px;
+            height: 12px;
+            background: #33ff33;
+            border-radius: 50%;
+            animation: pulse 1s infinite;
+            box-shadow: 0 0 10px #33ff33;
+        }
+
+        /* Settings */
+        .settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-top: 1px solid rgba(51, 255, 51, 0.3);
+            margin-top: 0.5rem;
+        }
+
+        .settings-label {
+            font-size: 0.8rem;
+            color: #22aa22;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 40px;
+            height: 22px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(51, 255, 51, 0.2);
+            transition: 0.3s;
+            border-radius: 22px;
+            border: 1px solid #33ff33;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: #33ff33;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: rgba(51, 255, 51, 0.4);
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(18px);
+        }
+
+        /* Game over overlay */
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        }
+
+        .overlay.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .overlay-content {
+            text-align: center;
+            padding: 3rem;
+        }
+
+        .overlay-content h2 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            color: #33ff33;
+            text-shadow: 0 0 20px #33ff33;
+        }
+
+        .overlay-content p {
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            color: #22aa22;
+        }
+
+        .overlay-content .score {
+            font-size: 1.5rem;
+            color: #ffff33;
+            margin-bottom: 2rem;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0a1628;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #33ff33;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #44ff44;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .game-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .side-panel {
+                order: 2;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="game-header">
+            <h1>VOICE TEXT ADVENTURE</h1>
+            <p class="subtitle">Speak to explore the world</p>
+        </header>
+
+        <div class="game-layout">
+            <aside class="side-panel">
+                <h3 class="panel-title">Game Select</h3>
+                <select class="game-select" id="gameSelect">
+                    <option value="">Loading games...</option>
+                </select>
+
+                <h3 class="panel-title">Status</h3>
+                <div class="stat-row">
+                    <span class="stat-label">Score:</span>
+                    <span class="stat-value" id="scoreDisplay">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Moves:</span>
+                    <span class="stat-value" id="movesDisplay">0</span>
+                </div>
+
+                <h3 class="panel-title" style="margin-top: 1rem;">Narrator</h3>
+                <div class="stat-row">
+                    <span class="stat-label">Voice:</span>
+                    <span class="stat-value" id="voiceDisplay">Kent</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Language:</span>
+                    <span class="stat-value" id="langDisplay">EN</span>
+                </div>
+
+                <h3 class="panel-title" style="margin-top: 1rem;">Valid Commands</h3>
+                <div class="commands-list" id="commandsList">
+                    <div class="command-item" style="color: #22aa22; font-style: italic;">
+                        Start a game to see commands...
+                    </div>
+                </div>
+
+                <div class="settings-row">
+                    <span class="settings-label">Echo Cancel</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="echoCancellation" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </aside>
+
+            <main class="main-panel">
+                <div class="description-panel" id="descriptionPanel">
+                    <span class="prompt">&gt;</span> Select a game and click "Start Adventure" to begin your journey...
+                </div>
+
+                <div class="transcript-panel" id="transcript">
+                    <div class="transcript-entry system">
+                        <span class="transcript-text">Welcome to Voice Text Adventure. Select a game to begin.</span>
+                    </div>
+                </div>
+
+                <div class="controls">
+                    <button class="btn btn-primary" id="startBtn">Start Adventure</button>
+                    <button class="btn btn-danger" id="stopBtn" style="display: none;">End Game</button>
+                    <div class="recording-indicator" id="recordingIndicator">
+                        <span class="recording-dot"></span>
+                        <span>Listening...</span>
+                    </div>
+                </div>
+
+                <p class="status" id="status">Select a game to begin</p>
+            </main>
+        </div>
+    </div>
+
+    <!-- Game Over Overlay -->
+    <div class="overlay" id="gameOverOverlay">
+        <div class="overlay-content">
+            <h2>GAME OVER</h2>
+            <p id="gameOverMessage">Your adventure has ended.</p>
+            <p class="score">Final Score: <span id="finalScore">0</span></p>
+            <button class="btn btn-primary" onclick="location.reload()">Play Again</button>
+        </div>
+    </div>
+
+    <!-- Audio processor scripts -->
+    <script src="/static/js/opus-encoder.js"></script>
+    <script src="/static/js/audio-processor.js"></script>
+    <script src="/static/js/synced-audio-player.js"></script>
+
+    <script>
+        // State
+        let games = [];
+        let selectedGame = null;
+        let ws = null;
+        let player = null;
+        let isRecording = false;
+        let turnBubbles = {};
+
+        // End game state - wait for buffer to drain before showing overlay
+        let pendingGameOver = null; // { message, score }
+        let endGameTurnIdx = null; // Turn index when game ended - wait for turn > this
+
+        // DOM elements
+        const gameSelect = document.getElementById('gameSelect');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const movesDisplay = document.getElementById('movesDisplay');
+        const voiceDisplay = document.getElementById('voiceDisplay');
+        const langDisplay = document.getElementById('langDisplay');
+        const commandsList = document.getElementById('commandsList');
+        const descriptionPanel = document.getElementById('descriptionPanel');
+        const transcript = document.getElementById('transcript');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const status = document.getElementById('status');
+        const recordingIndicator = document.getElementById('recordingIndicator');
+        const echoCancellationToggle = document.getElementById('echoCancellation');
+        const gameOverOverlay = document.getElementById('gameOverOverlay');
+        const gameOverMessage = document.getElementById('gameOverMessage');
+        const finalScore = document.getElementById('finalScore');
+
+        // Language display names
+        const LANG_FLAGS = { en: 'EN', fr: 'FR', de: 'DE', es: 'ES', pt: 'PT' };
+
+        // Load available games
+        async function loadGames() {
+            try {
+                const response = await fetch('/api/games');
+                const data = await response.json();
+                games = data.games;
+
+                gameSelect.innerHTML = games.length > 0
+                    ? games.map(g => `<option value="${g.filename}">${g.name}</option>`).join('')
+                    : '<option value="">No games found</option>';
+
+                if (games.length > 0) {
+                    selectedGame = games[0].filename;
+                }
+            } catch (error) {
+                console.error('Failed to load games:', error);
+                gameSelect.innerHTML = '<option value="">Error loading games</option>';
+            }
+        }
+
+        // Update game display
+        function updateGameDisplay(state) {
+            scoreDisplay.textContent = state.score;
+            movesDisplay.textContent = state.moves;
+
+            // Update narrator info
+            if (state.voice_name) {
+                voiceDisplay.textContent = state.voice_name;
+            }
+            if (state.language) {
+                langDisplay.textContent = LANG_FLAGS[state.language] || state.language.toUpperCase();
+            }
+
+            // Update description
+            descriptionPanel.innerHTML = `<span class="prompt">&gt;</span> ${state.description}`;
+
+            // Update valid commands
+            if (state.valid_actions && state.valid_actions.length > 0) {
+                commandsList.innerHTML = state.valid_actions
+                    .map(cmd => `<div class="command-item">${cmd}</div>`)
+                    .join('');
+            }
+        }
+
+        // Update narrator display
+        function updateNarrator(data) {
+            if (data.voice_name) {
+                voiceDisplay.textContent = data.voice_name;
+            }
+            if (data.language) {
+                langDisplay.textContent = LANG_FLAGS[data.language] || data.language.toUpperCase();
+            }
+            // Show system message for narrator change
+            if (data.language_name) {
+                addSystemMessage(`Narrator switched to ${data.language_name}`);
+            } else if (data.voice_name && data.reason) {
+                addSystemMessage(`Voice changed to ${data.voice_name} (${data.reason})`);
+            } else if (data.style) {
+                addSystemMessage(`Narration style: ${data.style}`);
+            }
+        }
+
+        // Transcript handling
+        let userBubble = null;
+        let hadNarratorBubble = false;
+
+        function getBubbleForTurn(turnIdx, isUser) {
+            if (isUser) {
+                if (userBubble && !hadNarratorBubble) {
+                    return userBubble;
+                }
+                hadNarratorBubble = false;
+                userBubble = document.createElement('div');
+                userBubble.className = 'transcript-entry user';
+                userBubble.innerHTML = `
+                    <div class="transcript-speaker">You</div>
+                    <div class="transcript-text"></div>
+                `;
+                transcript.appendChild(userBubble);
+                return userBubble;
+            }
+
+            let bubble = turnBubbles[turnIdx];
+            if (!bubble) {
+                hadNarratorBubble = true;
+                bubble = document.createElement('div');
+                bubble.className = 'transcript-entry narrator';
+                bubble.innerHTML = `
+                    <div class="transcript-speaker">Narrator</div>
+                    <div class="transcript-text"></div>
+                `;
+                transcript.appendChild(bubble);
+                turnBubbles[turnIdx] = bubble;
+            }
+            return bubble;
+        }
+
+        function handleText({ text, turnIdx, isUser }) {
+            const bubble = getBubbleForTurn(turnIdx, isUser);
+            const textDiv = bubble.querySelector('.transcript-text');
+            textDiv.textContent += text + ' ';
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        function addSystemMessage(text) {
+            userBubble = null;
+            hadNarratorBubble = false;
+
+            const entry = document.createElement('div');
+            entry.className = 'transcript-entry system';
+            entry.innerHTML = `<span class="transcript-text">${text}</span>`;
+            transcript.appendChild(entry);
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        function showGameOver(message, score) {
+            gameOverMessage.textContent = message || 'Your adventure has ended.';
+            finalScore.textContent = score || 0;
+            gameOverOverlay.classList.add('visible');
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'game_state':
+                    updateGameDisplay(msg.state);
+                    break;
+
+                case 'game_over':
+                    // Don't stop audio yet - let the LLM speak its farewell
+                    // Capture current turn so we wait for the farewell turn to complete
+                    pendingGameOver = { message: msg.message, score: msg.final_score };
+                    endGameTurnIdx = player.getTurnIdx();
+                    console.log('Game over at turn:', endGameTurnIdx);
+                    recordingIndicator.classList.remove('active');
+                    status.textContent = 'Game over! Finishing narration...';
+                    break;
+
+                case 'narrator_change':
+                    updateNarrator(msg);
+                    break;
+
+                case 'event':
+                    console.log('Event:', msg.event);
+                    // When TTS finishes and game ended, stop audio and schedule the end callback
+                    if (msg.event === 'end_tts_audio' && pendingGameOver) {
+                        isRecording = false;
+                        player.scheduleEndOfTurn();
+                    }
+                    break;
+            }
+        }
+
+        // Start game
+        async function startGame() {
+            selectedGame = gameSelect.value;
+            if (!selectedGame) {
+                status.textContent = 'Please select a game';
+                status.className = 'status error';
+                return;
+            }
+
+            try {
+                // Reset state
+                turnBubbles = {};
+                userBubble = null;
+                pendingGameOver = null;
+                endGameTurnIdx = null;
+                hadNarratorBubble = false;
+                transcript.innerHTML = '';
+
+                addSystemMessage(`Starting ${games.find(g => g.filename === selectedGame)?.name || selectedGame}...`);
+
+                // Step 1: Create player first (buffers messages until started)
+                player = new SyncedAudioPlayer({
+                    basePath: '/static/js',
+                    sampleRate: 24000,
+                    echoCancellation: echoCancellationToggle.checked,
+                    onEncodedAudio: (opusData) => {
+                        if (isRecording && ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(opusData);
+                        }
+                    },
+                    onText: handleText,
+                    onEvent: (eventType, msg) => {
+                        console.log('Event:', eventType, msg);
+                        handleMessage(msg);
+                    },
+                    onError: (error) => {
+                        console.error('Player error:', error);
+                        status.textContent = 'Error: ' + error.message;
+                        status.className = 'status error';
+                    },
+                    onEndOfTurn: (turnIdx) => {
+                        console.log('End of turn:', turnIdx, 'pendingGameOver:', pendingGameOver, 'endGameTurnIdx:', endGameTurnIdx);
+                        // If game ended, show the overlay only after the farewell turn completes
+                        if (pendingGameOver && turnIdx > endGameTurnIdx) {
+                            showGameOver(pendingGameOver.message, pendingGameOver.score);
+                            pendingGameOver = null;
+                            endGameTurnIdx = null;
+                            stopGame();
+                        }
+                    }
+                });
+
+                // Step 2: Connect WebSocket
+                status.textContent = 'Connecting...';
+                const wsUrl = `ws://${window.location.host}/ws/game`;
+                ws = new WebSocket(wsUrl);
+
+                // All messages go to player (which buffers until started)
+                ws.onmessage = (event) => {
+                    player.handleMessage(event.data);
+                    // Also check for game_state to update UI
+                    if (typeof event.data === 'string') {
+                        try {
+                            const msg = JSON.parse(event.data);
+                            if (msg.type === 'game_state') {
+                                updateGameDisplay(msg.state);
+                            }
+                        } catch (e) {}
+                    }
+                };
+
+                // Wait for connection
+                await new Promise((resolve, reject) => {
+                    ws.onopen = resolve;
+                    ws.onerror = reject;
+                    setTimeout(() => reject(new Error('Connection timeout')), 10000);
+                });
+
+                // Step 3: Send start message and wait for game to be ready
+                status.textContent = 'Loading game...';
+                const gameReadyPromise = new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error('Game load timeout')), 30000);
+                    const origOnMessage = ws.onmessage;
+                    ws.onmessage = (event) => {
+                        origOnMessage(event);
+                        if (typeof event.data === 'string') {
+                            try {
+                                const msg = JSON.parse(event.data);
+                                if (msg.type === 'game_state') {
+                                    clearTimeout(timeout);
+                                    resolve();
+                                } else if (msg.type === 'error') {
+                                    clearTimeout(timeout);
+                                    reject(new Error(msg.message || 'Game load failed'));
+                                }
+                            } catch (e) {}
+                        }
+                    };
+                });
+
+                ws.send(JSON.stringify({
+                    type: 'start',
+                    game: selectedGame
+                }));
+
+                await gameReadyPromise;
+
+                // Step 4: Start audio player (replays buffered messages including header)
+                status.textContent = 'Setting up audio...';
+                await player.start();
+
+                ws.onerror = (e) => {
+                    console.error('WebSocket error:', e);
+                    status.textContent = 'Connection error';
+                    status.className = 'status error';
+                };
+
+                ws.onclose = () => {
+                    // If game over is pending, don't stop - onEndOfTurn will handle it
+                    if (pendingGameOver) {
+                        status.textContent = 'Finishing narration...';
+                        ws = null;
+                    } else if (isRecording) {
+                        status.textContent = 'Disconnected';
+                        status.className = 'status';
+                        stopGame();
+                    }
+                };
+
+                isRecording = true;
+                startBtn.style.display = 'none';
+                stopBtn.style.display = 'inline-block';
+                gameSelect.disabled = true;
+                recordingIndicator.classList.add('active');
+                status.textContent = 'Speak to play!';
+                status.className = 'status active';
+
+            } catch (e) {
+                console.error('Failed to start:', e);
+                status.textContent = 'Failed to start: ' + e.message;
+                status.className = 'status error';
+                // Clean up on error
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+            }
+        }
+
+        // Stop game
+        function stopGame() {
+            isRecording = false;
+            startBtn.style.display = 'inline-block';
+            stopBtn.style.display = 'none';
+            gameSelect.disabled = false;
+            recordingIndicator.classList.remove('active');
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'stop' }));
+                ws.close();
+            }
+            ws = null;
+
+            if (player) {
+                player.stop();
+                player = null;
+            }
+
+            status.textContent = 'Game ended';
+            status.className = 'status';
+        }
+
+        // Event listeners
+        startBtn.addEventListener('click', startGame);
+        stopBtn.addEventListener('click', stopGame);
+        gameSelect.addEventListener('change', () => {
+            selectedGame = gameSelect.value;
+        });
+
+        // Initialize
+        loadGames();
+        // Preload decoder WASM so it's ready when user clicks start
+        AudioProcessor.preloadDecoder('/static/js');
+    </script>
+</body>
+</html>

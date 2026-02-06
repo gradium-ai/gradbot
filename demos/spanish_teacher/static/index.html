@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spanish Teacher</title>
+    <style>
+        :root {
+            --primary: #e53e3e;
+            --primary-hover: #c53030;
+            --success: #38a169;
+            --warning: #dd6b20;
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --text: #edf2f7;
+            --text-muted: #a0aec0;
+            --border: #2d3748;
+            --gold: #ecc94b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 700px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 0.5rem;
+            font-size: 2.5rem;
+        }
+
+        .flag {
+            font-size: 3rem;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+        }
+
+        .score-card {
+            display: flex;
+            justify-content: space-around;
+            text-align: center;
+        }
+
+        .score-item {
+            padding: 1rem 2rem;
+        }
+
+        .score-value {
+            font-size: 3rem;
+            font-weight: bold;
+        }
+
+        .score-value.success {
+            color: var(--success);
+        }
+
+        .score-value.failure {
+            color: var(--warning);
+        }
+
+        .score-label {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .sentence-card {
+            text-align: center;
+        }
+
+        .sentence-label {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .sentence-spanish {
+            font-size: 1.75rem;
+            font-weight: 600;
+            color: var(--gold);
+            margin-bottom: 0.5rem;
+            min-height: 2.5rem;
+        }
+
+        .sentence-english {
+            color: var(--text-muted);
+            font-style: italic;
+            min-height: 1.5rem;
+        }
+
+        .progress-bar {
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            margin-top: 1rem;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--gold));
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+
+        .button-container {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+
+        button {
+            padding: 1rem 2.5rem;
+            font-size: 1.125rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-start {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-start:hover:not(:disabled) {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-start:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-stop {
+            background: var(--border);
+            color: white;
+        }
+
+        .btn-stop:hover:not(:disabled) {
+            background: #4a5568;
+        }
+
+        .btn-stop:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .status {
+            text-align: center;
+            padding: 1rem;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        .status.active {
+            color: var(--success);
+        }
+
+        .status.error {
+            color: var(--primary);
+        }
+
+        .transcript {
+            max-height: 250px;
+            overflow-y: auto;
+            padding: 1rem;
+            background: rgba(0,0,0,0.2);
+            border-radius: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .transcript-item {
+            margin-bottom: 0.75rem;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            background: rgba(236, 201, 75, 0.1);
+            border-left: 3px solid var(--gold);
+        }
+
+        .transcript-item.user {
+            background: rgba(99, 102, 241, 0.1);
+            border-left: 3px solid #6366f1;
+            margin-left: 2rem;
+        }
+
+        .transcript-label {
+            font-size: 0.75rem;
+            color: var(--gold);
+            margin-bottom: 0.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .transcript-item.user .transcript-label {
+            color: #6366f1;
+        }
+
+        .transcript-text {
+            line-height: 1.5;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.7; }
+            50% { transform: scale(1.2); opacity: 1; }
+        }
+
+        .listening-indicator {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 1rem;
+        }
+
+        .listening-indicator.active {
+            display: flex;
+        }
+
+        .listening-dot {
+            width: 12px;
+            height: 12px;
+            background: var(--primary);
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        .listening-dot:nth-child(2) { animation-delay: 0.2s; }
+        .listening-dot:nth-child(3) { animation-delay: 0.4s; }
+
+        .listening-text {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        .lesson-complete {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .lesson-complete.show {
+            display: block;
+        }
+
+        .lesson-complete h2 {
+            color: var(--gold);
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .lesson-complete p {
+            color: var(--text-muted);
+            margin-bottom: 1.5rem;
+        }
+
+        .final-score {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+        }
+
+        label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="flag">🇲🇽</div>
+        <h1>Spanish Teacher</h1>
+        <p class="subtitle">Learn Spanish with Valentina</p>
+
+        <div class="card score-card">
+            <div class="score-item">
+                <div class="score-value success" id="successCount">0</div>
+                <div class="score-label">Successes</div>
+            </div>
+            <div class="score-item">
+                <div class="score-value failure" id="failureCount">0</div>
+                <div class="score-label">Attempts</div>
+            </div>
+        </div>
+
+        <div class="card sentence-card" id="sentenceCard">
+            <div class="sentence-label">Current Sentence (<span id="sentenceNum">0</span>/<span id="totalSentences">6</span>)</div>
+            <div class="sentence-spanish" id="spanishSentence">-</div>
+            <div class="sentence-english" id="englishSentence">Press Start to begin your lesson</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <div class="card lesson-complete" id="lessonComplete">
+            <h2>Lesson Complete!</h2>
+            <p>Congratulations on finishing your Spanish lesson!</p>
+            <div class="final-score">
+                Final Score: <span id="finalSuccess">0</span> correct out of <span id="finalTotal">0</span> attempts
+            </div>
+            <button class="btn-start" onclick="location.reload()">Start New Lesson</button>
+        </div>
+
+        <div class="card">
+            <div class="button-container">
+                <button class="btn-start" id="startBtn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                        <line x1="12" y1="19" x2="12" y2="23"/>
+                        <line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                    Start Lesson
+                </button>
+                <button class="btn-stop" id="stopBtn" disabled>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="6" y="6" width="12" height="12" rx="2"/>
+                    </svg>
+                    Stop
+                </button>
+            </div>
+
+            <div class="listening-indicator" id="listeningIndicator">
+                <span class="listening-dot"></span>
+                <span class="listening-dot"></span>
+                <span class="listening-dot"></span>
+                <span class="listening-text">Listening...</span>
+            </div>
+
+            <p class="status" id="status">Click Start Lesson to begin</p>
+        </div>
+
+        <div class="card">
+            <label>Teacher</label>
+            <div class="transcript" id="transcript">
+                <p style="color: var(--text-muted); text-align: center;">
+                    Valentina will speak here...
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio processor scripts -->
+    <script src="/static/js/opus-encoder.js"></script>
+    <script src="/static/js/audio-processor.js"></script>
+    <script src="/static/js/synced-audio-player.js"></script>
+
+    <script>
+        // State
+        let ws = null;
+        let player = null;
+        let isRecording = false;
+        let turnBubbles = {};
+        let userBubble = null;
+
+        // DOM elements
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const status = document.getElementById('status');
+        const transcript = document.getElementById('transcript');
+        const listeningIndicator = document.getElementById('listeningIndicator');
+        const successCount = document.getElementById('successCount');
+        const failureCount = document.getElementById('failureCount');
+        const spanishSentence = document.getElementById('spanishSentence');
+        const englishSentence = document.getElementById('englishSentence');
+        const sentenceNum = document.getElementById('sentenceNum');
+        const totalSentences = document.getElementById('totalSentences');
+        const progressFill = document.getElementById('progressFill');
+        const lessonComplete = document.getElementById('lessonComplete');
+        const sentenceCard = document.getElementById('sentenceCard');
+
+        // Get or create bubble for a turn
+        function getBubbleForTurn(turnIdx) {
+            let bubble = turnBubbles[turnIdx];
+            if (!bubble) {
+                bubble = document.createElement('div');
+                bubble.className = 'transcript-item';
+                bubble.innerHTML = `
+                    <div class="transcript-label">
+                        <span>Valentina</span>
+                    </div>
+                    <div class="transcript-text"></div>
+                `;
+                transcript.appendChild(bubble);
+                turnBubbles[turnIdx] = bubble;
+            }
+            return bubble;
+        }
+
+        // Get or create user bubble
+        function getUserBubble() {
+            if (!userBubble) {
+                userBubble = document.createElement('div');
+                userBubble.className = 'transcript-item user';
+                userBubble.innerHTML = `
+                    <div class="transcript-label">You</div>
+                    <div class="transcript-text"></div>
+                `;
+                transcript.appendChild(userBubble);
+            }
+            return userBubble;
+        }
+
+        // Handle text from SyncedAudioPlayer
+        function handleText({ text, turnIdx, isUser }) {
+            if (isUser) {
+                const bubble = getUserBubble();
+                const textDiv = bubble.querySelector('.transcript-text');
+                textDiv.textContent += text + ' ';
+                transcript.scrollTop = transcript.scrollHeight;
+                return;
+            }
+
+            // New teacher turn - reset user bubble
+            userBubble = null;
+
+            const bubble = getBubbleForTurn(turnIdx);
+            const textDiv = bubble.querySelector('.transcript-text');
+            textDiv.textContent += text + ' ';
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        // Start lesson
+        async function startLesson() {
+            // Clear transcript and reset state
+            transcript.innerHTML = '';
+            turnBubbles = {};
+            userBubble = null;
+            successCount.textContent = '0';
+            failureCount.textContent = '0';
+            spanishSentence.textContent = '-';
+            englishSentence.textContent = 'Starting lesson...';
+            progressFill.style.width = '0%';
+            lessonComplete.classList.remove('show');
+            sentenceCard.style.display = 'block';
+
+            // Create SyncedAudioPlayer
+            player = new SyncedAudioPlayer({
+                basePath: '/static/js',
+                sampleRate: 24000,
+                echoCancellation: true,
+                onEncodedAudio: (opusData) => {
+                    if (isRecording && ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(opusData);
+                    }
+                },
+                onText: handleText,
+                onEvent: (eventType, msg) => {
+                    console.log('Event:', eventType, msg);
+                },
+                onError: (error) => {
+                    console.error('Player error:', error);
+                    status.textContent = 'Error: ' + error.message;
+                    status.className = 'status error';
+                }
+            });
+
+            try {
+                await player.start();
+            } catch (error) {
+                console.error('Failed to setup audio:', error);
+                status.textContent = 'Microphone access denied';
+                status.className = 'status error';
+                return;
+            }
+
+            // Connect WebSocket
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws/chat`);
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({ type: 'start' }));
+
+                isRecording = true;
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                status.textContent = 'Lesson in progress...';
+                status.className = 'status active';
+                listeningIndicator.classList.add('active');
+            };
+
+            ws.onmessage = async (event) => {
+                if (typeof event.data === 'string') {
+                    const msg = JSON.parse(event.data);
+                    console.log('[WS] JSON message:', msg.type, msg);
+
+                    if (msg.type === 'new_sentence') {
+                        spanishSentence.textContent = msg.spanish;
+                        englishSentence.textContent = msg.english;
+                        sentenceNum.textContent = msg.sentence_number;
+                        totalSentences.textContent = msg.total_sentences;
+                        progressFill.style.width = `${(msg.sentence_number / msg.total_sentences) * 100}%`;
+                    } else if (msg.type === 'score_update') {
+                        successCount.textContent = msg.successes;
+                        failureCount.textContent = msg.failures;
+                    } else if (msg.type === 'lesson_complete') {
+                        lessonComplete.classList.add('show');
+                        sentenceCard.style.display = 'none';
+                        document.getElementById('finalSuccess').textContent = msg.successes;
+                        document.getElementById('finalTotal').textContent = msg.successes + msg.failures;
+                    } else if (msg.type === 'transcript' && msg.is_user) {
+                        // Handle user transcript directly (not through player)
+                        handleText({ text: msg.text, turnIdx: 0, isUser: true });
+                    } else {
+                        // Pass to player for audio/TTS handling
+                        player.handleMessage(event.data);
+                    }
+                } else {
+                    // Binary audio data
+                    console.log('[WS] Binary audio:', event.data.size, 'bytes');
+                    player.handleMessage(event.data);
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                status.textContent = 'Connection error';
+                status.className = 'status error';
+            };
+
+            ws.onclose = () => {
+                isRecording = false;
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                listeningIndicator.classList.remove('active');
+                if (status.textContent === 'Lesson in progress...') {
+                    status.textContent = 'Lesson ended';
+                    status.className = 'status';
+                }
+            };
+        }
+
+        // Stop lesson
+        function stopLesson() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'stop' }));
+                ws.close();
+            }
+            ws = null;
+            isRecording = false;
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            status.textContent = 'Lesson stopped';
+            status.className = 'status';
+            listeningIndicator.classList.remove('active');
+
+            if (player) {
+                player.stop();
+                player = null;
+            }
+        }
+
+        // Event listeners
+        startBtn.addEventListener('click', startLesson);
+        stopBtn.addEventListener('click', stopLesson);
+    </script>
+</body>
+</html>
