@@ -10,7 +10,7 @@ version = "0.6.3"
 edition = "2024"
 license = "Proprietary"
 description = "gradbot voice AI"
-repository = "https://github.com/gradium-ai/gradium-serve"
+repository = "https://github.com/gradium-ai/gradbot"
 keywords = ["voice", "ai", "audio"]
 categories = ["multimedia::audio"]
 
