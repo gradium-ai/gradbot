@@ -32,6 +32,7 @@ class SyncedAudioPlayer {
     this.onEvent = options.onEvent || (() => {});
     this.onError = options.onError || ((e) => console.error('SyncedAudioPlayer error:', e));
     this.onEndOfTurn = options.onEndOfTurn || (() => {}); // Called when turn audio finishes playing
+    this.pcmOutput = options.pcmOutput || false; // Use PCM instead of Opus for incoming audio
 
     this.audioProcessor = null;
     this._flushInterval = null;
@@ -213,12 +214,22 @@ class SyncedAudioPlayer {
         // Audio binary - play with pending timing info
         const arrayBuffer = await data.arrayBuffer();
         if (this.audioProcessor) {
-          this.audioProcessor.playOpusData(
-            new Uint8Array(arrayBuffer),
-            this.pendingAudioStopS,
-            this.pendingAudioTurnIdx,
-            this.pendingAudioInterrupted
-          );
+          const bytes = new Uint8Array(arrayBuffer);
+          if (this.pcmOutput) {
+            this.audioProcessor.playPcmData(
+              bytes,
+              this.pendingAudioStopS,
+              this.pendingAudioTurnIdx,
+              this.pendingAudioInterrupted
+            );
+          } else {
+            this.audioProcessor.playOpusData(
+              bytes,
+              this.pendingAudioStopS,
+              this.pendingAudioTurnIdx,
+              this.pendingAudioInterrupted
+            );
+          }
         }
         this.pendingAudioStopS = null;
         this.pendingAudioTurnIdx = null;

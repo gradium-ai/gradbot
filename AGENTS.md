@@ -61,6 +61,12 @@ uv sync
 uv run uvicorn main:app --reload
 ```
 
+> **After changing gradbot/pygradbot Rust code**, you must reinstall the package in each demo venv:
+> ```bash
+> uv sync --reinstall-package pygradbot
+> ```
+> A plain `uv sync` will not rebuild pygradbot if the version number hasn't changed.
+
 ### Running Server Binary
 ```bash
 # Run with config (configs are in parent compute-engine/configs/)
@@ -273,7 +279,8 @@ When adding dependencies:
 2. **Run `cargo check -p gradbot`** to catch type errors quickly
 3. **Run `cargo clippy -p gradbot`** to fix warnings
 4. **Run `cargo test -p gradbot`** to verify tests pass
-5. **Optional**: Run example client to test manually:
+5. **If you changed pygradbot or gradbot_lib**: run `uv sync --reinstall-package pygradbot` in the demo directory to pick up changes
+6. **Optional**: Run example client to test manually:
    ```bash
    cargo run -p gradbot --bin gradbot -- --config configs/gradbot.toml
    ```

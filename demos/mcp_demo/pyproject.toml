@@ -1,0 +1,15 @@
+[project]
+name = "mcp-demo"
+version = "0.1.0"
+description = "MCP-powered voice demo - connect any MCP server to a voice AI assistant"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pygradbot",
+    "pyyaml>=6.0",
+    "mcp>=1.0.0",
+]
+
+[tool.uv.sources]
+pygradbot = { path = "../../pygradbot" }

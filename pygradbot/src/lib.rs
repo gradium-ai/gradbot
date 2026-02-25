@@ -6,8 +6,13 @@ use tokio::sync::Mutex;
 /// Call this once at startup to enable logging via RUST_LOG.
 #[pyfunction]
 fn init_logging() -> PyResult<()> {
+    let env_filter = if std::env::var("RUST_LOG").is_ok() {
+        tracing_subscriber::EnvFilter::from_default_env()
+    } else {
+        tracing_subscriber::EnvFilter::new("gradbot_lib=info,pygradbot=info")
+    };
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(env_filter)
         .with_target(true)
         .try_init()
         .ok(); // Ignore error if already initialized
@@ -15,7 +20,7 @@ fn init_logging() -> PyResult<()> {
 }
 
 fn to_py_err(e: anyhow::Error) -> PyErr {
-    pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
+    pyo3::exceptions::PyRuntimeError::new_err(format!("{e:#}"))
 }
 
 /// Language enum for voice AI sessions.
@@ -27,6 +32,21 @@ pub enum Lang {
     Es,
     De,
     Pt,
+}
+
+#[pymethods]
+impl Lang {
+    /// Returns the language code string for use as TTS rewrite_rules.
+    #[getter]
+    fn rewrite_rules(&self) -> &str {
+        match self {
+            Lang::En => "en",
+            Lang::Fr => "fr",
+            Lang::Es => "es",
+            Lang::De => "de",
+            Lang::Pt => "pt",
+        }
+    }
 }
 
 impl From<Lang> for gradbot_lib::Lang {
@@ -254,12 +274,27 @@ pub struct SessionConfig {
     /// Tool definitions for the LLM.
     #[pyo3(get, set)]
     pub tools: Vec<ToolDef>,
+    /// Duration of silence (in seconds) to flush the STT pipeline. Defaults to 0.5.
+    #[pyo3(get, set)]
+    pub flush_duration_s: f64,
+    /// Padding bonus for STT. Positive = wait longer, negative = finalize sooner. Range: -4 to 4. Default 0.
+    #[pyo3(get, set)]
+    pub padding_bonus: f64,
+    /// TTS rewrite rules. Language codes like "en", "fr" enable all rules for that language.
+    #[pyo3(get, set)]
+    pub rewrite_rules: Option<String>,
+    /// Extra JSON config to merge into the STT stream's json_config.
+    #[pyo3(get, set)]
+    pub stt_extra_config: Option<String>,
+    /// Extra JSON config to merge into the TTS stream's json_config.
+    #[pyo3(get, set)]
+    pub tts_extra_config: Option<String>,
 }
 
 #[pymethods]
 impl SessionConfig {
     #[new]
-    #[pyo3(signature = (voice_id=None, instructions=None, language=Lang::En, assistant_speaks_first=true, silence_timeout_s=5.0, tools=vec![]))]
+    #[pyo3(signature = (voice_id=None, instructions=None, language=Lang::En, assistant_speaks_first=true, silence_timeout_s=5.0, tools=vec![], flush_duration_s=0.5, padding_bonus=0.0, rewrite_rules=None, stt_extra_config=None, tts_extra_config=None))]
     fn new(
         voice_id: Option<String>,
         instructions: Option<String>,
@@ -267,8 +302,13 @@ impl SessionConfig {
         assistant_speaks_first: bool,
         silence_timeout_s: f64,
         tools: Vec<ToolDef>,
+        flush_duration_s: f64,
+        padding_bonus: f64,
+        rewrite_rules: Option<String>,
+        stt_extra_config: Option<String>,
+        tts_extra_config: Option<String>,
     ) -> Self {
-        Self { voice_id, instructions, language, assistant_speaks_first, silence_timeout_s, tools }
+        Self { voice_id, instructions, language, assistant_speaks_first, silence_timeout_s, tools, flush_duration_s, padding_bonus, rewrite_rules, stt_extra_config, tts_extra_config }
     }
 }
 
@@ -282,6 +322,11 @@ impl SessionConfig {
             assistant_speaks_first: self.assistant_speaks_first,
             silence_timeout_s: self.silence_timeout_s,
             tools: tools?,
+            flush_duration_s: self.flush_duration_s,
+            padding_bonus: self.padding_bonus,
+            rewrite_rules: self.rewrite_rules.clone(),
+            stt_extra_config: self.stt_extra_config.clone(),
+            tts_extra_config: self.tts_extra_config.clone(),
         })
     }
 }

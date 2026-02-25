@@ -7,6 +7,7 @@ Run with: uvicorn main:app --reload
 """
 
 import asyncio
+import os
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -20,6 +21,16 @@ import pygradbot
 
 # Initialize Rust logging
 pygradbot.init_logging()
+
+USE_PCM = os.environ.get("USE_PCM") == "1"
+FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
+
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from demo_config import load_config, session_config_overrides, merge_overrides
+
+_YAML_CFG = load_config(Path(__file__).parent)
+_OVERRIDES = session_config_overrides(_YAML_CFG)
 
 
 @dataclass
@@ -57,13 +68,13 @@ LANG_NAMES = {
 # Format: (language_code, gender) -> (voice_name, character_name_suffix)
 VOICE_MAP = {
     # Attendant voices (masculine)
-    ("en", "masculine"): ("Kent", "Grumbold"),
+    ("en", "masculine"): ("Jack", "Grumbold"),
     ("fr", "masculine"): ("Leo", "Guillaume"),
     ("de", "masculine"): ("Maximilian", "Heinrich"),
     ("es", "masculine"): ("Sergio", "Fernando"),
     ("pt", "masculine"): ("Davi", "Roberto"),
     # Manager voices (feminine)
-    ("en", "feminine"): ("Eva", "Princess Celestia"),
+    ("en", "feminine"): ("Sydney", "Princess Celestia"),
     ("fr", "feminine"): ("Elise", "Princesse Célestine"),
     ("de", "feminine"): ("Mia", "Prinzessin Celestia"),
     ("es", "feminine"): ("Valentina", "Princesa Celestina"),
@@ -124,6 +135,13 @@ TOOLS:
 - sell_sword: Use when the customer agrees to buy the sword and has enough gold. This completes the sale!
 - change_language: If the customer speaks in French, German, Spanish, or Portuguese, switch to their language!
 
+CRITICAL - WHEN YOU CALL THE MANAGER:
+- After calling call_manager, the manager takes about 10 seconds to arrive from the back room
+- While waiting, KEEP TALKING to the customer! Fill the time naturally as {char_name}
+- Chat about the shop, the sword's legend, your day, ask them questions, share gossip about the manager
+- Example: "I've sent word to the back. She should be here shortly... Between you and me, the manager is quite an interesting character. Very regal, if you know what I mean..."
+- When the tool result arrives, {char_name} is GONE. You are now the manager. STOP talking as {char_name} immediately. Do NOT continue his sentences or personality. The attendant has left the room.
+
 LANGUAGE: If the customer speaks in another language, call change_language to switch. You're multilingual!
 
 Start by greeting the customer and asking how you can help them today.
@@ -156,6 +174,7 @@ SPEAKING STYLE:
 - Keep responses to 2-3 sentences maximum
 - NEVER use action annotations like *sighs* or *smiles warmly* - just speak naturally
 - Let your voice convey emotion, don't describe your actions
+- Always speak in first person ("I", "me", "my") - NEVER refer to yourself in third person
 
 IMPORTANT RULES:
 1. You can offer a 25 gold discount using apply_discount, BUT ONLY if the customer convinces you the sword is to DEFEND THE VILLAGE or FIGHT A DRAGON
@@ -174,7 +193,7 @@ LANGUAGE: If the customer speaks in another language, call change_language to sw
 
 {"You've already applied the formal discount. But you can still adjust the price if moved by generosity." if state.discount_applied else "You haven't applied any discount yet."}
 
-Greet the customer regally (but try to hide that you're royalty). Ask why they seek the legendary Dragonbane.
+Start by simply greeting the customer and asking how {char_name} can help them. Do NOT announce your arrival or say things like "I have arrived" - just say hello naturally and ask what they need.
 """
 
 
@@ -397,12 +416,16 @@ async def websocket_game(websocket: WebSocket):
             instructions=get_attendant_prompt(state, state.character_name),
             language=LANG_MAP[state.language],
             tools=tools,
+            **merge_overrides(_OVERRIDES,
+                flush_duration_s=FLUSH_FOR_S,
+                rewrite_rules=LANG_MAP[state.language].rewrite_rules,
+            ),
         )
 
         input_handle, output_handle = await pygradbot.run(
             session_config=config,
             input_format=pygradbot.AudioFormat.OggOpus,
-            output_format=pygradbot.AudioFormat.OggOpus,
+            output_format=pygradbot.AudioFormat.Pcm if USE_PCM else pygradbot.AudioFormat.OggOpus,
         )
 
         stop_event = asyncio.Event()
@@ -434,40 +457,52 @@ async def websocket_game(websocket: WebSocket):
                 await tool_handle.send(json.dumps({"result": "Customer has been kicked out"}))
 
             elif tool_name == "call_manager":
-                state.current_character = "manager"
-                tools = build_manager_tools()
+                # DEFERRED: manager takes 10 seconds to arrive
+                async def _manager_arrives():
+                    await asyncio.sleep(10)
 
-                # Get manager voice for current language
-                manager_voice, state.character_name = get_voice_for_role(state.language, "manager")
+                    state.current_character = "manager"
+                    nonlocal tools
+                    tools = build_manager_tools()
 
-                # Update to manager
-                new_config = pygradbot.SessionConfig(
-                    voice_id=manager_voice.voice_id,
-                    instructions=get_manager_prompt(state, state.character_name),
-                    language=LANG_MAP[state.language],
-                    tools=tools,
-                )
-                await input_handle.send_config(new_config)
+                    # Get manager voice for current language
+                    manager_voice, state.character_name = get_voice_for_role(state.language, "manager")
 
-                display_name = f"The Manager ({state.character_name})"
-                await websocket.send_json({
-                    "type": "character_change",
-                    "character": "manager",
-                    "character_name": display_name,
-                })
-                await websocket.send_json({
-                    "type": "game_state",
-                    "state": {
-                        "gold": state.gold,
-                        "has_fake_ruby": state.has_fake_ruby,
-                        "sword_price": state.sword_price,
-                        "current_character": state.current_character,
+                    # Update to manager
+                    new_config = pygradbot.SessionConfig(
+                        voice_id=manager_voice.voice_id,
+                        instructions=get_manager_prompt(state, state.character_name),
+                        language=LANG_MAP[state.language],
+                        tools=tools,
+                        **merge_overrides(_OVERRIDES,
+                            flush_duration_s=FLUSH_FOR_S,
+                            rewrite_rules=LANG_MAP[state.language].rewrite_rules,
+                        ),
+                    )
+                    await input_handle.send_config(new_config)
+
+                    display_name = f"The Manager ({state.character_name})"
+                    await websocket.send_json({
+                        "type": "character_change",
+                        "character": "manager",
                         "character_name": display_name,
-                    }
-                })
-                await tool_handle.send(json.dumps({
-                    "result": f"The manager {state.character_name} has arrived. She is an elegant woman with a regal bearing."
-                }))
+                    })
+                    await websocket.send_json({
+                        "type": "game_state",
+                        "state": {
+                            "gold": state.gold,
+                            "has_fake_ruby": state.has_fake_ruby,
+                            "sword_price": state.sword_price,
+                            "current_character": state.current_character,
+                            "character_name": display_name,
+                        }
+                    })
+                    await tool_handle.send(json.dumps({
+                        "result": f"PERSONA CHANGE: The attendant has left the room. You are now {state.character_name}, the manager. Do NOT continue speaking as the attendant. Greet the customer as {state.character_name}."
+                    }))
+
+                asyncio.create_task(_manager_arrives())
+                # DON'T send result yet - it arrives after 10s delay
 
             elif tool_name == "change_language":
                 new_lang = args.get("language", "en")
@@ -495,6 +530,10 @@ async def websocket_game(websocket: WebSocket):
                         instructions=prompt,
                         language=LANG_MAP[new_lang],
                         tools=tools,
+                        **merge_overrides(_OVERRIDES,
+                            flush_duration_s=FLUSH_FOR_S,
+                            rewrite_rules=LANG_MAP[new_lang].rewrite_rules,
+                        ),
                     )
                     await input_handle.send_config(new_config)
 
@@ -732,6 +771,10 @@ async def websocket_game(websocket: WebSocket):
         except:
             pass
 
+
+@app.get("/api/audio-config")
+async def audio_config():
+    return JSONResponse(content={"pcm": USE_PCM})
 
 # Serve static files
 static_dir = Path(__file__).parent / "static"

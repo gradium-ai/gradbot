@@ -1,0 +1,15 @@
+[project]
+name = "mtg-adviser-demo"
+version = "0.1.0"
+description = "MTG strategy adviser with card search and voice chat"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pygradbot",
+    "pyyaml>=6.0",
+    "httpx>=0.27.0",
+]
+
+[tool.uv.sources]
+pygradbot = { path = "../../pygradbot" }

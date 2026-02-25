@@ -1,7 +1,7 @@
 // Copyright (c) Gradium, all rights reserved.
 // This uses OPENAI_API_KEY for the api key when connecting to the real OpenAI API.
 // gpt-5-chat-latest is less prone to use reasoning but more expensive.
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_openai as oai;
 use async_openai::error::OpenAIError;
 use async_openai::types::ChatCompletionRequestUserMessageContentPart;
@@ -130,6 +130,36 @@ fn get_model_cache() -> &'static tokio::sync::RwLock<HashMap<String, Vec<String>
     MODEL_CACHE.get_or_init(|| tokio::sync::RwLock::new(HashMap::new()))
 }
 
+/// List model IDs from an OpenAI-compatible API with lenient deserialization.
+/// Only requires each model object to have an `id` field, ignoring extras
+/// that servers like LM Studio may omit (e.g. `created`).
+async fn list_model_ids(client: &oai::Client<oai::config::OpenAIConfig>) -> Result<Vec<String>> {
+    use oai::config::Config;
+    let url = client.config().url("/models");
+    let headers = client.config().headers();
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .headers(headers)
+        .send()
+        .await
+        .context(format!("LLM: HTTP request to {url} failed"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("LLM: GET {url} returned {status}: {body}");
+    }
+    let body: Value = resp.json().await.context("LLM: failed to parse JSON from /models")?;
+    let ids = body["data"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(ids)
+}
+
 #[derive(Clone)]
 pub struct LlmConfig {
     pub user_prompt: String,
@@ -192,6 +222,7 @@ impl Llm {
         let client = match base_url {
             None => oai::Client::new(),
             Some(base_url) => {
+                let base_url = base_url.trim_end_matches('/');
                 let config = oai::config::OpenAIConfig::default().with_api_base(base_url);
                 oai::Client::with_config(config)
             }
@@ -213,9 +244,8 @@ impl Llm {
                         ids.clone()
                     } else {
                         tracing::info!("no model name provided, listing available models");
-                        let models = client.models().list().await?;
-                        let ids: Vec<_> = models.data.iter().map(|m| m.id.clone()).collect();
-                        cache.insert(cache_key, ids.clone());
+                        let ids = list_model_ids(&client).await.context("LLM: failed to list models")?;
+                        cache.insert(cache_key.clone(), ids.clone());
                         ids
                     }
                 };
@@ -234,7 +264,11 @@ impl Llm {
             }
         };
 
-        tracing::info!(model = %model_name, "llm client created");
+        let completions_url = format!(
+            "{}/chat/completions",
+            if cache_key.is_empty() { "https://api.openai.com/v1" } else { &cache_key }
+        );
+        tracing::info!(model = %model_name, completions_url = %completions_url, "llm client created");
         Ok(Self { client: Arc::new(client), max_completion_tokens, model_name })
     }
 
@@ -528,7 +562,7 @@ impl LlmSession {
             request_builder.tools(tools);
         }
         let request = request_builder.build()?;
-        let mut responses = self.llm.client.chat().create_stream(request).await?;
+        let mut responses = self.llm.client.chat().create_stream(request).await.context("LLM: failed to create completion stream")?;
         let (tx, rx) = tokio::sync::mpsc::channel::<LlmResponseItem>(8);
         let pending_tool_calls = self.pending_tool_calls.clone();
         let tool_results_pending = self.tool_results_pending.clone();

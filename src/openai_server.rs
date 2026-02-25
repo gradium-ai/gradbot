@@ -134,6 +134,11 @@ async fn msg_in_producer(
                         assistant_speaks_first: true,
                         silence_timeout_s: 5.0,
                         tools: vec![],
+                        flush_duration_s: gradbot_lib::DEFAULT_FLUSH_FOR_S,
+                        padding_bonus: 0.0,
+                        rewrite_rules: None,
+                        stt_extra_config: None,
+                        tts_extra_config: None,
                     })
                     .await?;
             }

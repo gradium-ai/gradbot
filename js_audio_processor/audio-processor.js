@@ -53,6 +53,8 @@ class AudioProcessor {
     this._started = false;
     this._decoderReady = false;
     this._decoderQueue = [];
+    this._oggHeaderPages = []; // Cached Ogg header pages for decoder recreation
+    this._oggHeadersCaptured = false;
   }
 
   /**
@@ -73,7 +75,10 @@ class AudioProcessor {
     });
 
     // Create audio context
-    this.audioContext = new AudioContext();
+    this.audioContext = new AudioContext({ sampleRate: 48000 });
+
+    // Resume context before addModule — Safari hangs on addModule if context is suspended
+    await this.audioContext.resume();
 
     // Set up output worklet for playback
     await this.audioContext.audioWorklet.addModule(`${this.basePath}/audio-output-worklet.js`);
@@ -111,55 +116,10 @@ class AudioProcessor {
       this.decoder = AudioProcessor._preloadWorker;
       AudioProcessor._preloadWorker = null; // Take ownership
       this._decoderReady = true; // Preloaded = already initialized
+      this._setupDecoderHandlers();
     } else {
-      console.debug('AudioProcessor: creating new decoder worker');
-      this.decoder = new Worker(`${this.basePath}/decoderWorker.min.js`);
-      this._decoderReady = false;
-
-      this.decoder.postMessage({
-        command: 'init',
-        bufferLength: (960 * this.audioContext.sampleRate) / this.sampleRate,
-        decoderSampleRate: this.sampleRate,
-        outputBufferSampleRate: this.audioContext.sampleRate,
-        resampleQuality: 0,
-      });
-
-      // Give decoder time to init before allowing decode commands
-      setTimeout(() => {
-        if (!this._decoderReady) {
-          console.debug('AudioProcessor: decoder init timeout, marking ready');
-          this._decoderReady = true;
-          this._flushDecoderQueue();
-        }
-      }, 500);
+      this._createDecoder();
     }
-
-    this.decoder.onmessage = (event) => {
-      // First response means decoder is ready
-      if (!this._decoderReady) {
-        this._decoderReady = true;
-        this._flushDecoderQueue();
-      }
-
-      if (!event.data) {
-        console.debug('AudioProcessor: decoder returned empty data');
-        return;
-      }
-      const frame = event.data[0];
-      if (frame) {
-        console.debug('AudioProcessor: decoded frame with', frame.length, 'samples');
-        this.outputWorklet.port.postMessage({
-          type: 'audio',
-          frame: frame,
-          stopS: this._pendingStopS,
-          turnIdx: this._pendingTurnIdx,
-          interrupted: this._pendingInterrupted,
-        });
-      }
-    };
-    this.decoder.onerror = (error) => {
-      console.error('AudioProcessor: decoder worker error:', error);
-    };
 
     // Set up Opus encoder using our standalone OpusEncoder
     if (typeof OpusEncoder === 'undefined') {
@@ -176,13 +136,41 @@ class AudioProcessor {
       },
     });
 
-    // Resume context if suspended (browser autoplay policy)
-    await this.audioContext.resume();
-
     // Start recording (share the audioContext)
     await this.encoder.start(this.mediaStream, this.audioContext);
 
     this._started = true;
+  }
+
+  /**
+   * Play incoming raw PCM audio data (16-bit signed LE, 48kHz mono).
+   * Bypasses the Opus decoder entirely — converts Int16 to Float32 and sends to worklet.
+   * @param {Uint8Array} pcmData - Raw PCM audio (Int16LE, 48kHz, mono)
+   * @param {number} [stopS] - The stop_s timestamp for this audio (for text sync)
+   * @param {number} [turnIdx] - The turn index for this audio (for turn boundary detection)
+   * @param {boolean} [interrupted] - If true, this is the last audio before an interruption
+   */
+  playPcmData(pcmData, stopS, turnIdx, interrupted) {
+    if (!this.outputWorklet) {
+      console.warn('AudioProcessor: worklet not initialized');
+      return;
+    }
+    console.debug('AudioProcessor: playing', pcmData.length, 'bytes of PCM data, turnIdx:', turnIdx);
+
+    // Convert Int16LE to Float32
+    const int16 = new Int16Array(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength / 2);
+    const float32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) {
+      float32[i] = int16[i] / 32768;
+    }
+
+    this.outputWorklet.port.postMessage({
+      type: 'audio',
+      frame: float32,
+      stopS: stopS,
+      turnIdx: turnIdx,
+      interrupted: interrupted || false,
+    });
   }
 
   /**
@@ -212,14 +200,102 @@ class AudioProcessor {
 
   /** @private */
   _sendPacket(packet) {
+    // Replace decoder on turn change to flush stale state (prevents click after interruption)
+    if (packet.turnIdx !== undefined && this._lastDecodedTurnIdx !== undefined
+        && packet.turnIdx !== this._lastDecodedTurnIdx) {
+      console.debug('AudioProcessor: turn changed', this._lastDecodedTurnIdx, '->', packet.turnIdx, '- replacing decoder');
+      this._lastDecodedTurnIdx = packet.turnIdx;
+      this._decoderQueue.push(packet);
+      this._createDecoder();
+      return;
+    }
     this._pendingStopS = packet.stopS;
     this._pendingTurnIdx = packet.turnIdx;
+    this._lastDecodedTurnIdx = packet.turnIdx;
     this._pendingInterrupted = packet.interrupted || false;
+
+    // Cache Ogg header pages (sent before first audio frame)
+    if (!this._oggHeadersCaptured) {
+      this._oggHeaderPages.push(new Uint8Array(packet.data));
+    }
+
     const copy = new Uint8Array(packet.data);
     this.decoder.postMessage(
       { command: 'decode', pages: copy },
       [copy.buffer]
     );
+  }
+
+  /** @private Create a fresh decoder worker (terminates existing one) */
+  _createDecoder() {
+    if (this.decoder) {
+      this.decoder.terminate();
+    }
+    this.decoder = new Worker(`${this.basePath}/decoderWorker.min.js`);
+    this._decoderReady = false;
+
+    this.decoder.postMessage({
+      command: 'init',
+      bufferLength: (960 * this.audioContext.sampleRate) / this.sampleRate,
+      decoderSampleRate: this.sampleRate,
+      outputBufferSampleRate: this.audioContext.sampleRate,
+      resampleQuality: 0,
+    });
+
+    // Replay cached Ogg headers so the new decoder can parse audio pages
+    if (this._oggHeadersCaptured && this._oggHeaderPages.length > 0) {
+      console.debug('AudioProcessor: replaying', this._oggHeaderPages.length, 'Ogg header pages to new decoder');
+      for (const header of this._oggHeaderPages) {
+        const copy = new Uint8Array(header);
+        this.decoder.postMessage({ command: 'decode', pages: copy }, [copy.buffer]);
+      }
+    }
+
+    this._setupDecoderHandlers();
+
+    setTimeout(() => {
+      if (!this._decoderReady) {
+        console.debug('AudioProcessor: decoder init timeout, marking ready');
+        this._decoderReady = true;
+        this._flushDecoderQueue();
+      }
+    }, 500);
+  }
+
+  /** @private Wire up onmessage/onerror for current decoder */
+  _setupDecoderHandlers() {
+    this.decoder.onmessage = (event) => {
+      if (!this._decoderReady) {
+        this._decoderReady = true;
+        this._flushDecoderQueue();
+      }
+
+      if (!event.data) {
+        console.debug('AudioProcessor: decoder returned empty data');
+        return;
+      }
+      const frame = event.data[0];
+      if (frame) {
+        // First audio frame means all prior packets were headers
+        if (!this._oggHeadersCaptured) {
+          // Remove the last entry — it produced audio, so it's not a header
+          this._oggHeaderPages.pop();
+          this._oggHeadersCaptured = true;
+          console.debug('AudioProcessor: captured', this._oggHeaderPages.length, 'Ogg header pages');
+        }
+        console.debug('AudioProcessor: decoded frame with', frame.length, 'samples');
+        this.outputWorklet.port.postMessage({
+          type: 'audio',
+          frame: frame,
+          stopS: this._pendingStopS,
+          turnIdx: this._pendingTurnIdx,
+          interrupted: this._pendingInterrupted,
+        });
+      }
+    };
+    this.decoder.onerror = (error) => {
+      console.error('AudioProcessor: decoder worker error:', error);
+    };
   }
 
   /** @private Flush queued packets after decoder is ready */

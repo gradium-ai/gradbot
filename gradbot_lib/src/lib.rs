@@ -92,13 +92,14 @@ mod text_to_speech;
 pub mod utils;
 mod wav;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::sync::Arc;
 
 // Re-export public API
 pub use llm::{Llm, LlmConfig, ToolCall, ToolCallHandle, ToolDef, ToolResult};
 pub use multiplex::{
-    Event, MsgIn, MsgOut, SessionConfig, SessionInputHandle, SessionOutputHandle, start_session,
+    DEFAULT_FLUSH_FOR_S, Event, MsgIn, MsgOut, SessionConfig, SessionInputHandle,
+    SessionOutputHandle, start_session,
 };
 pub use speech_to_text::SttClient;
 pub use system_prompt::Lang;
@@ -441,11 +442,15 @@ impl GradbotClients {
             llm_base_url.map(|s| s.to_string()).or_else(|| std::env::var("LLM_BASE_URL").ok());
         let max_completion_tokens = max_completion_tokens.unwrap_or(4096);
 
-        let tts_client = Arc::new(TtsClient::new(gradium_api_key, &gradium_base_url)?);
-        let stt_client = Arc::new(SttClient::new(gradium_api_key, &gradium_base_url)?);
+        tracing::info!(gradium_base_url, llm_base_url = llm_base_url.as_deref().unwrap_or("(default)"), "creating clients");
+
+        let tts_client = Arc::new(TtsClient::new(gradium_api_key, &gradium_base_url).context(format!("TTS: failed to create client (base_url={gradium_base_url})"))?);
+        let stt_client = Arc::new(SttClient::new(gradium_api_key, &gradium_base_url).context(format!("STT: failed to create client (base_url={gradium_base_url})"))?);
+        let llm_base_url_display = llm_base_url.as_deref().unwrap_or("https://api.openai.com/v1").to_string();
         let llm = Arc::new(
             Llm::new(llm_base_url, max_completion_tokens, llm_model_name.map(|s| s.to_string()))
-                .await?,
+                .await
+                .context(format!("LLM: failed to create client (base_url={llm_base_url_display})"))?,
         );
 
         Ok(Self { tts_client, stt_client, llm })

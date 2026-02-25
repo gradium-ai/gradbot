@@ -1,10 +1,10 @@
 use crate::speech_to_text::{SttClient, SttStreamReceiver, SttStreamSender};
 use crate::text_to_speech::{TtsClient, TtsOut};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-const FLUSH_FOR_S: f64 = 0.8;
+pub const DEFAULT_FLUSH_FOR_S: f64 = 0.5;
 const INPUT_SAMPLE_RATE: usize = 24000;
 
 /// Internal commands sent from spawned tasks back to the main session loop.
@@ -51,17 +51,25 @@ const TTS_OUT_CHANNEL_CAPACITY: usize = 100;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
 pub enum Event {
-    Flushing { started_listening: f64, text_chunks: usize },
+    Flushing {
+        started_listening: f64,
+        text_chunks: usize,
+    },
     EndOfTurn,
     Interrupted,
-    PushToLlm { user_text: String },
-    PreviousLlmGen { agent_text: String },
+    PushToLlm {
+        user_text: String,
+    },
+    PreviousLlmGen {
+        agent_text: String,
+    },
     LlmStarted,
     FirstWord,
     FirstTtsAudio,
     EndTtsAudio,
 }
 
+#[allow(dead_code)]
 enum State {
     // All seconds in time of the current STT
     Listening {
@@ -164,9 +172,15 @@ impl Session {
         msg_out_tx: tokio::sync::mpsc::Sender<MsgOut>,
         session_config: Option<SessionConfig>,
     ) -> Result<(Self, SttSender)> {
-        let (ss, stt_receiver) = stt_client.stt_stream().await?;
-        let llm = Arc::new(tokio::sync::RwLock::new(llm.session()?));
-        let stt_sender = SttSender_ { ss, samples_sent: 0, flush_samples_sent: 0 };
+        let stt_lang = session_config.as_ref().map(|c| c.language).unwrap_or(crate::Lang::En);
+        let stt_extra = session_config.as_ref().and_then(|c| c.stt_extra_config.as_deref());
+        let (ss, stt_receiver) = stt_client.stt_stream(stt_lang, stt_extra).await.context("STT: failed to create stream")?;
+        let llm = Arc::new(tokio::sync::RwLock::new(llm.session().context("LLM: failed to create session")?));
+        let stt_sender = SttSender_ {
+            ss,
+            samples_sent: 0,
+            flush_samples_sent: 0,
+        };
         let stt_sender = SttSender(Arc::new(Mutex::new(stt_sender)));
         let session_config = Arc::new(Mutex::new(session_config));
         let (internal_cmd_tx, internal_cmd_rx) = tokio::sync::mpsc::channel(10);
@@ -194,7 +208,12 @@ impl Session {
             min_inactivity_prob: 1.0,
             last_inactivity_prob: 1.0,
             restart_stt_enabled: std::env::var("RESTART_STT")
-                .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
+                .map(|v| {
+                    matches!(
+                        v.as_str(),
+                        "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+                    )
+                })
                 .unwrap_or(false),
             user_interrupted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             interrupted_task_jh: None,
@@ -215,7 +234,11 @@ impl Session {
         self.min_inactivity_prob = 1.0;
         self.last_inactivity_prob = 1.0;
 
-        let (ss, stt_receiver) = self.stt_client.stt_stream().await?;
+        let config_guard = self.session_config.lock().await;
+        let stt_lang = config_guard.as_ref().map(|c| c.language).unwrap_or(crate::Lang::En);
+        let stt_extra = config_guard.as_ref().and_then(|c| c.stt_extra_config.as_deref());
+        let (ss, stt_receiver) = self.stt_client.stt_stream(stt_lang, stt_extra).await.context("STT: failed to reconnect stream")?;
+        drop(config_guard);
         self.stt_receiver = stt_receiver;
         self.stt_connected_at = std::time::Instant::now();
         let mut sender = self.stt_sender.0.lock().await;
@@ -337,6 +360,7 @@ impl Session {
         Ok(())
     }
 
+    // This function handles the full logic for a turn, deciding to stop if it receives a tool or a user interuption.
     async fn llm_tts(
         &mut self,
         text: &str,
@@ -360,7 +384,13 @@ impl Session {
         };
         self.llm_config = Some(llm_config.clone());
 
-        let previous_gen = match self.llm.write().await.incorporate_previous_generation().await {
+        let previous_gen = match self
+            .llm
+            .write()
+            .await
+            .incorporate_previous_generation()
+            .await
+        {
             Ok(prev) => prev,
             Err(e) => {
                 tracing::error!(?e, "failed to incorporate previous generation");
@@ -368,19 +398,30 @@ impl Session {
             }
         };
         if let Some(previous_gen) = previous_gen {
-            let _ = self.send_event(Event::PreviousLlmGen { agent_text: previous_gen }).await;
+            let _ = self
+                .send_event(Event::PreviousLlmGen {
+                    agent_text: previous_gen,
+                })
+                .await;
         }
-        let _ = self.send_event(Event::PushToLlm { user_text: text.to_string() }).await;
-        let streaming_session = match self.llm.write().await.push(text, llm_config).await {
+        let _ = self
+            .send_event(Event::PushToLlm {
+                user_text: text.to_string(),
+            })
+            .await;
+        let streaming_session = match self.llm.write().await.push(text, llm_config).await
+            .context("LLM: failed to push text")
+        {
             Ok(session) => session,
             Err(e) => {
-                tracing::error!(?e, "failed to push to LLM");
+                tracing::error!(?e, "LLM: failed to push text");
                 return None;
             }
         };
         // Drop any previous interrupted task and reset the flag
         self.interrupted_task_jh = None;
-        self.user_interrupted.store(false, std::sync::atomic::Ordering::Release);
+        self.user_interrupted
+            .store(false, std::sync::atomic::Ordering::Release);
 
         let tts_client = self.tts_client.clone();
         let tts_out_tx = self.tts_out_tx.clone();
@@ -392,6 +433,14 @@ impl Session {
         let internal_cmd_tx = self.internal_cmd_tx.clone();
         let llm = self.llm.clone();
         let user_interrupted = self.user_interrupted.clone();
+        let (padding_bonus, rewrite_rules, tts_extra_config) = {
+            let guard = self.session_config.lock().await;
+            (
+                guard.as_ref().map(|c| c.padding_bonus).unwrap_or(0.0),
+                guard.as_ref().and_then(|c| c.rewrite_rules.clone()),
+                guard.as_ref().and_then(|c| c.tts_extra_config.clone()),
+            )
+        };
         let jh = crate::utils::spawn_abort_on_drop("llm-tts", async move {
             let result: Result<f64> = async {
                 let voice_id = {
@@ -403,10 +452,8 @@ impl Session {
                 };
                 tracing::info!(?voice_id, "creating TTS stream");
                 let (mut tts_tx, tts_rx) =
-                    tts_client.tts_stream(voice_id.clone()).await.map_err(|e| {
-                        tracing::error!(?voice_id, ?e, "failed to create TTS stream");
-                        e
-                    })?;
+                    tts_client.tts_stream(voice_id.clone(), padding_bonus, rewrite_rules.clone(), tts_extra_config.as_deref()).await
+                        .context("TTS: failed to create stream")?;
                 tracing::info!("TTS stream created successfully");
                 // Shared state for tracking last stop_s across futures
                 let last_stop_s =
@@ -419,6 +466,11 @@ impl Session {
                         let mut streaming_session = streaming_session;
                         let mut first_word = true;
                         let mut buffer = String::new();
+                        // When the buffer ends with "<digit>." or "<digit>,", we can't
+                        // tell if the punctuation is mid-number ($50,000 or 6.1%) or a
+                        // real boundary (sentence end / list comma). We stash the buffer
+                        // and decide when the next chunk arrives.
+                        let mut pending_numeric: Option<String> = None;
                         while let Some(item) = streaming_session.recv().await {
                             match item {
                                 crate::llm::LlmResponseItem::Text(chunk) => {
@@ -429,17 +481,37 @@ impl Session {
                                             .await?;
                                         first_word = false;
                                     }
+                                    // Resolve any pending numeric: check if this chunk
+                                    // starts with a digit (mid-number) or not (real boundary).
+                                    if let Some(held) = pending_numeric.take() {
+                                        let next_is_digit = chunk.chars().next().is_some_and(|c| c.is_ascii_digit());
+                                        if next_is_digit {
+                                            // Mid-number punctuation — rejoin into buffer
+                                            buffer.push_str(&held);
+                                        } else {
+                                            // Real boundary — flush it
+                                            tts_tx.send_text(&held).await?;
+                                        }
+                                    }
                                     buffer.push_str(&chunk);
-                                    // Send when we have a word boundary (ends with space or sentence punctuation)
-                                    // This ensures "don't" and "well-known" stay together
+                                    // Send when we have a word boundary (ends with space or sentence punctuation).
+                                    // This ensures "don't" and "well-known" stay together.
                                     let last_char = buffer.chars().last();
-                                    let is_word_boundary = matches!(
-                                        last_char,
-                                        Some(' ' | '.' | '!' | '?' | ',' | '\n')
-                                    );
-                                    if is_word_boundary {
-                                        tts_tx.send_text(&buffer).await?;
+                                    let maybe_mid_number = matches!(last_char, Some('.' | ','))
+                                        && matches!(buffer.chars().rev().nth(1), Some('0'..='9'));
+                                    if maybe_mid_number {
+                                        // Stash — we need the next chunk to decide
+                                        pending_numeric = Some(buffer.clone());
                                         buffer.clear();
+                                    } else {
+                                        let is_word_boundary = matches!(
+                                            last_char,
+                                            Some(' ' | '.' | '!' | '?' | ',' | '\n')
+                                        );
+                                        if is_word_boundary {
+                                            tts_tx.send_text(&buffer).await?;
+                                            buffer.clear();
+                                        }
                                     }
                                 }
                                 crate::llm::LlmResponseItem::ToolCall { call, handle } => {
@@ -460,7 +532,10 @@ impl Session {
                                 }
                             }
                         }
-                        // Send any remaining buffered text
+                        // Send any remaining buffered text (including stashed numeric)
+                        if let Some(held) = pending_numeric.take() {
+                            buffer.insert_str(0, &held);
+                        }
                         if !buffer.is_empty() {
                             tts_tx.send_text(&buffer).await?;
                         }
@@ -523,9 +598,6 @@ impl Session {
                                     // Texts are still sent AFTER audio to preserve ordering.
                                     let mut texts_to_send = Vec::new();
                                     while let Some(TtsOut::Text {text, stop_s: text_stop_s, turn_idx: text_turn_idx, start_s }) = text_queue.pop_front() {
-                                        if text_turn_idx < turn_idx {
-                                            continue
-                                        }
                                         if text_stop_s <= adjusted_stop_s {
                                             let has_pending = llm.read().await.has_pending_tool_results();
                                             done = done || has_pending && text.chars().any(|c| matches!(c, '.' | '!' | '?' | ';'));
@@ -576,11 +648,9 @@ impl Session {
                         }
                         if !done {
                                     while let Some(TtsOut::Text {text, stop_s: text_stop_s, turn_idx: text_turn_idx, start_s }) = text_queue.pop_front() {
-                                        if text_turn_idx < turn_idx {
-                                            continue
-                                        }
                                             tts_out_tx.send(Ok(TtsOut::Text {text, stop_s: text_stop_s, turn_idx: text_turn_idx, start_s })).await?
-                                    }            }
+                                    }
+                        }
                         tracing::info!(message_count, "TTS receiver finished");
                         let time_s = stt_sender.current_time_s().await;
                         msg_out_tx
@@ -604,7 +674,9 @@ impl Session {
             }
             match result {
                 Ok(stop_s) => {
-                    tts_out_tx.send(Ok(TtsOut::TurnComplete { turn_idx, stop_s })).await?;
+                    tts_out_tx
+                        .send(Ok(TtsOut::TurnComplete { turn_idx, stop_s }))
+                        .await?;
                 }
                 Err(e) => {
                     tts_out_tx.send(Err(e)).await?;
@@ -617,7 +689,9 @@ impl Session {
 
     async fn send_event(&mut self, event: Event) -> Result<()> {
         let time_s = self.audio_time_s().await;
-        self.msg_out_tx.send(MsgOut::Event { time_s, event }).await?;
+        self.msg_out_tx
+            .send(MsgOut::Event { time_s, event })
+            .await?;
         Ok(())
     }
 
@@ -629,7 +703,12 @@ impl Session {
         let mut state = self.state.lock().await;
         // Avoid interruptions just after the end of turn.
         // Only flush if there are texts to process (user actually said something).
-        if let State::Listening { since_s, texts, turn_idx } = &mut *state {
+        if let State::Listening {
+            since_s,
+            texts,
+            turn_idx,
+        } = &mut *state
+        {
             tracing::debug!(
                 since_s,
                 texts_len = texts.len(),
@@ -638,7 +717,12 @@ impl Session {
                 "on_end_of_turn in Listening"
             );
         }
-        if let State::Listening { since_s, texts, turn_idx } = &mut *state {
+        if let State::Listening {
+            since_s,
+            texts,
+            turn_idx,
+        } = &mut *state
+        {
             if texts.is_empty() {
                 if self.restart_stt_enabled
                     && self.min_inactivity_prob <= 0.5
@@ -659,17 +743,30 @@ impl Session {
             if stt_time - *since_s <= 0.5 {
                 return Ok(());
             }
-            let flush_duration_s = FLUSH_FOR_S;
+            let flush_duration_s = self
+                .session_config
+                .lock()
+                .await
+                .as_ref()
+                .map(|c| c.flush_duration_s)
+                .unwrap_or(DEFAULT_FLUSH_FOR_S);
             let started_listening = *since_s;
             let turn_idx = *turn_idx;
             let texts = std::mem::take(texts);
             // Release lock before async operations
             drop(state);
-            self.send_event(Event::Flushing { started_listening, text_chunks: texts.len() })
-                .await?;
+            self.send_event(Event::Flushing {
+                started_listening,
+                text_chunks: texts.len(),
+            })
+            .await?;
             self.stt_sender.send_flush(flush_duration_s).await?;
-            *self.state.lock().await =
-                State::Flushing { since_s: stt_time, texts, flush_duration_s, turn_idx };
+            *self.state.lock().await = State::Flushing {
+                since_s: stt_time,
+                texts,
+                flush_duration_s,
+                turn_idx,
+            };
         }
         Ok(())
     }
@@ -684,11 +781,36 @@ impl Session {
         _end_of_turn: bool,
         inactivity_prob: f64,
     ) -> Result<()> {
+        // VAD-based interruption: if we're generating/speaking and the VAD
+        // detects likely voice activity (inactivity_prob < 0.4), signal
+        // interruption immediately instead of waiting for STT text.
+        if inactivity_prob < 0.4 {
+            let state = self.state.lock().await;
+            if let State::Processing { since_s, .. } = &*state {
+                let elapsed = stt_time - since_s;
+                if elapsed > 2.0 {
+                    drop(state);
+                    tracing::info!(
+                        inactivity_prob,
+                        elapsed,
+                        "VAD-based interruption: voice activity detected while processing"
+                    );
+                    self.user_interrupted
+                        .store(true, std::sync::atomic::Ordering::Release);
+                }
+            }
+        }
+
         let jh = {
             let state = self.state.lock().await;
             // Note: Function call interruptions are now handled within the TTS task itself
             // by checking has_pending_tool_results() at punctuation boundaries
-            if let State::Flushing { since_s, texts, flush_duration_s, turn_idx } = &*state
+            if let State::Flushing {
+                since_s,
+                texts,
+                flush_duration_s,
+                turn_idx,
+            } = &*state
                 && stt_time - since_s > *flush_duration_s
             {
                 let text = texts.join(" ");
@@ -697,7 +819,11 @@ impl Session {
                 drop(state);
                 let _ = self.send_event(Event::EndOfTurn).await;
                 self.llm_tts(&text, turn_idx).await
-            } else if let State::Listening { since_s, texts, turn_idx } = &*state
+            } else if let State::Listening {
+                since_s,
+                texts,
+                turn_idx,
+            } = &*state
                 && texts.is_empty()
             {
                 // Check for pending tool results first - process them immediately
@@ -758,7 +884,11 @@ impl Session {
         if let Some(jh) = jh {
             let mut state = self.state.lock().await;
             let turn_idx = state.turn_idx();
-            *state = State::Processing { since_s: stt_time, turn_idx, _jh: jh };
+            *state = State::Processing {
+                since_s: stt_time,
+                turn_idx,
+                _jh: jh,
+            };
         }
         Ok(())
     }
@@ -769,8 +899,18 @@ impl Session {
     /// when the speech actually started in the audio - more accurate than audio_time_s()
     /// for knowing when the user spoke, since STT has already analyzed the audio.
     async fn on_text(&mut self, text: String, stt_time: f64) -> Result<()> {
-        tracing::info!(?text, stt_time, silence_prompts = self.silence_prompts, "on_text called");
-        self.msg_out_tx.send(MsgOut::SttText { text: text.clone(), start_s: stt_time }).await?;
+        tracing::info!(
+            ?text,
+            stt_time,
+            silence_prompts = self.silence_prompts,
+            "on_text called"
+        );
+        self.msg_out_tx
+            .send(MsgOut::SttText {
+                text: text.clone(),
+                start_s: stt_time,
+            })
+            .await?;
         // User spoke - reset silence prompt counter
         self.silence_prompts = 0;
         self.min_inactivity_prob = 1.0;
@@ -780,32 +920,31 @@ impl Session {
             State::Flushing { texts, .. } | State::Listening { texts, .. } => {
                 texts.push(text);
             }
-            State::Processing { since_s, turn_idx, .. } => {
-                if stt_time >= *since_s {
-                    let new_turn_idx = *turn_idx + 1;
+            State::Processing { turn_idx, .. } => {
+                let new_turn_idx = *turn_idx + 1;
 
-                    // Signal the LLM/TTS task to stop after its next audio packet.
-                    // It will mark that packet interrupted=true so the client fades out.
-                    self.user_interrupted.store(true, std::sync::atomic::Ordering::Release);
+                // Signal the LLM/TTS task to stop after its next audio packet.
+                // It will mark that packet interrupted=true so the client fades out.
+                self.user_interrupted
+                    .store(true, std::sync::atomic::Ordering::Release);
 
-                    // Extract JoinHandle so the task isn't aborted — it needs to
-                    // send one more audio packet before exiting gracefully.
-                    let old_state = std::mem::replace(
-                        &mut *state,
-                        State::Listening {
-                            since_s: stt_time,
-                            texts: vec![text],
-                            turn_idx: new_turn_idx,
-                        },
-                    );
-                    drop(state);
+                // Extract JoinHandle so the task isn't aborted — it needs to
+                // send one more audio packet before exiting gracefully.
+                let old_state = std::mem::replace(
+                    &mut *state,
+                    State::Listening {
+                        since_s: stt_time,
+                        texts: vec![text],
+                        turn_idx: new_turn_idx,
+                    },
+                );
+                drop(state);
 
-                    if let State::Processing { _jh, .. } = old_state {
-                        self.interrupted_task_jh = Some(_jh);
-                    }
-
-                    self.send_event(Event::Interrupted).await?;
+                if let State::Processing { _jh, .. } = old_state {
+                    self.interrupted_task_jh = Some(_jh);
                 }
+
+                self.send_event(Event::Interrupted).await?;
             }
         }
         Ok(())
@@ -846,6 +985,19 @@ pub struct SessionConfig {
     pub silence_timeout_s: f64,
     /// Tool definitions for the LLM.
     pub tools: Vec<crate::llm::ToolDef>,
+    /// Duration of silence (in seconds) to send to STT to flush the pipeline after
+    /// the user stops speaking. Default is 0.5s.
+    pub flush_duration_s: f64,
+    /// Padding bonus for STT. Positive values make the model pad more (wait longer before
+    /// finalizing), negative values make it pad less. Range: -4.0 to 4.0. Default is 0.0.
+    pub padding_bonus: f64,
+    /// TTS rewrite rules. Language codes like "en", "fr", "de", "es", "pt" enable all
+    /// rewriting rules for that language. Passed via json_config to the TTS stream.
+    pub rewrite_rules: Option<String>,
+    /// Extra JSON config to merge into the STT stream's json_config.
+    pub stt_extra_config: Option<String>,
+    /// Extra JSON config to merge into the TTS stream's json_config.
+    pub tts_extra_config: Option<String>,
 }
 
 pub enum MsgIn {
@@ -857,15 +1009,29 @@ pub enum MsgIn {
 pub enum MsgOut {
     /// Encoded audio data ready to send.
     /// When `interrupted` is true, the client should fade out over ~200ms instead of 10ms.
-    Audio { data: Vec<u8>, start_s: f64, stop_s: f64, turn_idx: u64, interrupted: bool },
+    Audio {
+        data: Vec<u8>,
+        start_s: f64,
+        stop_s: f64,
+        turn_idx: u64,
+        interrupted: bool,
+    },
     /// Text being spoken by the assistant (for captions/display).
-    TtsText { text: String, start_s: f64, stop_s: f64, turn_idx: u64 },
+    TtsText {
+        text: String,
+        start_s: f64,
+        stop_s: f64,
+        turn_idx: u64,
+    },
     /// Transcription of user speech.
     SttText { text: String, start_s: f64 },
     /// Lifecycle event.
     Event { time_s: f64, event: Event },
     /// Tool call from the LLM. Client should execute the tool and send result via the handle.
-    ToolCall { call: crate::llm::ToolCall, handle: crate::llm::ToolCallHandle },
+    ToolCall {
+        call: crate::llm::ToolCall,
+        handle: crate::llm::ToolCallHandle,
+    },
 }
 
 /// Handle for sending input to a voice session.
@@ -898,7 +1064,8 @@ impl SessionInputHandle {
 
 impl Drop for SessionInputHandle {
     fn drop(&mut self) {
-        self.input_closed.store(true, std::sync::atomic::Ordering::Release);
+        self.input_closed
+            .store(true, std::sync::atomic::Ordering::Release);
     }
 }
 
@@ -921,7 +1088,44 @@ impl SessionOutputHandle {
     /// - `Err(e)` - an error occurred (task error, panic, or unexpected closure)
     pub async fn receive(&mut self) -> Result<Option<MsgOut>> {
         match self.msg_out.recv().await {
-            Some(msg) => Ok(Some(msg)),
+            Some(msg) => {
+                match &msg {
+                    MsgOut::Audio {
+                        start_s,
+                        stop_s,
+                        turn_idx,
+                        interrupted,
+                        data,
+                    } => {
+                        tracing::debug!(
+                            start_s,
+                            stop_s,
+                            turn_idx,
+                            interrupted,
+                            bytes = data.len(),
+                            "OUT Audio"
+                        );
+                    }
+                    MsgOut::TtsText {
+                        text,
+                        start_s,
+                        stop_s,
+                        turn_idx,
+                    } => {
+                        tracing::debug!(start_s, stop_s, turn_idx, text, "OUT TtsText");
+                    }
+                    MsgOut::SttText { text, start_s } => {
+                        tracing::debug!(start_s, text, "OUT SttText");
+                    }
+                    MsgOut::Event { time_s, event } => {
+                        tracing::info!(time_s, ?event, "OUT Event");
+                    }
+                    MsgOut::ToolCall { call, .. } => {
+                        tracing::info!(tool_name = call.tool_name, "OUT ToolCall");
+                    }
+                }
+                Ok(Some(msg))
+            }
             None => {
                 // Output channel closed - determine why
                 if let Some(task) = self.task.take() {
@@ -1013,8 +1217,15 @@ pub async fn start_session(
         io_format,
     ));
 
-    let input_handle = SessionInputHandle { msg_in: msg_in_tx, input_closed: input_closed.clone() };
-    let output_handle = SessionOutputHandle { msg_out: msg_out_rx, task: Some(task), input_closed };
+    let input_handle = SessionInputHandle {
+        msg_in: msg_in_tx,
+        input_closed: input_closed.clone(),
+    };
+    let output_handle = SessionOutputHandle {
+        msg_out: msg_out_rx,
+        task: Some(task),
+        input_closed,
+    };
 
     Ok((input_handle, output_handle))
 }
@@ -1033,13 +1244,25 @@ async fn run(
     let output_format = io_format.output;
     let (tts_out_tx, mut tts_out_rx) =
         tokio::sync::mpsc::channel::<Result<TtsOut>>(TTS_OUT_CHANNEL_CAPACITY);
-    let assistant_speaks_first = initial_config.as_ref().is_some_and(|c| c.assistant_speaks_first);
-    let (mut session, sender) =
-        Session::new(tts_client, stt_client, llm, tts_out_tx, msg_out_tx.clone(), initial_config)
-            .await?;
+    let assistant_speaks_first = initial_config
+        .as_ref()
+        .is_some_and(|c| c.assistant_speaks_first);
+    let (mut session, sender) = Session::new(
+        tts_client,
+        stt_client,
+        llm,
+        tts_out_tx,
+        msg_out_tx.clone(),
+        initial_config,
+    )
+    .await?;
     // If assistant speaks first, trigger initial greeting
     if assistant_speaks_first && let Some(jh) = session.llm_tts("", 0).await {
-        *session.state.lock().await = State::Processing { since_s: 0.0, turn_idx: 0, _jh: jh };
+        *session.state.lock().await = State::Processing {
+            since_s: 0.0,
+            turn_idx: 0,
+            _jh: jh,
+        };
     }
     let session_config = session.session_config.clone();
     let out_send_loop = {
@@ -1050,11 +1273,6 @@ async fn run(
         async move {
             let mut encoder =
                 crate::encoder::Encoder::new(output_format, OUTPUT_FRAME_SIZE, OUTPUT_SAMPLE_RATE)?;
-            let mut encoder_turn_idx: Option<u64> = None;
-            // Track whether we've sent an interrupted signal for a user-interrupted turn.
-            // On user interruption, turn_idx increments and stale audio arrives — we send the
-            // first stale packet with interrupted=true so the client can fade out gracefully.
-            let mut user_interrupt_sent_for_turn: Option<u64> = None;
             if let Some(header) = encoder.header() {
                 msg_out_tx
                     .send(MsgOut::Audio {
@@ -1066,48 +1284,47 @@ async fn run(
                     })
                     .await?;
             }
+            let mut last_encoder_turn_idx: u64 = 0;
             while let Some(msg) = tts_out_rx.recv().await {
                 // Handle errors from the LLM/TTS task
                 let msg = msg?;
                 let current_turn_idx = state.lock().await.turn_idx();
                 match msg {
-                    TtsOut::Audio { pcm, start_s, stop_s, turn_idx, interrupted } => {
-                        // Skip stale audio from old turns, but send the first
-                        // stale packet with interrupted=true so the client fades out.
+                    TtsOut::Audio {
+                        pcm,
+                        start_s,
+                        stop_s,
+                        turn_idx,
+                        interrupted,
+                    } => {
                         if turn_idx < current_turn_idx {
-                            if user_interrupt_sent_for_turn != Some(turn_idx) {
-                                let encoded = encoder.encode(&pcm)?;
-                                if !encoded.data.is_empty() {
-                                    user_interrupt_sent_for_turn = Some(turn_idx);
-                                    tracing::debug!(
-                                        "[out_send] SEND Audio (user-interrupted): turn={turn_idx} start_s={start_s:.3} stop_s={stop_s:.3} bytes={}",
-                                        encoded.data.len()
-                                    );
-                                    msg_out_tx
-                                        .send(MsgOut::Audio {
-                                            data: encoded.data,
-                                            start_s,
-                                            stop_s,
-                                            turn_idx,
-                                            interrupted: true,
-                                        })
-                                        .await?;
-                                }
-                            } else {
-                                tracing::debug!(
-                                    "[out_send] SKIP Audio: turn={turn_idx} < current={current_turn_idx} start_s={start_s:.3} stop_s={stop_s:.3}"
-                                );
-                            }
+                            tracing::debug!(
+                                "[out_send] SKIP Audio: turn={turn_idx} < current={current_turn_idx} start_s={start_s:.3} stop_s={stop_s:.3}"
+                            );
                             continue;
                         }
-                        // Recreate encoder on turn change to avoid any internal state leaking
-                        if encoder_turn_idx != Some(turn_idx) {
+                        // Reset encoder on turn change to flush stale Opus state
+                        if turn_idx != last_encoder_turn_idx {
+                            tracing::debug!(
+                                "[out_send] Turn changed {last_encoder_turn_idx} -> {turn_idx}, resetting encoder"
+                            );
                             encoder = crate::encoder::Encoder::new(
                                 output_format,
                                 OUTPUT_FRAME_SIZE,
                                 OUTPUT_SAMPLE_RATE,
                             )?;
-                            encoder_turn_idx = Some(turn_idx);
+                            if let Some(header) = encoder.header() {
+                                msg_out_tx
+                                    .send(MsgOut::Audio {
+                                        data: header.to_vec(),
+                                        start_s: 0.0,
+                                        stop_s: 0.0,
+                                        turn_idx,
+                                        interrupted: false,
+                                    })
+                                    .await?;
+                            }
+                            last_encoder_turn_idx = turn_idx;
                         }
                         let encoded = encoder.encode(&pcm)?;
                         if !encoded.data.is_empty() {
@@ -1126,7 +1343,12 @@ async fn run(
                                 .await?;
                         }
                     }
-                    TtsOut::Text { text, start_s, stop_s, turn_idx } => {
+                    TtsOut::Text {
+                        text,
+                        start_s,
+                        stop_s,
+                        turn_idx,
+                    } => {
                         // Skip stale text from old turns
                         if turn_idx < current_turn_idx {
                             tracing::debug!(
@@ -1140,7 +1362,12 @@ async fn run(
                         // Text was actually spoken - record it
                         transmitted.lock().await.push(text.clone());
                         msg_out_tx
-                            .send(MsgOut::TtsText { text, start_s, stop_s, turn_idx })
+                            .send(MsgOut::TtsText {
+                                text,
+                                start_s,
+                                stop_s,
+                                turn_idx,
+                            })
                             .await?;
                     }
                     TtsOut::TurnComplete { turn_idx, stop_s } => {
@@ -1150,7 +1377,11 @@ async fn run(
                             continue;
                         }
                         let mut state_guard = state.lock().await;
-                        if let State::Processing { turn_idx: state_turn_idx, .. } = &*state_guard {
+                        if let State::Processing {
+                            turn_idx: state_turn_idx,
+                            ..
+                        } = &*state_guard
+                        {
                             // Only transition if still processing the same turn
                             if *state_turn_idx == turn_idx {
                                 let stt_time = sender.current_time_s().await;
@@ -1200,8 +1431,8 @@ async fn run(
         Ok::<(), anyhow::Error>(())
     };
     tokio::select! {
-        res = out_send_loop => res,
-        res = tr_loop => res,
-        res = recv_loop => res,
+        res = out_send_loop => res.context("TTS/LLM output loop failed"),
+        res = tr_loop => res.context("STT transcription loop failed"),
+        res = recv_loop => res.context("audio input loop failed"),
     }
 }

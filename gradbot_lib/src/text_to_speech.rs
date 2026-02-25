@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 pub struct TtsClient(gradium::Client);
 pub struct TtsStreamSender(gradium::tts::TtsStreamSender);
@@ -28,10 +28,7 @@ pub enum TtsOut {
     /// Signals that all output for this turn has been sent.
     /// The stop_s is the timestamp of the last audio sent, used to
     /// set the listening start time for silence detection.
-    TurnComplete {
-        turn_idx: u64,
-        stop_s: f64,
-    },
+    TurnComplete { turn_idx: u64, stop_s: f64 },
 }
 
 impl TtsClient {
@@ -41,22 +38,47 @@ impl TtsClient {
             None => std::env::var("GRADIUM_API_KEY")
                 .map_err(|_| anyhow::anyhow!("GRADIUM_API_KEY environment variable not set"))?,
         };
-        let client = gradium::Client::new(&api_key).with_base_url(base_url)?;
+        let client = gradium::Client::new(&api_key).with_base_url(base_url).context("TTS: failed to initialize Gradium client")?;
         Ok(Self(client))
     }
 
     pub async fn tts_stream(
         &self,
         voice_id: Option<String>,
+        padding_bonus: f64,
+        rewrite_rules: Option<String>,
+        extra_config: Option<&str>,
     ) -> Result<(TtsStreamSender, TtsStreamReceiver)> {
+        let json_config = {
+            let mut config = serde_json::Map::new();
+            if padding_bonus != 0.0 {
+                config.insert("padding_bonus".into(), serde_json::json!(padding_bonus));
+            }
+            if let Some(rules) = rewrite_rules {
+                config.insert("rewrite_rules".into(), serde_json::json!(rules));
+            }
+            if let Some(extra) = extra_config
+                && let Ok(serde_json::Value::Object(map)) = serde_json::from_str(extra) {
+                config.extend(map);
+            }
+            if config.is_empty() {
+                None
+            } else {
+                Some(serde_json::Value::Object(config).to_string())
+            }
+        };
+
         let setup = gradium::protocol::tts::Setup {
             model_name: "default".to_string(),
             voice_id,
             voice: None,
             output_format: gradium::protocol::AudioFormat::Pcm,
-            json_config: None,
+            json_config,
+            client_req_id: None,
+            close_ws_on_eos: None,
+            pronunciation_id: None,
         };
-        let stream = self.0.tts_stream(setup).await?;
+        let stream = self.0.tts_stream(setup).await.context("TTS: failed to connect")?;
         let (tx, rx) = stream.split();
         Ok((TtsStreamSender(tx), TtsStreamReceiver(rx)))
     }
@@ -64,12 +86,12 @@ impl TtsClient {
 
 impl TtsStreamSender {
     pub async fn send_text(&mut self, text: &str) -> Result<()> {
-        self.0.send_text(text).await?;
+        self.0.send_text(text).await.context("TTS: failed to send text")?;
         Ok(())
     }
 
     pub async fn send_end_of_stream(&mut self) -> Result<()> {
-        self.0.send_eos().await?;
+        self.0.send_eos().await.context("TTS: failed to send end-of-stream")?;
         Ok(())
     }
 }
@@ -101,14 +123,14 @@ impl TtsStreamReceiver {
                         turn_idx,
                     }));
                 }
-                Response::Error { code, message } => {
+                Response::Error { code, message, .. } => {
                     tracing::error!(?code, ?message, "TTS API returned error");
                     anyhow::bail!("TTS Error {code:?}: {message}")
                 }
                 Response::Ready(_) => {
                     tracing::debug!("TTS Ready received");
                 }
-                Response::EndOfStream => {
+                Response::EndOfStream { .. } => {
                     tracing::debug!("TTS EndOfStream received");
                 }
             }

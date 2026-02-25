@@ -15,16 +15,18 @@ cd gradbot/demos/voice_text_adventure
 uv sync
 ```
 
+> **After changing gradbot Rust code**, re-run with `uv sync --reinstall-package pygradbot` to rebuild the package.
+
 ### Download games
 
-Jericho plays Z-machine game files (`.z3`, `.z5`, `.z8`, etc.). These are **not included** in this repo. Download them from the [BYU-PCCL Z-machine Games Archive](https://github.com/BYU-PCCL/z-machine-games-archive):
+Jericho plays Z-machine game files (`.z3`, `.z5`, `.z8`, etc.). These are **not included** in this repo. Download them from the [BYU-PCCL Z-machine Games](https://github.com/BYU-PCCL/z-machine-games):
 
 ```bash
 # From the voice_text_adventure directory:
-wget https://github.com/BYU-PCCL/z-machine-games-archive/archive/refs/heads/master.zip
+wget https://github.com/BYU-PCCL/z-machine-games/archive/refs/heads/master.zip
 unzip master.zip
-cp z-machine-games-archive-master/jericho-game-suite/*.z* games/
-rm -rf z-machine-games-archive-master master.zip
+cp z-machine-games-master/jericho-game-suite/*.z* games/
+rm -rf z-machine-games-master master.zip
 ```
 
 The `games/` directory should now contain `.z3`/`.z5`/`.z8` files.

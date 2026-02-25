@@ -8,6 +8,7 @@ Run with: uvicorn main:app --reload
 """
 
 import asyncio
+import os
 from concurrent.futures import ThreadPoolExecutor
 import json
 from contextlib import asynccontextmanager
@@ -23,6 +24,16 @@ import pygradbot
 
 # Initialize Rust logging
 pygradbot.init_logging()
+
+USE_PCM = os.environ.get("USE_PCM") == "1"
+FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
+
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from demo_config import load_config, session_config_overrides, merge_overrides
+
+_YAML_CFG = load_config(Path(__file__).parent)
+_OVERRIDES = session_config_overrides(_YAML_CFG)
 
 # Games directory
 GAMES_DIR = Path(__file__).parent / "games"
@@ -91,7 +102,7 @@ class GameState:
     game_over: bool = False
     # Voice/language state
     language: str = "en"
-    voice_name: str = "Kent"
+    voice_name: str = "John"
     narrator_style: str = "dramatic"  # dramatic, spooky, comedic, etc.
 
 
@@ -305,17 +316,22 @@ async def websocket_game(websocket: WebSocket):
             return
 
         print(f"Loading game: {game_path}")
-        state.game = jericho.FrotzEnv(str(game_path))
-        state.game_name = game_path.stem.replace("_", " ").title()
+        game_executor = ThreadPoolExecutor(max_workers=1)
+        loop = asyncio.get_running_loop()
 
-        # Get initial game state
-        initial_obs, info = state.game.reset()
+        def _init_game():
+            game = jericho.FrotzEnv(str(game_path))
+            obs, info = game.reset()
+            valid = game.get_valid_actions()
+            return game, obs, info, valid
+
+        state.game, initial_obs, info, state.valid_actions = await loop.run_in_executor(
+            game_executor, _init_game
+        )
+        state.game_name = game_path.stem.replace("_", " ").title()
         state.current_description = initial_obs
         state.score = info.get("score", 0)
         state.moves = info.get("moves", 0)
-
-        # Get valid actions
-        state.valid_actions = state.game.get_valid_actions()
 
         print(f"Game loaded. Initial state: score={state.score}, moves={state.moves}")
         print(f"Valid actions: {state.valid_actions[:10]}...")
@@ -344,16 +360,19 @@ async def websocket_game(websocket: WebSocket):
             instructions=get_narrator_prompt(state),
             language=LANG_MAP[state.language],
             tools=tools,
+            **merge_overrides(_OVERRIDES,
+                flush_duration_s=FLUSH_FOR_S,
+                rewrite_rules=LANG_MAP[state.language].rewrite_rules,
+            ),
         )
 
         input_handle, output_handle = await pygradbot.run(
             session_config=config,
             input_format=pygradbot.AudioFormat.OggOpus,
-            output_format=pygradbot.AudioFormat.OggOpus,
+            output_format=pygradbot.AudioFormat.Pcm if USE_PCM else pygradbot.AudioFormat.OggOpus,
         )
 
         stop_event = asyncio.Event()
-        game_executor = ThreadPoolExecutor(max_workers=1)
         tool_task_counter = 0
 
         async def handle_tool_call(tool_call, tool_handle):
@@ -378,7 +397,6 @@ async def websocket_game(websocket: WebSocket):
 
                 try:
                     # Execute the command on a dedicated single thread (Jericho is not thread-safe)
-                    loop = asyncio.get_running_loop()
                     obs, reward, done, info = await loop.run_in_executor(
                         game_executor, state.game.step, command
                     )
@@ -389,8 +407,21 @@ async def websocket_game(websocket: WebSocket):
                     state.moves = info.get("moves", state.moves)
                     state.game_over = done
 
-                    # Get new valid actions
-                    state.valid_actions = state.game.get_valid_actions()
+                    # Return result to the voice agent FIRST (before slow get_valid_actions)
+                    await tool_handle.send(json.dumps({
+                        "command": command,
+                        "result": obs,
+                        "score": state.score,
+                        "moves": state.moves,
+                        "game_over": done,
+                        "reward": reward,
+                    }))
+                    print(f"Tool call done: {call_id} {tool_name} (ok)")
+
+                    # Get new valid actions (slow - uses multiprocessing, run in executor)
+                    state.valid_actions = await loop.run_in_executor(
+                        game_executor, state.game.get_valid_actions
+                    )
 
                     # Send updated state to client
                     await websocket.send_json({
@@ -413,17 +444,6 @@ async def websocket_game(websocket: WebSocket):
                             "message": "The game has ended.",
                             "final_score": state.score,
                         })
-
-                    # Return result to the voice agent
-                    await tool_handle.send(json.dumps({
-                        "command": command,
-                        "result": obs,
-                        "score": state.score,
-                        "moves": state.moves,
-                        "game_over": done,
-                        "reward": reward,
-                    }))
-                    print(f"Tool call done: {call_id} {tool_name} (ok)")
 
                 except Exception as e:
                     print(f"Command execution error: {e}")
@@ -468,6 +488,10 @@ async def websocket_game(websocket: WebSocket):
                         instructions=get_narrator_prompt(state),
                         language=LANG_MAP[new_lang],
                         tools=tools,
+                        **merge_overrides(_OVERRIDES,
+                            flush_duration_s=FLUSH_FOR_S,
+                            rewrite_rules=LANG_MAP[new_lang].rewrite_rules,
+                        ),
                     )
                     await input_handle.send_config(new_config)
 
@@ -501,6 +525,10 @@ async def websocket_game(websocket: WebSocket):
                         instructions=get_narrator_prompt(state),
                         language=LANG_MAP[state.language],
                         tools=tools,
+                        **merge_overrides(_OVERRIDES,
+                            flush_duration_s=FLUSH_FOR_S,
+                            rewrite_rules=LANG_MAP[state.language].rewrite_rules,
+                        ),
                     )
                     await input_handle.send_config(new_config)
 
@@ -530,6 +558,10 @@ async def websocket_game(websocket: WebSocket):
                     instructions=get_narrator_prompt(state),
                     language=LANG_MAP[state.language],
                     tools=tools,
+                    **merge_overrides(_OVERRIDES,
+                        flush_duration_s=FLUSH_FOR_S,
+                        rewrite_rules=LANG_MAP[state.language].rewrite_rules,
+                    ),
                 )
                 await input_handle.send_config(new_config)
 
@@ -661,6 +693,10 @@ async def websocket_game(websocket: WebSocket):
         except Exception:
             pass
 
+
+@app.get("/api/audio-config")
+async def audio_config():
+    return JSONResponse(content={"pcm": USE_PCM})
 
 # Serve static files
 static_dir = Path(__file__).parent / "static"

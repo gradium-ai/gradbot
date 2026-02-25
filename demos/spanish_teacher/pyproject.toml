@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn[standard]>=0.20.0",
     "python-dotenv>=1.0.0",
     "pygradbot",
+    "pyyaml>=6.0",
 ]
 
 [tool.uv.sources]

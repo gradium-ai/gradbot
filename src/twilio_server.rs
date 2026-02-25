@@ -251,6 +251,11 @@ pub async fn serve(config: Config, twilio_config: TwilioConfig) -> Result<()> {
         assistant_speaks_first: true,
         silence_timeout_s: 5.0,
         tools: vec![],
+        flush_duration_s: gradbot_lib::DEFAULT_FLUSH_FOR_S,
+        padding_bonus: 0.0,
+        rewrite_rules: None,
+        stt_extra_config: None,
+        tts_extra_config: None,
     };
     let config = Arc::new(config);
     let state =

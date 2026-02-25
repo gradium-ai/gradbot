@@ -14,6 +14,7 @@ Run with: uvicorn main:app --reload
 """
 
 import asyncio
+import os
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -28,6 +29,16 @@ import pygradbot
 
 # Initialize Rust logging (outputs to stderr)
 pygradbot.init_logging()
+
+USE_PCM = os.environ.get("USE_PCM") == "1"
+FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
+
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from demo_config import load_config, session_config_overrides, merge_overrides
+
+_YAML_CFG = load_config(Path(__file__).parent)
+_OVERRIDES = session_config_overrides(_YAML_CFG)
 
 
 @dataclass
@@ -249,13 +260,17 @@ async def websocket_chat(websocket: WebSocket):
             instructions=get_system_prompt(voice_name, []),
             language=voice.language,
             tools=tools,
+            **merge_overrides(_OVERRIDES,
+                flush_duration_s=FLUSH_FOR_S,
+                rewrite_rules=voice.language.rewrite_rules,
+            ),
         )
 
         # Create clients and start session
         input_handle, output_handle = await pygradbot.run(
             session_config=config,
             input_format=pygradbot.AudioFormat.OggOpus,
-            output_format=pygradbot.AudioFormat.OggOpus,
+            output_format=pygradbot.AudioFormat.Pcm if USE_PCM else pygradbot.AudioFormat.OggOpus,
         )
 
         stop_event = asyncio.Event()
@@ -325,6 +340,10 @@ async def websocket_chat(websocket: WebSocket):
                         ),
                         language=new_voice.language,
                         tools=tools,
+                        **merge_overrides(_OVERRIDES,
+                            flush_duration_s=FLUSH_FOR_S,
+                            rewrite_rules=new_voice.language.rewrite_rules,
+                        ),
                     )
                     await input_handle.send_config(new_config)
 
@@ -506,6 +525,10 @@ async def websocket_chat(websocket: WebSocket):
         except:
             pass
 
+
+@app.get("/api/audio-config")
+async def audio_config():
+    return JSONResponse(content={"pcm": USE_PCM})
 
 # Serve static files
 static_dir = Path(__file__).parent / "static"

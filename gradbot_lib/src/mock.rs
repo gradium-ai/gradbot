@@ -117,7 +117,7 @@ impl MockSttStreamReceiver {
                         self.text_index += 1;
                     }
 
-                    return Ok(Some(Msg::Step { end_of_turn: true, current_s }));
+                    return Ok(Some(Msg::Step { end_of_turn: true, current_s, inactivity_prob: 0.0 }));
                 }
 
                 // Reset end_of_turn flag when we get non-silence
@@ -125,7 +125,7 @@ impl MockSttStreamReceiver {
                     self.end_of_turn_triggered = false;
                 }
 
-                Ok(Some(Msg::Step { end_of_turn: false, current_s }))
+                Ok(Some(Msg::Step { end_of_turn: false, current_s, inactivity_prob: 0.0 }))
             }
             None => Ok(None),
         }

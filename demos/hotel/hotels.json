@@ -1,0 +1,514 @@
+{
+  "cities": {
+    "paris": {
+      "name": "Paris",
+      "country": "France",
+      "description": "The City of Light, renowned for its art, cuisine, and romantic ambiance.",
+      "image_url": "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=800&h=500&fit=crop",
+      "events": [
+        "Paris Fashion Week is happening this month with runway shows across the city",
+        "The Louvre has a brand new immersive Van Gogh exhibition running until April",
+        "The annual Fête de la Musique brings free concerts to every street corner",
+        "A new rooftop bar just opened on the Champs-Élysées with stunning Eiffel Tower views"
+      ],
+      "attractions": [
+        "Eiffel Tower — best visited at sunset for golden hour photos",
+        "Seine River cruise — especially magical at night when the bridges are lit up",
+        "Montmartre and Sacré-Cœur — the artistic heart of Paris with amazing views",
+        "The Marais district — trendy boutiques, galleries, and the best falafel in town",
+        "Musée d'Orsay — incredible Impressionist collection, less crowded than the Louvre"
+      ],
+      "hotels": [
+        {
+          "id": "paris_1",
+          "name": "Le Ciel Doré",
+          "stars": 5,
+          "phone": "+33 1 42 68 91 00",
+          "description": "An opulent palace hotel steps from the Champs-Élysées, featuring Michelin-starred dining and a rooftop terrace with Eiffel Tower views.",
+          "image_url": "https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=600&h=400&fit=crop",
+          "amenities": ["Spa", "Rooftop Bar", "Michelin Restaurant", "Concierge", "Valet Parking"],
+          "rooms": [
+            {
+              "type": "Classic Room",
+              "price_per_night": 320,
+              "description": "Elegant 28m² room with Haussmann-style décor, marble bathroom, and city views.",
+              "image_url": "https://images.unsplash.com/photo-1611892440504-42a792e24d32?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Deluxe Suite",
+              "price_per_night": 580,
+              "description": "Spacious 52m² suite with separate living area, walk-in closet, and views of the Tuileries Garden.",
+              "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=400&h=300&fit=crop",
+              "max_guests": 3
+            },
+            {
+              "type": "Presidential Suite",
+              "price_per_night": 1200,
+              "description": "Lavish 95m² suite with grand piano, private terrace overlooking the Eiffel Tower, and butler service.",
+              "image_url": "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=400&h=300&fit=crop",
+              "max_guests": 4
+            }
+          ]
+        },
+        {
+          "id": "paris_2",
+          "name": "Hôtel du Marais Enchanté",
+          "stars": 4,
+          "phone": "+33 1 48 87 63 25",
+          "description": "A charming boutique hotel nestled in the historic Marais district, blending 17th-century architecture with contemporary design.",
+          "image_url": "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&h=400&fit=crop",
+          "amenities": ["Courtyard Garden", "Wine Bar", "Breakfast Room", "Bike Rental"],
+          "rooms": [
+            {
+              "type": "Cozy Room",
+              "price_per_night": 175,
+              "description": "Intimate 20m² room with exposed stone walls, antique furnishings, and rain shower.",
+              "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Superior Room",
+              "price_per_night": 260,
+              "description": "Bright 30m² room with courtyard views, king bed, and freestanding bathtub.",
+              "image_url": "https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Loft Suite",
+              "price_per_night": 420,
+              "description": "Duplex 48m² suite with mezzanine bedroom, rooftop terrace, and views over Parisian rooftops.",
+              "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?w=400&h=300&fit=crop",
+              "max_guests": 3
+            }
+          ]
+        }
+      ]
+    },
+    "bali": {
+      "name": "Bali",
+      "country": "Indonesia",
+      "description": "A tropical paradise of lush rice terraces, sacred temples, and world-class surf breaks.",
+      "image_url": "https://images.unsplash.com/photo-1537996194471-e657df975ab4?w=800&h=500&fit=crop",
+      "events": [
+        "The Bali Spirit Festival is on this month — yoga, music, and dance from around the world",
+        "Galungan celebrations are coming up, when the whole island is decorated with bamboo poles and offerings",
+        "A new underwater sculpture garden just opened off the coast of Pemuteran",
+        "The Ubud Writers & Readers Festival is hosting world-class authors this season"
+      ],
+      "attractions": [
+        "Uluwatu Temple — perched on a dramatic cliff with traditional Kecak fire dance at sunset",
+        "Tegallalang Rice Terraces — the iconic cascading green paddies perfect for photos",
+        "Sacred Monkey Forest in Ubud — hundreds of playful long-tailed macaques in an ancient temple",
+        "Mount Batur sunrise trek — hike up an active volcano and watch the sunrise above the clouds",
+        "Seminyak Beach — trendy beach clubs, cocktails, and world-class sunsets"
+      ],
+      "hotels": [
+        {
+          "id": "bali_1",
+          "name": "Tirta Sari Resort & Spa",
+          "stars": 5,
+          "phone": "+62 361 847 6222",
+          "description": "A luxurious cliffside retreat in Uluwatu with infinity pools overlooking the Indian Ocean and a world-class surf break below.",
+          "image_url": "https://images.unsplash.com/photo-1573843981267-be1999ff37cd?w=600&h=400&fit=crop",
+          "amenities": ["Infinity Pool", "Balinese Spa", "Yoga Pavilion", "Surf School", "Sunset Bar"],
+          "rooms": [
+            {
+              "type": "Garden Villa",
+              "price_per_night": 210,
+              "description": "Private 45m² villa surrounded by tropical gardens with outdoor shower and plunge pool.",
+              "image_url": "https://images.unsplash.com/photo-1540541338287-41700207dee6?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Ocean View Pool Villa",
+              "price_per_night": 385,
+              "description": "Stunning 65m² villa perched on the cliff edge with private infinity pool and panoramic ocean views.",
+              "image_url": "https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Royal Cliff Villa",
+              "price_per_night": 720,
+              "description": "Expansive 120m² two-bedroom villa with private butler, heated jacuzzi, and direct beach access via funicular.",
+              "image_url": "https://images.unsplash.com/photo-1602002418082-a4443e081dd1?w=400&h=300&fit=crop",
+              "max_guests": 4
+            }
+          ]
+        },
+        {
+          "id": "bali_2",
+          "name": "Padi Hijau Ubud",
+          "stars": 4,
+          "phone": "+62 361 975 1088",
+          "description": "An intimate eco-retreat hidden among the rice terraces of Ubud, where traditional Balinese culture meets sustainable luxury.",
+          "image_url": "https://images.unsplash.com/photo-1559628233-100c798642d4?w=600&h=400&fit=crop",
+          "amenities": ["Rice Terrace Views", "Organic Restaurant", "Meditation Garden", "Cooking Classes", "Art Gallery"],
+          "rooms": [
+            {
+              "type": "Rice Terrace Room",
+              "price_per_night": 120,
+              "description": "Serene 25m² room with bamboo furnishings, mosquito net canopy, and private balcony over the rice paddies.",
+              "image_url": "https://images.unsplash.com/photo-1596394516093-501ba68a0ba6?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Jungle Suite",
+              "price_per_night": 195,
+              "description": "Open-air 40m² suite with outdoor stone bathtub, rainforest canopy views, and handcrafted Balinese furniture.",
+              "image_url": "https://images.unsplash.com/photo-1584132967334-10e028bd69f7?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Treehouse Villa",
+              "price_per_night": 340,
+              "description": "Unique elevated 55m² bamboo villa perched in the treetops with glass floor panels and private infinity pool.",
+              "image_url": "https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=400&h=300&fit=crop",
+              "max_guests": 3
+            }
+          ]
+        }
+      ]
+    },
+    "dubai": {
+      "name": "Dubai",
+      "country": "United Arab Emirates",
+      "description": "A dazzling metropolis of futuristic skyscrapers, luxury shopping, and golden desert adventures.",
+      "image_url": "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=800&h=500&fit=crop",
+      "events": [
+        "The Dubai Shopping Festival is on right now with incredible deals across the city's mega-malls",
+        "The Dubai Fountain has a brand new choreographed show set to Arabic and international music",
+        "Dubai Food Festival is happening — celebrity chef pop-ups and street food markets everywhere",
+        "The new Museum of the Future just launched an immersive space exploration exhibit"
+      ],
+      "attractions": [
+        "Burj Khalifa — the world's tallest building with an observation deck on the 148th floor",
+        "Desert safari — dune bashing in 4x4s, camel rides, and dinner under the stars",
+        "The Gold Souk in Deira — a dazzling maze of shops with tons of gold jewelry",
+        "Palm Jumeirah — the iconic man-made island with luxury resorts and the Atlantis waterpark",
+        "Dubai Marina — stunning waterfront promenade with restaurants, yachts, and evening walks"
+      ],
+      "hotels": [
+        {
+          "id": "dubai_1",
+          "name": "The Sapphire Tower",
+          "stars": 5,
+          "phone": "+971 4 399 8888",
+          "description": "An iconic 60-story tower on the Palm Jumeirah featuring underwater suites, a private beach, and helicopter transfers.",
+          "image_url": "https://images.unsplash.com/photo-1582719508461-905c673771fd?w=600&h=400&fit=crop",
+          "amenities": ["Private Beach", "Underwater Restaurant", "Helipad", "Luxury Spa", "Water Park"],
+          "rooms": [
+            {
+              "type": "Skyline Room",
+              "price_per_night": 290,
+              "description": "Modern 35m² room on floors 30-45 with floor-to-ceiling windows and Arabian Gulf views.",
+              "image_url": "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Palm Suite",
+              "price_per_night": 550,
+              "description": "Luxurious 70m² suite with wraparound terrace, private jacuzzi, and panoramic views of the Palm Jumeirah.",
+              "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?w=400&h=300&fit=crop",
+              "max_guests": 3
+            },
+            {
+              "type": "Royal Penthouse",
+              "price_per_night": 2500,
+              "description": "The ultimate 200m² penthouse spanning the top floor with cinema room, private pool, and 360° views of Dubai's skyline.",
+              "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?w=400&h=300&fit=crop",
+              "max_guests": 6
+            }
+          ]
+        },
+        {
+          "id": "dubai_2",
+          "name": "Desert Rose Heritage Hotel",
+          "stars": 4,
+          "phone": "+971 4 832 5500",
+          "description": "A boutique desert retreat in the Al Marmoom conservation area, offering authentic Arabian hospitality with modern comforts.",
+          "image_url": "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=600&h=400&fit=crop",
+          "amenities": ["Desert Safari", "Camel Rides", "Stargazing Deck", "Traditional Hammam", "Falconry"],
+          "rooms": [
+            {
+              "type": "Desert View Room",
+              "price_per_night": 180,
+              "description": "Arabian-inspired 30m² room with traditional mashrabiya screens, desert dune views, and outdoor terrace.",
+              "image_url": "https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Bedouin Tent Suite",
+              "price_per_night": 350,
+              "description": "Luxurious 50m² tent-inspired suite with hand-woven carpets, copper fixtures, and private fire pit.",
+              "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Oasis Villa",
+              "price_per_night": 680,
+              "description": "Secluded 85m² villa with private garden, plunge pool fed by natural spring water, and open-air dining pavilion.",
+              "image_url": "https://images.unsplash.com/photo-1602002418082-a4443e081dd1?w=400&h=300&fit=crop",
+              "max_guests": 4
+            }
+          ]
+        }
+      ]
+    },
+    "tokyo": {
+      "name": "Tokyo",
+      "country": "Japan",
+      "description": "A mesmerizing blend of ultra-modern technology, ancient temples, and the world's greatest food scene.",
+      "image_url": "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=800&h=500&fit=crop",
+      "events": [
+        "Cherry blossom season is approaching — the parks will be covered in stunning pink blooms",
+        "teamLab Borderless just reopened in a brand new location with never-before-seen digital art installations",
+        "The Sumo Grand Tournament is taking place at the Ryogoku Kokugikan arena this month",
+        "A massive anime and manga convention is running all week in Akihabara"
+      ],
+      "attractions": [
+        "Shibuya Crossing — the world's busiest intersection, an absolute must-see",
+        "Senso-ji Temple in Asakusa — Tokyo's oldest temple with a vibrant shopping street leading to it",
+        "Tsukiji Outer Market — incredible street food, fresh sushi, and Japanese snacks",
+        "Shinjuku Gyoen — a beautiful garden perfect for cherry blossom viewing",
+        "Akihabara — electric town, the epicenter of anime, manga, and gaming culture"
+      ],
+      "hotels": [
+        {
+          "id": "tokyo_1",
+          "name": "Hikari Grand Tokyo",
+          "stars": 5,
+          "phone": "+81 3 6388 8000",
+          "description": "A sleek luxury tower in Roppongi with panoramic views of Tokyo Tower and Mount Fuji, blending Japanese minimalism with world-class service.",
+          "image_url": "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=600&h=400&fit=crop",
+          "amenities": ["Onsen Bath", "Sushi Counter", "Sky Lounge", "Zen Garden", "Concierge"],
+          "rooms": [
+            {
+              "type": "City View Room",
+              "price_per_night": 280,
+              "description": "Minimalist 30m² room with shoji screen accents, deep soaking tub, and floor-to-ceiling Tokyo skyline views.",
+              "image_url": "https://images.unsplash.com/photo-1611892440504-42a792e24d32?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Fuji Suite",
+              "price_per_night": 520,
+              "description": "Elegant 55m² suite with tatami lounge area, private onsen bath, and views of Mount Fuji on clear days.",
+              "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=400&h=300&fit=crop",
+              "max_guests": 3
+            },
+            {
+              "type": "Imperial Suite",
+              "price_per_night": 1100,
+              "description": "Magnificent 90m² suite with traditional Japanese art collection, private tea ceremony room, and wrap-around terrace.",
+              "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?w=400&h=300&fit=crop",
+              "max_guests": 4
+            }
+          ]
+        },
+        {
+          "id": "tokyo_2",
+          "name": "Sakura House Asakusa",
+          "stars": 3,
+          "phone": "+81 3 5830 7741",
+          "description": "A cozy traditional ryokan-style guesthouse near Senso-ji Temple, offering an authentic Japanese experience at an affordable price.",
+          "image_url": "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&h=400&fit=crop",
+          "amenities": ["Shared Onsen", "Tea Room", "Futon Beds", "Kimono Rental", "Calligraphy Class"],
+          "rooms": [
+            {
+              "type": "Tatami Room",
+              "price_per_night": 95,
+              "description": "Traditional 18m² tatami room with futon bedding, paper lanterns, and garden views.",
+              "image_url": "https://images.unsplash.com/photo-1596394516093-501ba68a0ba6?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Garden Room",
+              "price_per_night": 145,
+              "description": "Serene 24m² room overlooking the inner zen garden with upgraded yukata robes and private wash area.",
+              "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Premium Suite",
+              "price_per_night": 230,
+              "description": "Spacious 35m² corner suite with both tatami and western seating, private cypress wood bath, and temple views.",
+              "image_url": "https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=400&h=300&fit=crop",
+              "max_guests": 3
+            }
+          ]
+        }
+      ]
+    },
+    "santorini": {
+      "name": "Santorini",
+      "country": "Greece",
+      "description": "A stunning volcanic island in the Aegean Sea, famous for its white-washed buildings, blue domes, and breathtaking sunsets.",
+      "image_url": "https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=800&h=500&fit=crop",
+      "events": [
+        "The Santorini Wine Festival is in full swing with tastings of the island's unique volcanic wines",
+        "An open-air cinema festival is showing classic Greek and international films against the caldera backdrop",
+        "The Ifestia volcano festival features fireworks and a reenactment of the volcanic eruption over the sea",
+        "A local ceramics workshop is running special week-long pottery courses for visitors"
+      ],
+      "attractions": [
+        "Oia sunset — widely considered the most beautiful sunset in the world from the castle ruins",
+        "Red Beach — dramatic red volcanic cliffs meeting crystal-clear waters",
+        "Ancient Akrotiri — a Bronze Age city preserved under volcanic ash, the 'Greek Pompeii'",
+        "Caldera boat tour — sail inside the volcanic crater, swim in hot springs, and visit the active island",
+        "Fira to Oia hike — a scenic 10km clifftop trail with jaw-dropping caldera views the entire way"
+      ],
+      "hotels": [
+        {
+          "id": "santorini_1",
+          "name": "Aetheria Suites",
+          "stars": 5,
+          "phone": "+30 22860 71614",
+          "description": "An exclusive cliffside retreat in Oia carved into the caldera, with private plunge pools and the most iconic sunset views on the island.",
+          "image_url": "https://images.unsplash.com/photo-1573843981267-be1999ff37cd?w=600&h=400&fit=crop",
+          "amenities": ["Caldera Views", "Infinity Pool", "Wine Cellar", "Sunset Terrace", "Private Transfers"],
+          "rooms": [
+            {
+              "type": "Cave Suite",
+              "price_per_night": 350,
+              "description": "Unique 32m² suite carved into the volcanic rock with whitewashed walls, arched ceilings, and a private terrace.",
+              "image_url": "https://images.unsplash.com/photo-1540541338287-41700207dee6?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Caldera Pool Suite",
+              "price_per_night": 580,
+              "description": "Luxurious 48m² suite with private heated plunge pool hanging over the caldera edge and outdoor dining area.",
+              "image_url": "https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Honeymoon Villa",
+              "price_per_night": 890,
+              "description": "Romantic 70m² two-level villa with private jacuzzi, champagne on arrival, couples massage, and unobstructed sunset views.",
+              "image_url": "https://images.unsplash.com/photo-1602002418082-a4443e081dd1?w=400&h=300&fit=crop",
+              "max_guests": 2
+            }
+          ]
+        },
+        {
+          "id": "santorini_2",
+          "name": "Petra Vineyard Hotel",
+          "stars": 4,
+          "phone": "+30 22860 33455",
+          "description": "A charming family-run hotel set among the vineyards of Pyrgos village, offering authentic Greek hospitality and wine-tasting experiences.",
+          "image_url": "https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=600&h=400&fit=crop",
+          "amenities": ["Vineyard Tours", "Wine Tasting", "Greek Cooking Class", "Pool", "Sunset Deck"],
+          "rooms": [
+            {
+              "type": "Vineyard Room",
+              "price_per_night": 160,
+              "description": "Cozy 22m² room with stone walls, vineyard views from the balcony, and complimentary local wine.",
+              "image_url": "https://images.unsplash.com/photo-1584132967334-10e028bd69f7?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Terrace Suite",
+              "price_per_night": 275,
+              "description": "Spacious 38m² suite with private terrace, outdoor dining table, and panoramic views of the Aegean Sea.",
+              "image_url": "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Wine Cellar Suite",
+              "price_per_night": 420,
+              "description": "Unique 50m² suite built into a converted wine cellar with vaulted stone ceiling, private wine collection, and garden.",
+              "image_url": "https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=400&h=300&fit=crop",
+              "max_guests": 3
+            }
+          ]
+        }
+      ]
+    },
+    "marrakech": {
+      "name": "Marrakech",
+      "country": "Morocco",
+      "description": "An enchanting city of vibrant souks, ornate palaces, fragrant gardens, and timeless North African culture.",
+      "image_url": "https://images.unsplash.com/photo-1597212618440-806262de4f6b?w=800&h=500&fit=crop",
+      "events": [
+        "The Marrakech International Film Festival is bringing celebrities and filmmakers from around the world",
+        "The annual Rose Festival in the nearby Dades Valley features parades and rose water distillation",
+        "A massive artisan crafts fair is running in the medina with master craftspeople demonstrating their skills",
+        "The Gnaoua World Music Festival has just been announced with incredible performances in Jemaa el-Fnaa square"
+      ],
+      "attractions": [
+        "Jemaa el-Fnaa — the legendary main square with snake charmers, storytellers, and food stalls at night",
+        "Majorelle Garden — Yves Saint Laurent's stunning cobalt-blue garden oasis",
+        "Bahia Palace — a masterpiece of Moroccan architecture with intricate zellige tilework",
+        "The Souks — a labyrinth of markets selling spices, leather, lamps, and carpets",
+        "Atlas Mountains day trip — just 90 minutes away with Berber villages and stunning mountain scenery"
+      ],
+      "hotels": [
+        {
+          "id": "marrakech_1",
+          "name": "Riad Zitoune d'Or",
+          "stars": 5,
+          "phone": "+212 524 38 91 00",
+          "description": "An exquisite palace riad in the heart of the medina with a stunning courtyard garden, traditional hammam, and rooftop terrace overlooking the Atlas Mountains.",
+          "image_url": "https://images.unsplash.com/photo-1582719508461-905c673771fd?w=600&h=400&fit=crop",
+          "amenities": ["Hammam Spa", "Rooftop Terrace", "Courtyard Pool", "Moroccan Cooking Class", "Private Guide"],
+          "rooms": [
+            {
+              "type": "Garden Room",
+              "price_per_night": 190,
+              "description": "Beautiful 25m² room with hand-carved cedar ceiling, zellige tile bathroom, and views of the courtyard garden.",
+              "image_url": "https://images.unsplash.com/photo-1596394516093-501ba68a0ba6?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Sultan Suite",
+              "price_per_night": 380,
+              "description": "Opulent 45m² suite with hand-painted walls, brass fixtures, private terrace, and a sunken marble bathtub.",
+              "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Royal Riad Suite",
+              "price_per_night": 650,
+              "description": "Magnificent 80m² private riad-within-a-riad with two bedrooms, private plunge pool, and personal butler.",
+              "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?w=400&h=300&fit=crop",
+              "max_guests": 4
+            }
+          ]
+        },
+        {
+          "id": "marrakech_2",
+          "name": "Dar Atlas Garden",
+          "stars": 3,
+          "phone": "+212 524 42 67 83",
+          "description": "A welcoming family-run guesthouse in the Palmerie district with lush gardens, a pool, and warm Moroccan hospitality at excellent value.",
+          "image_url": "https://images.unsplash.com/photo-1559628233-100c798642d4?w=600&h=400&fit=crop",
+          "amenities": ["Garden Pool", "Mint Tea Service", "Airport Shuttle", "Terrace Dining", "Bike Rental"],
+          "rooms": [
+            {
+              "type": "Standard Room",
+              "price_per_night": 65,
+              "description": "Comfortable 18m² room with colorful Berber textiles, tiled floors, and a ceiling fan.",
+              "image_url": "https://images.unsplash.com/photo-1611892440504-42a792e24d32?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Terrace Room",
+              "price_per_night": 95,
+              "description": "Charming 22m² room with private terrace, garden views, and traditional Moroccan décor.",
+              "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?w=400&h=300&fit=crop",
+              "max_guests": 2
+            },
+            {
+              "type": "Family Suite",
+              "price_per_night": 140,
+              "description": "Spacious 35m² suite with two beds, a sitting area with Moroccan poufs, and a private patio.",
+              "image_url": "https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=400&h=300&fit=crop",
+              "max_guests": 4
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

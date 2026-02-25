@@ -11,6 +11,8 @@ uv sync
 
 This will build pygradbot from source using maturin.
 
+> **After changing gradbot Rust code**, re-run with `uv sync --reinstall-package pygradbot` to rebuild the package. A plain `uv sync` won't pick up changes if the version hasn't changed.
+
 ## Run
 
 ```bash
