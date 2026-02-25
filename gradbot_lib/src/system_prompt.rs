@@ -33,7 +33,7 @@ const SYSTEM_PROMPT_TEMPLATE: &str = r#"
 {SYSTEM_PROMPT_BASICS}
 
 # STYLE
-Be brief.
+Be brief. Do not reason step by step. Respond directly and concisely.
 {language_instructions}
 
 This is important because it's a specific wish of the user:
