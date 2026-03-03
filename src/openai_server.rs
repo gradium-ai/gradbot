@@ -71,7 +71,11 @@ async fn msg_out_consumer(
                 if let Some(log) = &mut log {
                     use tokio::io::AsyncWriteExt;
                     let wall_time_s = (timens::Time::now() - start_time).to_sec();
-                    let timed_event = TimedEvent { wall_time_s, time_s, event };
+                    let timed_event = TimedEvent {
+                        wall_time_s,
+                        time_s,
+                        event,
+                    };
                     let log_line = serde_json::to_string(&timed_event)? + "\n";
                     log.write_all(log_line.as_bytes()).await?;
                 }
@@ -79,7 +83,10 @@ async fn msg_out_consumer(
             MsgOut::ToolCall { call, handle } => {
                 tracing::info!(call_id = %call.call_id, tool = %call.tool_name, "Sending tool call to client");
                 // Store handle for later when client sends result
-                pending_tool_calls.lock().await.insert(call.call_id.clone(), handle);
+                pending_tool_calls
+                    .lock()
+                    .await
+                    .insert(call.call_id.clone(), handle);
                 // Send tool call to client
                 let event = ServerEvent::unmute_response_function_call(
                     call.call_id,
@@ -116,7 +123,10 @@ async fn msg_in_producer(
         };
         match msg {
             ClientEvent::UnmuteInputAudioBufferAppendAnonymized { .. } => {}
-            ClientEvent::SessionUpdate { session, event_id: _ } => {
+            ClientEvent::SessionUpdate {
+                session,
+                event_id: _,
+            } => {
                 tracing::info!(?session, "session update");
                 let instructions = session.instructions;
                 let language = session
@@ -139,13 +149,19 @@ async fn msg_in_producer(
                         rewrite_rules: None,
                         stt_extra_config: None,
                         tts_extra_config: None,
+                        llm_extra_config: None,
                     })
                     .await?;
             }
             ClientEvent::InputAudioBufferAppend { audio, event_id: _ } => {
                 input.send_audio(audio).await?;
             }
-            ClientEvent::UnmuteFunctionCallResult { call_id, result, is_error, event_id: _ } => {
+            ClientEvent::UnmuteFunctionCallResult {
+                call_id,
+                result,
+                is_error,
+                event_id: _,
+            } => {
                 tracing::info!(%call_id, %is_error, "Received function call result from client");
                 if let Some(handle) = pending_tool_calls.lock().await.remove(&call_id) {
                     if is_error {
@@ -226,16 +242,21 @@ pub async fn realtime(
 
     tracing::info!("realtime websocket connection");
     let state = state.0;
-    ws.protocols(["realtime"]).on_upgrade(move |v| websocket(v, state))
+    ws.protocols(["realtime"])
+        .on_upgrade(move |v| websocket(v, state))
 }
 
 pub async fn serve(config: Config) -> Result<()> {
     use std::str::FromStr;
     let tts_client = TtsClient::new(Some(&config.gradium_api_key), &config.gradium_base_url)?;
     let stt_client = SttClient::new(Some(&config.gradium_api_key), &config.gradium_base_url)?;
-    let llm =
-        Llm::new(config.llm_base_url.clone(), config.max_completion_tokens.unwrap_or(4096), None)
-            .await?;
+    let llm = Llm::new(
+        config.llm_base_url.clone(),
+        config.max_completion_tokens.unwrap_or(4096),
+        None,
+        None,
+    )
+    .await?;
     let config = Arc::new(config);
     let state = State {
         tts_client: Arc::new(tts_client),

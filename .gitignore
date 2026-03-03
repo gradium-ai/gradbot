@@ -1,5 +1,6 @@
 # Rust
-/target/
+**/target/
+**/logs/
 Cargo.lock
 
 # Python

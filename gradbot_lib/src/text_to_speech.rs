@@ -38,7 +38,9 @@ impl TtsClient {
             None => std::env::var("GRADIUM_API_KEY")
                 .map_err(|_| anyhow::anyhow!("GRADIUM_API_KEY environment variable not set"))?,
         };
-        let client = gradium::Client::new(&api_key).with_base_url(base_url).context("TTS: failed to initialize Gradium client")?;
+        let client = gradium::Client::new(&api_key)
+            .with_base_url(base_url)
+            .context("TTS: failed to initialize Gradium client")?;
         Ok(Self(client))
     }
 
@@ -58,7 +60,8 @@ impl TtsClient {
                 config.insert("rewrite_rules".into(), serde_json::json!(rules));
             }
             if let Some(extra) = extra_config
-                && let Ok(serde_json::Value::Object(map)) = serde_json::from_str(extra) {
+                && let Ok(serde_json::Value::Object(map)) = serde_json::from_str(extra)
+            {
                 config.extend(map);
             }
             if config.is_empty() {
@@ -74,11 +77,12 @@ impl TtsClient {
             voice: None,
             output_format: gradium::protocol::AudioFormat::Pcm,
             json_config,
-            client_req_id: None,
-            close_ws_on_eos: None,
-            pronunciation_id: None,
         };
-        let stream = self.0.tts_stream(setup).await.context("TTS: failed to connect")?;
+        let stream = self
+            .0
+            .tts_stream(setup)
+            .await
+            .context("TTS: failed to connect")?;
         let (tx, rx) = stream.split();
         Ok((TtsStreamSender(tx), TtsStreamReceiver(rx)))
     }
@@ -86,12 +90,18 @@ impl TtsClient {
 
 impl TtsStreamSender {
     pub async fn send_text(&mut self, text: &str) -> Result<()> {
-        self.0.send_text(text).await.context("TTS: failed to send text")?;
+        self.0
+            .send_text(text)
+            .await
+            .context("TTS: failed to send text")?;
         Ok(())
     }
 
     pub async fn send_end_of_stream(&mut self) -> Result<()> {
-        self.0.send_eos().await.context("TTS: failed to send end-of-stream")?;
+        self.0
+            .send_eos()
+            .await
+            .context("TTS: failed to send end-of-stream")?;
         Ok(())
     }
 }
@@ -130,7 +140,7 @@ impl TtsStreamReceiver {
                 Response::Ready(_) => {
                     tracing::debug!("TTS Ready received");
                 }
-                Response::EndOfStream { .. } => {
+                Response::EndOfStream => {
                     tracing::debug!("TTS EndOfStream received");
                 }
             }

@@ -42,7 +42,7 @@ uv run python -m spacy download en_core_web_sm
 ```bash
 # Set your API keys
 export GRADIUM_API_KEY=your_key_here
-export OPENAI_API_KEY=your_openai_key  # or use LLM_BASE_URL for other providers
+export LLM_API_KEY=your_llm_key  # or use LLM_BASE_URL + LLM_API_KEY for other providers
 
 # Run the server
 uv run uvicorn main:app --reload

@@ -92,13 +92,22 @@ pub struct TranscriptLogprob {
 #[serde(tag = "type")]
 pub enum ServerEvent {
     #[serde(rename = "error")]
-    Error { event_id: String, error: ErrorDetails },
+    Error {
+        event_id: String,
+        error: ErrorDetails,
+    },
 
     #[serde(rename = "session.updated")]
-    SessionUpdated { event_id: String, session: SessionConfig },
+    SessionUpdated {
+        event_id: String,
+        session: SessionConfig,
+    },
 
     #[serde(rename = "response.created")]
-    ResponseCreated { event_id: String, response: Response },
+    ResponseCreated {
+        event_id: String,
+        response: Response,
+    },
 
     #[serde(rename = "response.text.delta")]
     ResponseTextDelta { event_id: String, delta: String },
@@ -138,10 +147,18 @@ pub enum ServerEvent {
     UnmuteResponseTextDeltaReady { event_id: String, delta: String },
 
     #[serde(rename = "unmute.response.audio.delta.ready")]
-    UnmuteResponseAudioDeltaReady { event_id: String, number_of_samples: i32 },
+    UnmuteResponseAudioDeltaReady {
+        event_id: String,
+        number_of_samples: i32,
+    },
 
     #[serde(rename = "unmute.response.function_call")]
-    UnmuteResponseFunctionCall { event_id: String, call_id: String, name: String, arguments: Value },
+    UnmuteResponseFunctionCall {
+        event_id: String,
+        call_id: String,
+        name: String,
+        arguments: Value,
+    },
 
     #[serde(rename = "unmute.interrupted_by_vad")]
     UnmuteInterruptedByVAD { event_id: String },
@@ -171,37 +188,57 @@ impl ServerEvent {
 
     /// Create a new error event
     pub fn error(error: ErrorDetails) -> Self {
-        ServerEvent::Error { event_id: random_id("event"), error }
+        ServerEvent::Error {
+            event_id: random_id("event"),
+            error,
+        }
     }
 
     /// Create a new session updated event
     pub fn session_updated(session: SessionConfig) -> Self {
-        ServerEvent::SessionUpdated { event_id: random_id("event"), session }
+        ServerEvent::SessionUpdated {
+            event_id: random_id("event"),
+            session,
+        }
     }
 
     /// Create a new response created event
     pub fn response_created(response: Response) -> Self {
-        ServerEvent::ResponseCreated { event_id: random_id("event"), response }
+        ServerEvent::ResponseCreated {
+            event_id: random_id("event"),
+            response,
+        }
     }
 
     /// Create a new response text delta event
     pub fn response_text_delta(delta: String) -> Self {
-        ServerEvent::ResponseTextDelta { event_id: random_id("event"), delta }
+        ServerEvent::ResponseTextDelta {
+            event_id: random_id("event"),
+            delta,
+        }
     }
 
     /// Create a new response text done event
     pub fn response_text_done(text: String) -> Self {
-        ServerEvent::ResponseTextDone { event_id: random_id("event"), text }
+        ServerEvent::ResponseTextDone {
+            event_id: random_id("event"),
+            text,
+        }
     }
 
     /// Create a new response audio delta event
     pub fn response_audio_delta(delta: Vec<u8>) -> Self {
-        ServerEvent::ResponseAudioDelta { event_id: random_id("event"), delta }
+        ServerEvent::ResponseAudioDelta {
+            event_id: random_id("event"),
+            delta,
+        }
     }
 
     /// Create a new response audio done event
     pub fn response_audio_done() -> Self {
-        ServerEvent::ResponseAudioDone { event_id: random_id("event") }
+        ServerEvent::ResponseAudioDone {
+            event_id: random_id("event"),
+        }
     }
 
     pub fn conversation_item_input_audio_transcription_delta(
@@ -230,7 +267,10 @@ impl ServerEvent {
 #[serde(tag = "type")]
 pub enum ClientEvent {
     #[serde(rename = "session.update")]
-    SessionUpdate { event_id: Option<String>, session: SessionConfig },
+    SessionUpdate {
+        event_id: Option<String>,
+        session: SessionConfig,
+    },
 
     #[serde(rename = "input_audio_buffer.append")]
     InputAudioBufferAppend {
@@ -242,7 +282,10 @@ pub enum ClientEvent {
 
     /// Used internally for recording, we're not expecting the user to send this
     #[serde(rename = "unmute.input_audio_buffer.append_anonymized")]
-    UnmuteInputAudioBufferAppendAnonymized { event_id: Option<String>, number_of_samples: i32 },
+    UnmuteInputAudioBufferAppendAnonymized {
+        event_id: Option<String>,
+        number_of_samples: i32,
+    },
 
     /// Function call result from the client
     #[serde(rename = "unmute.function_call_result")]
@@ -260,12 +303,18 @@ pub enum ClientEvent {
 impl ClientEvent {
     /// Create a new session update event
     pub fn session_update(session: SessionConfig) -> Self {
-        ClientEvent::SessionUpdate { event_id: None, session }
+        ClientEvent::SessionUpdate {
+            event_id: None,
+            session,
+        }
     }
 
     /// Create a new input audio buffer append event
     pub fn input_audio_buffer_append(audio: Vec<u8>) -> Self {
-        ClientEvent::InputAudioBufferAppend { event_id: None, audio }
+        ClientEvent::InputAudioBufferAppend {
+            event_id: None,
+            audio,
+        }
     }
 }
 

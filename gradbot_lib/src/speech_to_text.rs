@@ -26,11 +26,17 @@ impl SttClient {
             None => std::env::var("GRADIUM_API_KEY")
                 .map_err(|_| anyhow::anyhow!("GRADIUM_API_KEY environment variable not set"))?,
         };
-        let client = gradium::Client::new(&api_key).with_base_url(base_url).context("STT: failed to initialize Gradium client")?;
+        let client = gradium::Client::new(&api_key)
+            .with_base_url(base_url)
+            .context("STT: failed to initialize Gradium client")?;
         Ok(Self(client))
     }
 
-    pub async fn stt_stream(&self, lang: crate::Lang, extra_config: Option<&str>) -> Result<(SttStreamSender, SttStreamReceiver)> {
+    pub async fn stt_stream(
+        &self,
+        lang: crate::Lang,
+        extra_config: Option<&str>,
+    ) -> Result<(SttStreamSender, SttStreamReceiver)> {
         let lang_code = match lang {
             crate::Lang::En => "en",
             crate::Lang::Fr => "fr",
@@ -43,7 +49,8 @@ impl SttClient {
             let mut config = serde_json::Map::new();
             config.insert("language".into(), serde_json::json!(lang_code));
             if let Some(extra) = extra_config
-                && let Ok(serde_json::Value::Object(map)) = serde_json::from_str(extra) {
+                && let Ok(serde_json::Value::Object(map)) = serde_json::from_str(extra)
+            {
                 config.extend(map);
             }
             serde_json::Value::Object(config).to_string()
@@ -53,7 +60,11 @@ impl SttClient {
             input_format: gradium::protocol::AudioFormat::Pcm,
             json_config: Some(json_config),
         };
-        let stream = self.0.stt_stream(setup).await.context("STT: failed to connect")?;
+        let stream = self
+            .0
+            .stt_stream(setup)
+            .await
+            .context("STT: failed to connect")?;
         let (tx, rx) = stream.split();
         Ok((SttStreamSender(tx), SttStreamReceiver(rx)))
     }
@@ -69,7 +80,10 @@ impl SttStreamSender {
                 s.to_le_bytes()
             })
             .collect::<Vec<u8>>();
-        self.0.send_audio(audio).await.context("STT: failed to send audio")?;
+        self.0
+            .send_audio(audio)
+            .await
+            .context("STT: failed to send audio")?;
         Ok(())
     }
 }

@@ -6,7 +6,10 @@ use anyhow::Result;
 
 pub enum Decoder {
     OggOpus(kaudio::ogg_opus::Decoder),
-    Pcm { fft: Option<(Vec<f32>, Box<rubato::FftFixedOut<f32>>)>, format: PcmFormat },
+    Pcm {
+        fft: Option<(Vec<f32>, Box<rubato::FftFixedOut<f32>>)>,
+        format: PcmFormat,
+    },
     Wav(crate::wav::Decoder),
 }
 
@@ -14,7 +17,10 @@ impl Decoder {
     pub fn new(format: Format, out_sample_rate: usize, frame_size: usize) -> Result<Self> {
         match format {
             Format::OggOpus => Self::ogg_opus(out_sample_rate, frame_size),
-            Format::Pcm { sample_rate, format } => {
+            Format::Pcm {
+                sample_rate,
+                format,
+            } => {
                 let sample_rate = sample_rate.unwrap_or(out_sample_rate);
                 let fft = if sample_rate == out_sample_rate {
                     None
@@ -37,7 +43,10 @@ impl Decoder {
     }
 
     fn ogg_opus(sample_rate: usize, frame_size: usize) -> Result<Self> {
-        Ok(Self::OggOpus(kaudio::ogg_opus::Decoder::new(sample_rate, frame_size)?))
+        Ok(Self::OggOpus(kaudio::ogg_opus::Decoder::new(
+            sample_rate,
+            frame_size,
+        )?))
     }
 
     fn wav(sample_rate: usize, frame_size: usize) -> Result<Self> {
@@ -103,7 +112,11 @@ mod law_decoder {
         let a_val = a_val ^ 0x55;
         let t = a_val as i16 & 0x0F;
         let seg = (a_val & 0x70) >> 4;
-        let t = if seg != 0 { (t + t + 1 + 32) << (seg + 2) } else { (t + t + 1) << 3 };
+        let t = if seg != 0 {
+            (t + t + 1 + 32) << (seg + 2)
+        } else {
+            (t + t + 1) << 3
+        };
         if a_val & 0x80 != 0 { t } else { -t }
     }
 
@@ -111,6 +124,10 @@ mod law_decoder {
         let u_val = !input;
         let t = ((u_val as i16 & 0x0f) << 3) + 0x84;
         let t = t << ((u_val as i16 & 0x70) >> 4);
-        if u_val & 0x80 != 0 { 0x84 - t } else { t - 0x84 }
+        if u_val & 0x80 != 0 {
+            0x84 - t
+        } else {
+            t - 0x84
+        }
     }
 }

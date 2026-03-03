@@ -11,7 +11,10 @@ pub enum PcmFormat {
 
 #[derive(serde::Deserialize, serde::Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
-    Pcm { sample_rate: Option<usize>, format: PcmFormat },
+    Pcm {
+        sample_rate: Option<usize>,
+        format: PcmFormat,
+    },
     Wav,
     OggOpus,
 }
@@ -43,15 +46,24 @@ impl std::str::FromStr for Format {
 
 impl Format {
     pub fn pcm(sample_rate: usize) -> Self {
-        Self::Pcm { sample_rate: Some(sample_rate), format: PcmFormat::Raw }
+        Self::Pcm {
+            sample_rate: Some(sample_rate),
+            format: PcmFormat::Raw,
+        }
     }
 
     pub fn ulaw(sample_rate: usize) -> Self {
-        Self::Pcm { sample_rate: Some(sample_rate), format: PcmFormat::Ulaw }
+        Self::Pcm {
+            sample_rate: Some(sample_rate),
+            format: PcmFormat::Ulaw,
+        }
     }
 
     pub fn alaw(sample_rate: usize) -> Self {
-        Self::Pcm { sample_rate: Some(sample_rate), format: PcmFormat::Alaw }
+        Self::Pcm {
+            sample_rate: Some(sample_rate),
+            format: PcmFormat::Alaw,
+        }
     }
 }
 
@@ -69,26 +81,36 @@ impl PcmFormat {
                 byteorder::LittleEndian::write_i16_into(&pcm, &mut buf);
                 buf
             }
-            Self::Alaw => {
-                pcm.iter().map(|&s| law_encoder::alaw_encode_sample(pcm_f32_to_s16(s))).collect()
-            }
-            Self::Ulaw => {
-                pcm.iter().map(|&s| law_encoder::mulaw_encode_sample(pcm_f32_to_s16(s))).collect()
-            }
+            Self::Alaw => pcm
+                .iter()
+                .map(|&s| law_encoder::alaw_encode_sample(pcm_f32_to_s16(s)))
+                .collect(),
+            Self::Ulaw => pcm
+                .iter()
+                .map(|&s| law_encoder::mulaw_encode_sample(pcm_f32_to_s16(s)))
+                .collect(),
         }
     }
 }
 
 impl Default for Format {
     fn default() -> Self {
-        Self::Pcm { sample_rate: None, format: PcmFormat::Raw }
+        Self::Pcm {
+            sample_rate: None,
+            format: PcmFormat::Raw,
+        }
     }
 }
 
 enum Encoder_ {
     OggOpus(kaudio::ogg_opus::Encoder),
-    Pcm { fft: Option<rubato::FftFixedInOut<f32>>, format: PcmFormat },
-    Wav { header: Vec<u8> },
+    Pcm {
+        fft: Option<rubato::FftFixedInOut<f32>>,
+        format: PcmFormat,
+    },
+    Wav {
+        header: Vec<u8>,
+    },
 }
 
 pub struct Encoder {
@@ -107,7 +129,10 @@ impl Encoder {
     pub fn new(format: Format, frame_size: usize, in_sample_rate: usize) -> Result<Self> {
         let inner = match format {
             Format::OggOpus => Self::ogg_opus(in_sample_rate),
-            Format::Pcm { sample_rate, format } => {
+            Format::Pcm {
+                sample_rate,
+                format,
+            } => {
                 let sample_rate = sample_rate.unwrap_or(in_sample_rate);
                 let fft = if sample_rate == in_sample_rate {
                     None
@@ -124,11 +149,17 @@ impl Encoder {
             }
             Format::Wav => Ok(Self::wav(in_sample_rate)?),
         };
-        Ok(Self { inner: inner?, samples_encoded: 0, in_sample_rate })
+        Ok(Self {
+            inner: inner?,
+            samples_encoded: 0,
+            in_sample_rate,
+        })
     }
 
     fn ogg_opus(sample_rate: usize) -> Result<Encoder_> {
-        Ok(Encoder_::OggOpus(kaudio::ogg_opus::Encoder::new(sample_rate)?))
+        Ok(Encoder_::OggOpus(kaudio::ogg_opus::Encoder::new(
+            sample_rate,
+        )?))
     }
 
     fn wav(sample_rate: usize) -> Result<Encoder_> {
@@ -159,7 +190,10 @@ impl Encoder {
                 buf
             }
             Encoder_::Pcm { fft: None, format } => format.pcm_to_bytes(pcm),
-            Encoder_::Pcm { fft: Some(fft), format } => {
+            Encoder_::Pcm {
+                fft: Some(fft),
+                format,
+            } => {
                 use rubato::Resampler;
                 let pcm = fft.process(&[&pcm], None)?;
                 if pcm.is_empty() {
@@ -171,7 +205,11 @@ impl Encoder {
         let start_s = self.samples_encoded as f64 / self.in_sample_rate as f64;
         self.samples_encoded += pcm.len();
         let stop_s = self.samples_encoded as f64 / self.in_sample_rate as f64;
-        Ok(EncodedAudio { data: buf, start_s, stop_s })
+        Ok(EncodedAudio {
+            data: buf,
+            start_s,
+            stop_s,
+        })
     }
 }
 
@@ -201,7 +239,11 @@ mod law_encoder {
     }
 
     pub fn mulaw_encode_sample(input: i16) -> u8 {
-        let mut sample = if input < 0 { (!input >> 2) + BIAS } else { (input >> 2) + BIAS };
+        let mut sample = if input < 0 {
+            (!input >> 2) + BIAS
+        } else {
+            (input >> 2) + BIAS
+        };
 
         if sample > CLIP {
             sample = CLIP;

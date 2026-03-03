@@ -172,10 +172,20 @@ impl Session {
         msg_out_tx: tokio::sync::mpsc::Sender<MsgOut>,
         session_config: Option<SessionConfig>,
     ) -> Result<(Self, SttSender)> {
-        let stt_lang = session_config.as_ref().map(|c| c.language).unwrap_or(crate::Lang::En);
-        let stt_extra = session_config.as_ref().and_then(|c| c.stt_extra_config.as_deref());
-        let (ss, stt_receiver) = stt_client.stt_stream(stt_lang, stt_extra).await.context("STT: failed to create stream")?;
-        let llm = Arc::new(tokio::sync::RwLock::new(llm.session().context("LLM: failed to create session")?));
+        let stt_lang = session_config
+            .as_ref()
+            .map(|c| c.language)
+            .unwrap_or(crate::Lang::En);
+        let stt_extra = session_config
+            .as_ref()
+            .and_then(|c| c.stt_extra_config.as_deref());
+        let (ss, stt_receiver) = stt_client
+            .stt_stream(stt_lang, stt_extra)
+            .await
+            .context("STT: failed to create stream")?;
+        let llm = Arc::new(tokio::sync::RwLock::new(
+            llm.session().context("LLM: failed to create session")?,
+        ));
         let stt_sender = SttSender_ {
             ss,
             samples_sent: 0,
@@ -235,9 +245,18 @@ impl Session {
         self.last_inactivity_prob = 1.0;
 
         let config_guard = self.session_config.lock().await;
-        let stt_lang = config_guard.as_ref().map(|c| c.language).unwrap_or(crate::Lang::En);
-        let stt_extra = config_guard.as_ref().and_then(|c| c.stt_extra_config.as_deref());
-        let (ss, stt_receiver) = self.stt_client.stt_stream(stt_lang, stt_extra).await.context("STT: failed to reconnect stream")?;
+        let stt_lang = config_guard
+            .as_ref()
+            .map(|c| c.language)
+            .unwrap_or(crate::Lang::En);
+        let stt_extra = config_guard
+            .as_ref()
+            .and_then(|c| c.stt_extra_config.as_deref());
+        let (ss, stt_receiver) = self
+            .stt_client
+            .stt_stream(stt_lang, stt_extra)
+            .await
+            .context("STT: failed to reconnect stream")?;
         drop(config_guard);
         self.stt_receiver = stt_receiver;
         self.stt_connected_at = std::time::Instant::now();
@@ -367,20 +386,22 @@ impl Session {
         turn_idx: u64,
     ) -> Option<crate::utils::JoinHandleAbortOnDrop> {
         // Build/update LlmConfig from SessionConfig
-        let llm_config = {
+        let (llm_config, llm_extra_config) = {
             let config_guard = self.session_config.lock().await;
             let config = config_guard.as_ref()?;
             let user_prompt = config.instructions.clone().unwrap_or_default();
             let language = config.language;
+            let llm_extra_config = config.llm_extra_config.clone();
             // Inject the internal reset_asr tool alongside user-provided tools
             let mut tools = config.tools.clone();
             tools.push(reset_asr_tool());
-            match &self.llm_config {
+            let llm_config = match &self.llm_config {
                 Some(existing) => {
                     crate::llm::LlmConfig::maybe_update(existing, &user_prompt, language, tools)
                 }
                 None => Arc::new(crate::llm::LlmConfig::new(user_prompt, language, tools)),
-            }
+            };
+            (llm_config, llm_extra_config)
         };
         self.llm_config = Some(llm_config.clone());
 
@@ -409,7 +430,12 @@ impl Session {
                 user_text: text.to_string(),
             })
             .await;
-        let streaming_session = match self.llm.write().await.push(text, llm_config).await
+        let streaming_session = match self
+            .llm
+            .write()
+            .await
+            .push(text, llm_config, llm_extra_config.as_deref())
+            .await
             .context("LLM: failed to push text")
         {
             Ok(session) => session,
@@ -529,6 +555,9 @@ impl Session {
                                     } else {
                                         msg_out_tx.send(MsgOut::ToolCall { call, handle }).await?;
                                     }
+                                }
+                                crate::llm::LlmResponseItem::Error(err) => {
+                                    return Err(anyhow::anyhow!("LLM error: {err}"));
                                 }
                             }
                         }
@@ -998,6 +1027,8 @@ pub struct SessionConfig {
     pub stt_extra_config: Option<String>,
     /// Extra JSON config to merge into the TTS stream's json_config.
     pub tts_extra_config: Option<String>,
+    /// Extra JSON config to merge into the LLM chat completion request body.
+    pub llm_extra_config: Option<String>,
 }
 
 pub enum MsgIn {
@@ -1385,16 +1416,25 @@ async fn run(
                             // Only transition if still processing the same turn
                             if *state_turn_idx == turn_idx {
                                 let stt_time = sender.current_time_s().await;
+                                // Use the later of stop_s and stt_time so that
+                                // the silence timer starts from when the AI
+                                // actually finished speaking, not from when the
+                                // audio was logically scheduled.  When the LLM is
+                                // slow, stop_s can lag behind stt_time by the LLM
+                                // latency, which would cause the silence timeout
+                                // to fire almost immediately.
+                                let since_s = stop_s.max(stt_time);
                                 let drift = stop_s - stt_time;
                                 tracing::info!(
                                     stop_s,
                                     stt_time,
+                                    since_s,
                                     drift,
                                     turn_idx,
-                                    "transitioning to Listening (since_s=stop_s)"
+                                    "transitioning to Listening"
                                 );
                                 *state_guard = State::Listening {
-                                    since_s: stop_s,
+                                    since_s,
                                     texts: vec![],
                                     turn_idx: turn_idx + 1,
                                 }

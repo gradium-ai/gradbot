@@ -1,9 +1,8 @@
 // Copyright (c) Gradium, all rights reserved.
-// This uses OPENAI_API_KEY for the api key when connecting to the real OpenAI API.
+// LLM API key resolution: api_key parameter → LLM_API_KEY env var → OPENAI_API_KEY env var (backwards compat).
 // gpt-5-chat-latest is less prone to use reasoning but more expensive.
 use anyhow::{Context, Result};
 use async_openai as oai;
-use async_openai::error::OpenAIError;
 use async_openai::types::ChatCompletionRequestUserMessageContentPart;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -60,7 +59,8 @@ impl ToolCallHandle {
     pub async fn send(&self, result: Value) -> Result<(), mpsc::error::SendError<ToolResult>> {
         let res = self.tx.send(Ok(result)).await;
         if res.is_ok() {
-            self.results_pending.fetch_add(1, std::sync::atomic::Ordering::Release);
+            self.results_pending
+                .fetch_add(1, std::sync::atomic::Ordering::Release);
         }
         res
     }
@@ -72,7 +72,8 @@ impl ToolCallHandle {
     ) -> Result<(), mpsc::error::SendError<ToolResult>> {
         let res = self.tx.send(Err(error)).await;
         if res.is_ok() {
-            self.results_pending.fetch_add(1, std::sync::atomic::Ordering::Release);
+            self.results_pending
+                .fetch_add(1, std::sync::atomic::Ordering::Release);
         }
         res
     }
@@ -81,7 +82,8 @@ impl ToolCallHandle {
     pub fn try_send(&self, result: Value) -> Result<(), mpsc::error::TrySendError<ToolResult>> {
         let res = self.tx.try_send(Ok(result));
         if res.is_ok() {
-            self.results_pending.fetch_add(1, std::sync::atomic::Ordering::Release);
+            self.results_pending
+                .fetch_add(1, std::sync::atomic::Ordering::Release);
         }
         res
     }
@@ -93,7 +95,8 @@ impl ToolCallHandle {
     ) -> Result<(), mpsc::error::TrySendError<ToolResult>> {
         let res = self.tx.try_send(Err(error));
         if res.is_ok() {
-            self.results_pending.fetch_add(1, std::sync::atomic::Ordering::Release);
+            self.results_pending
+                .fetch_add(1, std::sync::atomic::Ordering::Release);
         }
         res
     }
@@ -148,7 +151,10 @@ async fn list_model_ids(client: &oai::Client<oai::config::OpenAIConfig>) -> Resu
         let body = resp.text().await.unwrap_or_default();
         anyhow::bail!("LLM: GET {url} returned {status}: {body}");
     }
-    let body: Value = resp.json().await.context("LLM: failed to parse JSON from /models")?;
+    let body: Value = resp
+        .json()
+        .await
+        .context("LLM: failed to parse JSON from /models")?;
     let ids = body["data"]
         .as_array()
         .map(|arr| {
@@ -173,7 +179,11 @@ impl LlmConfig {
         language: crate::system_prompt::Lang,
         tools: Vec<ToolDef>,
     ) -> Self {
-        Self { user_prompt, language, tools }
+        Self {
+            user_prompt,
+            language,
+            tools,
+        }
     }
 
     /// Returns a new Arc only if the config values differ, otherwise returns the existing Arc.
@@ -188,7 +198,11 @@ impl LlmConfig {
         if existing.user_prompt == user_prompt
             && existing.language == language
             && existing.tools.len() == tools.len()
-            && existing.tools.iter().zip(tools.iter()).all(|(a, b)| a.name == b.name)
+            && existing
+                .tools
+                .iter()
+                .zip(tools.iter())
+                .all(|(a, b)| a.name == b.name)
         {
             existing.clone()
         } else {
@@ -199,13 +213,20 @@ impl LlmConfig {
 
 #[derive(Clone)]
 pub struct Llm {
-    client: Arc<oai::Client<oai::config::OpenAIConfig>>,
     max_completion_tokens: u32,
     model_name: String,
+    reqwest_client: reqwest::Client,
+    api_key: String,
+    completions_url: String,
 }
 
 impl Llm {
     /// Create a new LLM client.
+    ///
+    /// API key resolution order:
+    /// 1. `api_key` parameter if provided
+    /// 2. `LLM_API_KEY` environment variable if set
+    /// 3. `OPENAI_API_KEY` environment variable (backwards compatibility)
     ///
     /// Model resolution order:
     /// 1. `model_name` parameter if provided
@@ -215,15 +236,30 @@ impl Llm {
         base_url: Option<String>,
         max_completion_tokens: u32,
         model_name: Option<String>,
+        api_key: Option<String>,
     ) -> Result<Self> {
+        // Resolve API key: parameter > LLM_API_KEY > OPENAI_API_KEY
+        let api_key = api_key
+            .or_else(|| std::env::var("LLM_API_KEY").ok())
+            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+            .unwrap_or_default();
+
+        // Resolve base URL: parameter > LLM_BASE_URL env var > OpenAI default
+        let base_url = base_url.or_else(|| std::env::var("LLM_BASE_URL").ok());
+
         // Cache key for model listing (computed before base_url is moved)
         let cache_key = base_url.as_deref().unwrap_or("").to_string();
 
         let client = match base_url {
-            None => oai::Client::new(),
+            None => {
+                let config = oai::config::OpenAIConfig::default().with_api_key(&api_key);
+                oai::Client::with_config(config)
+            }
             Some(base_url) => {
                 let base_url = base_url.trim_end_matches('/');
-                let config = oai::config::OpenAIConfig::default().with_api_base(base_url);
+                let config = oai::config::OpenAIConfig::default()
+                    .with_api_base(base_url)
+                    .with_api_key(&api_key);
                 oai::Client::with_config(config)
             }
         };
@@ -244,7 +280,9 @@ impl Llm {
                         ids.clone()
                     } else {
                         tracing::info!("no model name provided, listing available models");
-                        let ids = list_model_ids(&client).await.context("LLM: failed to list models")?;
+                        let ids = list_model_ids(&client)
+                            .await
+                            .context("LLM: failed to list models")?;
                         cache.insert(cache_key.clone(), ids.clone());
                         ids
                     }
@@ -266,10 +304,20 @@ impl Llm {
 
         let completions_url = format!(
             "{}/chat/completions",
-            if cache_key.is_empty() { "https://api.openai.com/v1" } else { &cache_key }
+            if cache_key.is_empty() {
+                "https://api.openai.com/v1"
+            } else {
+                &cache_key
+            }
         );
         tracing::info!(model = %model_name, completions_url = %completions_url, "llm client created");
-        Ok(Self { client: Arc::new(client), max_completion_tokens, model_name })
+        Ok(Self {
+            max_completion_tokens,
+            model_name,
+            reqwest_client: reqwest::Client::new(),
+            api_key,
+            completions_url,
+        })
     }
 
     pub fn session(&self) -> Result<LlmSession> {
@@ -304,19 +352,24 @@ impl LlmSession {
     /// This allows the caller to trigger an LLM call to process tool results
     /// without waiting for user input.
     pub fn has_pending_tool_results(&self) -> bool {
-        self.tool_results_pending.load(std::sync::atomic::Ordering::Acquire) > 0
+        self.tool_results_pending
+            .load(std::sync::atomic::Ordering::Acquire)
+            > 0
     }
 
     /// Check if there are any NEW tool calls that haven't been injected into history yet.
     /// This is used to trigger LLM calls for tool calls that are still awaiting results.
     pub async fn has_new_tool_calls(&self) -> bool {
         let pending = self.pending_tool_calls.lock().await;
-        pending.iter().any(|p| matches!(p.status, ToolCallStatus::New))
+        pending
+            .iter()
+            .any(|p| matches!(p.status, ToolCallStatus::New))
     }
 
     /// Clear the pending tool results counter (called after processing).
     fn clear_tool_results_pending(&self) {
-        self.tool_results_pending.store(0, std::sync::atomic::Ordering::Release);
+        self.tool_results_pending
+            .store(0, std::sync::atomic::Ordering::Release);
     }
 }
 
@@ -326,7 +379,12 @@ pub enum LlmResponseItem {
     /// Text content from the LLM
     Text(String),
     /// A tool call from the LLM with a handle to send results
-    ToolCall { call: ToolCall, handle: ToolCallHandle },
+    ToolCall {
+        call: ToolCall,
+        handle: ToolCallHandle,
+    },
+    /// An error from the LLM stream
+    Error(String),
 }
 
 pub struct LlmResponseStream {
@@ -487,8 +545,8 @@ impl LlmSession {
         &mut self,
         user_msg: &str,
         config: Arc<LlmConfig>,
+        extra_config: Option<&str>,
     ) -> Result<LlmResponseStream> {
-        use futures::StreamExt;
         use oai::types::ChatCompletionRequestSystemMessageArgs as System;
         use oai::types::ChatCompletionRequestUserMessageArgs as User;
 
@@ -501,8 +559,11 @@ impl LlmSession {
         if config_changed {
             let prompt =
                 crate::system_prompt::system_prompt(config.language, Some(&config.user_prompt));
-            let system_msg =
-                System::default().content(prompt).build().expect("building system prompt").into();
+            let system_msg = System::default()
+                .content(prompt)
+                .build()
+                .expect("building system prompt")
+                .into();
             if self.messages.is_empty() {
                 self.messages = vec![system_msg];
             } else {
@@ -525,11 +586,14 @@ impl LlmSession {
                     text.push_str(user_msg);
                 }
                 oai::types::ChatCompletionRequestUserMessageContent::Array(array) => {
-                    array.push(ChatCompletionRequestUserMessageContentPart::Text(user_msg.into()));
+                    array.push(ChatCompletionRequestUserMessageContentPart::Text(
+                        user_msg.into(),
+                    ));
                 }
             }
         } else {
-            self.messages.push(User::default().content(user_msg).build()?.into());
+            self.messages
+                .push(User::default().content(user_msg).build()?.into());
         }
         tracing::debug!(?self.messages);
 
@@ -562,57 +626,120 @@ impl LlmSession {
             request_builder.tools(tools);
         }
         let request = request_builder.build()?;
-        let mut responses = self.llm.client.chat().create_stream(request).await.context("LLM: failed to create completion stream")?;
+
+        // Serialize request to JSON, set stream=true, merge extra_config
+        let mut body = serde_json::to_value(&request)?;
+        body["stream"] = true.into();
+        if let Some(extra) = extra_config {
+            let extra: Value =
+                serde_json::from_str(extra).context("LLM: failed to parse extra_config JSON")?;
+            if let (Some(body_map), Some(extra_map)) = (body.as_object_mut(), extra.as_object()) {
+                for (k, v) in extra_map {
+                    body_map.insert(k.clone(), v.clone());
+                }
+            }
+        }
+
+        // POST with SSE using reqwest
+        let response = self
+            .llm
+            .reqwest_client
+            .post(&self.llm.completions_url)
+            .bearer_auth(&self.llm.api_key)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .context("LLM: failed to send completion request")?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let err_body = response.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "LLM: POST {} returned {status}: {err_body}",
+                self.llm.completions_url
+            );
+        }
+
         let (tx, rx) = tokio::sync::mpsc::channel::<LlmResponseItem>(8);
         let pending_tool_calls = self.pending_tool_calls.clone();
         let tool_results_pending = self.tool_results_pending.clone();
 
         let jh = crate::utils::spawn_abort_on_drop("llm-loop", async move {
+            use futures::StreamExt;
             // Accumulate tool call chunks by index
             let mut tool_call_accum: HashMap<u32, (String, String, String)> = HashMap::new(); // index -> (id, name, args)
 
-            while let Some(resp) = responses.next().await {
+            // Parse SSE stream line by line
+            let mut byte_stream = response.bytes_stream();
+            let mut line_buf = String::new();
+
+            while let Some(chunk_result) = byte_stream.next().await {
                 if tx.is_closed() {
                     break;
                 }
-                let resp = match resp {
-                    Ok(r) => r,
-                    // The end of stream is reported as a stream error.
-                    Err(OpenAIError::StreamError(err)) => {
-                        tracing::error!(?err, "stream error");
+                let chunk = match chunk_result {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!(?e, "SSE stream read error");
+                        let _ = tx.send(LlmResponseItem::Error(e.to_string())).await;
                         break;
                     }
-                    Err(e) => return Err(e.into()),
                 };
-                // Usually it would be only one choice: choice 0, but let's be robust.
-                for choice in resp.choices {
-                    // Handle text content
-                    if let Some(c) = choice.delta.content {
-                        // Don't trim - we need the spaces to know word boundaries for TTS buffering
-                        if !c.is_empty() {
-                            tx.send(LlmResponseItem::Text(c)).await?;
-                        }
+                let text = String::from_utf8_lossy(&chunk);
+                line_buf.push_str(&text);
+
+                // Process complete lines
+                while let Some(newline_pos) = line_buf.find('\n') {
+                    let line = line_buf[..newline_pos].trim_end_matches('\r').to_string();
+                    line_buf = line_buf[newline_pos + 1..].to_string();
+
+                    if line.is_empty() || line.starts_with(':') {
+                        continue;
+                    }
+                    let data = if let Some(d) = line.strip_prefix("data: ") {
+                        d.trim()
+                    } else {
+                        continue;
+                    };
+                    if data == "[DONE]" {
+                        break;
                     }
 
-                    // Handle tool calls (streamed as chunks)
-                    if let Some(tool_calls) = choice.delta.tool_calls {
-                        for tc_chunk in tool_calls {
-                            let idx = tc_chunk.index;
-                            let entry = tool_call_accum
-                                .entry(idx)
-                                .or_insert_with(|| (String::new(), String::new(), String::new()));
+                    let chunk: StreamChunk = match serde_json::from_str(data) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::warn!(?e, data, "failed to parse SSE chunk");
+                            continue;
+                        }
+                    };
 
-                            // Accumulate id
-                            if let Some(id) = tc_chunk.id {
-                                entry.0.push_str(&id);
+                    for choice in chunk.choices {
+                        // Handle text content
+                        if let Some(c) = choice.delta.content {
+                            if !c.is_empty() {
+                                tx.send(LlmResponseItem::Text(c)).await?;
                             }
-                            // Accumulate function name and args
-                            if let Some(func) = tc_chunk.function {
-                                if let Some(name) = func.name {
-                                    entry.1.push_str(&name);
+                        }
+
+                        // Handle tool calls (streamed as chunks)
+                        if let Some(tool_calls) = choice.delta.tool_calls {
+                            for tc_chunk in tool_calls {
+                                let idx = tc_chunk.index;
+                                let entry = tool_call_accum.entry(idx).or_insert_with(|| {
+                                    (String::new(), String::new(), String::new())
+                                });
+
+                                if let Some(id) = tc_chunk.id {
+                                    entry.0.push_str(&id);
                                 }
-                                if let Some(args) = func.arguments {
-                                    entry.2.push_str(&args);
+                                if let Some(func) = tc_chunk.function {
+                                    if let Some(name) = func.name {
+                                        entry.1.push_str(&name);
+                                    }
+                                    if let Some(args) = func.arguments {
+                                        entry.2.push_str(&args);
+                                    }
                                 }
                             }
                         }
@@ -642,9 +769,15 @@ impl LlmSession {
                 pending_tool_calls.lock().await.push(pending);
 
                 // Send tool call to client
-                let handle =
-                    ToolCallHandle { tx: result_tx, results_pending: tool_results_pending.clone() };
-                let call = ToolCall { call_id, tool_name, args };
+                let handle = ToolCallHandle {
+                    tx: result_tx,
+                    results_pending: tool_results_pending.clone(),
+                };
+                let call = ToolCall {
+                    call_id,
+                    tool_name,
+                    args,
+                };
                 tx.send(LlmResponseItem::ToolCall { call, handle }).await?;
             }
 
@@ -652,4 +785,34 @@ impl LlmSession {
         });
         Ok(LlmResponseStream { rx, _jh: jh })
     }
+}
+
+// Minimal SSE response types for streaming chat completions
+#[derive(serde::Deserialize)]
+struct StreamChunk {
+    choices: Vec<StreamChoice>,
+}
+
+#[derive(serde::Deserialize)]
+struct StreamChoice {
+    delta: StreamDelta,
+}
+
+#[derive(serde::Deserialize)]
+struct StreamDelta {
+    content: Option<String>,
+    tool_calls: Option<Vec<StreamToolCall>>,
+}
+
+#[derive(serde::Deserialize)]
+struct StreamToolCall {
+    index: u32,
+    id: Option<String>,
+    function: Option<StreamFunction>,
+}
+
+#[derive(serde::Deserialize)]
+struct StreamFunction {
+    name: Option<String>,
+    arguments: Option<String>,
 }

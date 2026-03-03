@@ -59,7 +59,11 @@ async fn msg_out_consumer(
                 if let Some(log) = &mut log {
                     use tokio::io::AsyncWriteExt;
                     let wall_time_s = (timens::Time::now() - start_time).to_sec();
-                    let timed_event = TimedEvent { wall_time_s, time_s, event };
+                    let timed_event = TimedEvent {
+                        wall_time_s,
+                        time_s,
+                        event,
+                    };
                     let log_line = serde_json::to_string(&timed_event)? + "\n";
                     log.write_all(log_line.as_bytes()).await?;
                 }
@@ -99,7 +103,11 @@ async fn msg_in_producer(mut ws: WebSocketReceiver, input: SessionInputHandle) -
         };
 
         match msg {
-            Event::Media { stream_sid: _, sequence_number: _, media } => {
+            Event::Media {
+                stream_sid: _,
+                sequence_number: _,
+                media,
+            } => {
                 let audio = B64.decode(&media.payload)?;
                 input.send_audio(audio).await?;
             }
@@ -116,7 +124,11 @@ async fn msg_in_producer(mut ws: WebSocketReceiver, input: SessionInputHandle) -
             Event::Mark { .. } => {
                 tracing::info!("mark received");
             }
-            Event::Start { stream_sid, sequence_number: _, start } => {
+            Event::Start {
+                stream_sid,
+                sequence_number: _,
+                start,
+            } => {
                 tracing::info!(?stream_sid, ?start, "stream started");
             }
         }
@@ -149,8 +161,11 @@ pub async fn realtime(
                         return;
                     }
                 };
-                if let Ok(prot::InboundEvent::Start { stream_sid, sequence_number: _, start: _ }) =
-                    msg
+                if let Ok(prot::InboundEvent::Start {
+                    stream_sid,
+                    sequence_number: _,
+                    start: _,
+                }) = msg
                 {
                     tracing::info!(?stream_sid, "stream started");
                     break stream_sid;
@@ -181,6 +196,7 @@ pub async fn realtime(
             Some(&state.config.gradium_base_url),
             state.config.llm_base_url.as_deref(),
             None, // model auto-detected or from LLM_MODEL env var
+            None, // API key from env vars
             state.config.max_completion_tokens,
             Some(state.session_config.clone()),
             gradbot_lib::IoFormat {
@@ -215,13 +231,17 @@ pub async fn realtime(
 
     tracing::info!("realtime websocket connection");
     let state = state.0;
-    ws.protocols(["realtime"]).on_upgrade(move |v| websocket(v, state))
+    ws.protocols(["realtime"])
+        .on_upgrade(move |v| websocket(v, state))
 }
 
 async fn twiml(
     headers: axum::http::HeaderMap,
 ) -> std::result::Result<impl axum::response::IntoResponse, axum::http::StatusCode> {
-    let host = headers.get("host").and_then(|h| h.to_str().ok()).unwrap_or("example.com");
+    let host = headers
+        .get("host")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("example.com");
     tracing::info!(?host, "generating twiml");
 
     let twiml = format!(
@@ -243,7 +263,10 @@ async fn twiml(
 pub async fn serve(config: Config, twilio_config: TwilioConfig) -> Result<()> {
     use std::str::FromStr;
 
-    let voice_id = twilio_config.voice_id.clone().unwrap_or_else(|| DEFAULT_VOICE_ID.to_string());
+    let voice_id = twilio_config
+        .voice_id
+        .clone()
+        .unwrap_or_else(|| DEFAULT_VOICE_ID.to_string());
     let session_config = gradbot_lib::SessionConfig {
         voice_id: Some(voice_id),
         instructions: Some(twilio_config.system_prompt.clone()),
@@ -256,10 +279,14 @@ pub async fn serve(config: Config, twilio_config: TwilioConfig) -> Result<()> {
         rewrite_rules: None,
         stt_extra_config: None,
         tts_extra_config: None,
+        llm_extra_config: None,
     };
     let config = Arc::new(config);
-    let state =
-        State { config: config.clone(), session_config, cnt: std::sync::atomic::AtomicU64::new(0) };
+    let state = State {
+        config: config.clone(),
+        session_config,
+        cnt: std::sync::atomic::AtomicU64::new(0),
+    };
     let state = std::sync::Arc::new(state);
     let app = axum::Router::new()
         .route("/twiml", axum::routing::post(twiml))

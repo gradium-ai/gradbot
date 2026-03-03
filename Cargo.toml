@@ -2,6 +2,7 @@
 members = [
     "gradbot_lib",
     "pygradbot",
+    "gradbot_server",
 ]
 resolver = "2"
 

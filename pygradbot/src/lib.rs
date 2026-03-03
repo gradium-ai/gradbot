@@ -2,6 +2,8 @@ use pyo3::prelude::*;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+mod remote;
+
 /// Initialize tracing subscriber for logging.
 /// Call this once at startup to enable logging via RUST_LOG.
 #[pyfunction]
@@ -237,7 +239,11 @@ pub struct ToolDef {
 impl ToolDef {
     #[new]
     fn new(name: String, description: String, parameters_json: String) -> Self {
-        Self { name, description, parameters_json }
+        Self {
+            name,
+            description,
+            parameters_json,
+        }
     }
 }
 
@@ -289,12 +295,15 @@ pub struct SessionConfig {
     /// Extra JSON config to merge into the TTS stream's json_config.
     #[pyo3(get, set)]
     pub tts_extra_config: Option<String>,
+    /// Extra JSON config to merge into the LLM chat completion request body.
+    #[pyo3(get, set)]
+    pub llm_extra_config: Option<String>,
 }
 
 #[pymethods]
 impl SessionConfig {
     #[new]
-    #[pyo3(signature = (voice_id=None, instructions=None, language=Lang::En, assistant_speaks_first=true, silence_timeout_s=5.0, tools=vec![], flush_duration_s=0.5, padding_bonus=0.0, rewrite_rules=None, stt_extra_config=None, tts_extra_config=None))]
+    #[pyo3(signature = (voice_id=None, instructions=None, language=Lang::En, assistant_speaks_first=true, silence_timeout_s=5.0, tools=vec![], flush_duration_s=0.5, padding_bonus=0.0, rewrite_rules=None, stt_extra_config=None, tts_extra_config=None, llm_extra_config=None))]
     fn new(
         voice_id: Option<String>,
         instructions: Option<String>,
@@ -307,8 +316,22 @@ impl SessionConfig {
         rewrite_rules: Option<String>,
         stt_extra_config: Option<String>,
         tts_extra_config: Option<String>,
+        llm_extra_config: Option<String>,
     ) -> Self {
-        Self { voice_id, instructions, language, assistant_speaks_first, silence_timeout_s, tools, flush_duration_s, padding_bonus, rewrite_rules, stt_extra_config, tts_extra_config }
+        Self {
+            voice_id,
+            instructions,
+            language,
+            assistant_speaks_first,
+            silence_timeout_s,
+            tools,
+            flush_duration_s,
+            padding_bonus,
+            rewrite_rules,
+            stt_extra_config,
+            tts_extra_config,
+            llm_extra_config,
+        }
     }
 }
 
@@ -327,6 +350,49 @@ impl SessionConfig {
             rewrite_rules: self.rewrite_rules.clone(),
             stt_extra_config: self.stt_extra_config.clone(),
             tts_extra_config: self.tts_extra_config.clone(),
+            llm_extra_config: self.llm_extra_config.clone(),
+        })
+    }
+
+    fn to_wire(&self) -> PyResult<remote::SessionConfigWire> {
+        let lang_str = match self.language {
+            Lang::En => "en",
+            Lang::Fr => "fr",
+            Lang::Es => "es",
+            Lang::De => "de",
+            Lang::Pt => "pt",
+        };
+        let tools: PyResult<Vec<_>> = self
+            .tools
+            .iter()
+            .map(|t| {
+                let params: serde_json::Value =
+                    serde_json::from_str(&t.parameters_json).map_err(|e| {
+                        pyo3::exceptions::PyValueError::new_err(format!(
+                            "Invalid JSON parameters: {}",
+                            e
+                        ))
+                    })?;
+                Ok(remote::ToolDefWire {
+                    name: t.name.clone(),
+                    description: t.description.clone(),
+                    parameters: params,
+                })
+            })
+            .collect();
+        Ok(remote::SessionConfigWire {
+            voice_id: self.voice_id.clone(),
+            instructions: self.instructions.clone(),
+            language: Some(lang_str.to_string()),
+            assistant_speaks_first: Some(self.assistant_speaks_first),
+            silence_timeout_s: Some(self.silence_timeout_s),
+            tools: Some(tools?),
+            flush_duration_s: Some(self.flush_duration_s),
+            padding_bonus: Some(self.padding_bonus),
+            rewrite_rules: self.rewrite_rules.clone(),
+            stt_extra_config: self.stt_extra_config.clone(),
+            tts_extra_config: self.tts_extra_config.clone(),
+            llm_extra_config: self.llm_extra_config.clone(),
         })
     }
 }
@@ -344,18 +410,33 @@ pub struct Event {
 fn event_from_lib(py: Python<'_>, event: gradbot_lib::Event) -> Event {
     use gradbot_lib::Event::*;
     match event {
-        Flushing { started_listening, text_chunks } => {
+        Flushing {
+            started_listening,
+            text_chunks,
+        } => {
             let dict = pyo3::types::PyDict::new(py);
             dict.set_item("started_listening", started_listening).ok();
             dict.set_item("text_chunks", text_chunks).ok();
-            Event { event_type: "flushing".to_string(), data: Some(dict.unbind().into_any()) }
+            Event {
+                event_type: "flushing".to_string(),
+                data: Some(dict.unbind().into_any()),
+            }
         }
-        EndOfTurn => Event { event_type: "end_of_turn".to_string(), data: None },
-        Interrupted => Event { event_type: "interrupted".to_string(), data: None },
+        EndOfTurn => Event {
+            event_type: "end_of_turn".to_string(),
+            data: None,
+        },
+        Interrupted => Event {
+            event_type: "interrupted".to_string(),
+            data: None,
+        },
         PushToLlm { user_text } => {
             let dict = pyo3::types::PyDict::new(py);
             dict.set_item("user_text", user_text).ok();
-            Event { event_type: "push_to_llm".to_string(), data: Some(dict.unbind().into_any()) }
+            Event {
+                event_type: "push_to_llm".to_string(),
+                data: Some(dict.unbind().into_any()),
+            }
         }
         PreviousLlmGen { agent_text } => {
             let dict = pyo3::types::PyDict::new(py);
@@ -365,10 +446,22 @@ fn event_from_lib(py: Python<'_>, event: gradbot_lib::Event) -> Event {
                 data: Some(dict.unbind().into_any()),
             }
         }
-        LlmStarted => Event { event_type: "llm_started".to_string(), data: None },
-        FirstWord => Event { event_type: "first_word".to_string(), data: None },
-        FirstTtsAudio => Event { event_type: "first_tts_audio".to_string(), data: None },
-        EndTtsAudio => Event { event_type: "end_tts_audio".to_string(), data: None },
+        LlmStarted => Event {
+            event_type: "llm_started".to_string(),
+            data: None,
+        },
+        FirstWord => Event {
+            event_type: "first_word".to_string(),
+            data: None,
+        },
+        FirstTtsAudio => Event {
+            event_type: "first_tts_audio".to_string(),
+            data: None,
+        },
+        EndTtsAudio => Event {
+            event_type: "end_tts_audio".to_string(),
+            data: None,
+        },
     }
 }
 
@@ -384,10 +477,22 @@ pub struct ToolCallInfo {
     pub args_json: String,
 }
 
+// ---------------------------------------------------------------------------
+// ToolCallHandle — supports both local and remote modes
+// ---------------------------------------------------------------------------
+
+enum ToolCallHandleInner {
+    Local(gradbot_lib::ToolCallHandle),
+    Remote {
+        call_id: String,
+        ws_tx: tokio::sync::mpsc::Sender<remote::WsOutMsg>,
+    },
+}
+
 /// Handle for sending tool call results back to the LLM.
 #[pyclass]
 pub struct ToolCallHandlePy {
-    inner: Option<gradbot_lib::ToolCallHandle>,
+    inner: Option<ToolCallHandleInner>,
 }
 
 #[pymethods]
@@ -403,9 +508,31 @@ impl ToolCallHandlePy {
             let value: serde_json::Value = serde_json::from_str(&result_json).map_err(|e| {
                 pyo3::exceptions::PyValueError::new_err(format!("Invalid JSON: {}", e))
             })?;
-            handle.send(value).await.map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to send result: {}", e))
-            })?;
+            match handle {
+                ToolCallHandleInner::Local(h) => {
+                    h.send(value).await.map_err(|e| {
+                        pyo3::exceptions::PyRuntimeError::new_err(format!(
+                            "Failed to send result: {}",
+                            e
+                        ))
+                    })?;
+                }
+                ToolCallHandleInner::Remote { call_id, ws_tx } => {
+                    ws_tx
+                        .send(remote::WsOutMsg::ToolResult {
+                            call_id,
+                            result: value,
+                            is_error: false,
+                        })
+                        .await
+                        .map_err(|e| {
+                            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                                "Failed to send result: {}",
+                                e
+                            ))
+                        })?;
+                }
+            }
             Ok(())
         })
     }
@@ -421,9 +548,33 @@ impl ToolCallHandlePy {
             .take()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("handle already used"))?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            handle.send_error(anyhow::anyhow!("{}", error_message)).await.map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to send error: {}", e))
-            })?;
+            match handle {
+                ToolCallHandleInner::Local(h) => {
+                    h.send_error(anyhow::anyhow!("{}", error_message))
+                        .await
+                        .map_err(|e| {
+                            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                                "Failed to send error: {}",
+                                e
+                            ))
+                        })?;
+                }
+                ToolCallHandleInner::Remote { call_id, ws_tx } => {
+                    ws_tx
+                        .send(remote::WsOutMsg::ToolResult {
+                            call_id,
+                            result: serde_json::Value::String(error_message),
+                            is_error: true,
+                        })
+                        .await
+                        .map_err(|e| {
+                            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                                "Failed to send error: {}",
+                                e
+                            ))
+                        })?;
+                }
+            }
             Ok(())
         })
     }
@@ -460,7 +611,13 @@ pub struct MsgOut {
 fn msgout_from_lib(py: Python<'_>, msg: gradbot_lib::MsgOut) -> PyResult<MsgOut> {
     use gradbot_lib::MsgOut::*;
     match msg {
-        Audio { data, start_s, stop_s, turn_idx, interrupted } => Ok(MsgOut {
+        Audio {
+            data,
+            start_s,
+            stop_s,
+            turn_idx,
+            interrupted,
+        } => Ok(MsgOut {
             msg_type: "audio".to_string(),
             data: Some(pyo3::types::PyBytes::new(py, &data).unbind().into_any()),
             text: None,
@@ -473,7 +630,12 @@ fn msgout_from_lib(py: Python<'_>, msg: gradbot_lib::MsgOut) -> PyResult<MsgOut>
             tool_call_handle: None,
             interrupted,
         }),
-        TtsText { text, start_s, stop_s, turn_idx } => Ok(MsgOut {
+        TtsText {
+            text,
+            start_s,
+            stop_s,
+            turn_idx,
+        } => Ok(MsgOut {
             msg_type: "tts_text".to_string(),
             data: None,
             text: Some(text),
@@ -523,7 +685,12 @@ fn msgout_from_lib(py: Python<'_>, msg: gradbot_lib::MsgOut) -> PyResult<MsgOut>
                 args_json: call.args.to_string(),
             };
             let tool_call_py = Py::new(py, tool_call_info)?;
-            let handle_py = Py::new(py, ToolCallHandlePy { inner: Some(handle) })?;
+            let handle_py = Py::new(
+                py,
+                ToolCallHandlePy {
+                    inner: Some(ToolCallHandleInner::Local(handle)),
+                },
+            )?;
             Ok(MsgOut {
                 msg_type: "tool_call".to_string(),
                 data: None,
@@ -541,10 +708,24 @@ fn msgout_from_lib(py: Python<'_>, msg: gradbot_lib::MsgOut) -> PyResult<MsgOut>
     }
 }
 
+// ---------------------------------------------------------------------------
+// Input/Output handles — support both local and remote modes
+// ---------------------------------------------------------------------------
+
+enum InputHandleInner {
+    Local(gradbot_lib::SessionInputHandle),
+    Remote(remote::RemoteInputHandle),
+}
+
+enum OutputHandleInner {
+    Local(gradbot_lib::SessionOutputHandle),
+    Remote(remote::RemoteOutputHandle),
+}
+
 /// Handle for sending input to a voice session.
 #[pyclass]
 pub struct SessionInputHandle {
-    inner: Arc<Mutex<Option<gradbot_lib::SessionInputHandle>>>,
+    inner: Arc<Mutex<Option<InputHandleInner>>>,
 }
 
 #[pymethods]
@@ -557,7 +738,10 @@ impl SessionInputHandle {
             let handle = guard
                 .as_ref()
                 .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("session closed"))?;
-            handle.send_audio(data).await.map_err(to_py_err)?;
+            match handle {
+                InputHandleInner::Local(h) => h.send_audio(data).await.map_err(to_py_err)?,
+                InputHandleInner::Remote(h) => h.send_audio(data).await.map_err(to_py_err)?,
+            }
             Ok(())
         })
     }
@@ -570,12 +754,18 @@ impl SessionInputHandle {
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         let lib_config = config.to_lib()?;
+        let wire_config = config.to_wire()?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let guard = inner.lock().await;
             let handle = guard
                 .as_ref()
                 .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("session closed"))?;
-            handle.send_config(lib_config).await.map_err(to_py_err)?;
+            match handle {
+                InputHandleInner::Local(h) => h.send_config(lib_config).await.map_err(to_py_err)?,
+                InputHandleInner::Remote(h) => {
+                    h.send_config(wire_config).await.map_err(to_py_err)?
+                }
+            }
             Ok(())
         })
     }
@@ -594,7 +784,7 @@ impl SessionInputHandle {
 /// Handle for receiving output from a voice session.
 #[pyclass]
 pub struct SessionOutputHandle {
-    inner: Arc<Mutex<Option<gradbot_lib::SessionOutputHandle>>>,
+    inner: Arc<Mutex<Option<OutputHandleInner>>>,
 }
 
 #[pymethods]
@@ -609,13 +799,22 @@ impl SessionOutputHandle {
             let handle = guard
                 .as_mut()
                 .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("session closed"))?;
-            match handle.receive().await {
-                Ok(Some(msg)) => Python::with_gil(|py| {
-                    let msg_out = msgout_from_lib(py, msg)?;
-                    Ok(Some(msg_out))
-                }),
-                Ok(None) => Ok(None),
-                Err(e) => Err(to_py_err(e)),
+            match handle {
+                OutputHandleInner::Local(h) => match h.receive().await {
+                    Ok(Some(msg)) => Python::with_gil(|py| {
+                        let msg_out = msgout_from_lib(py, msg)?;
+                        Ok(Some(msg_out))
+                    }),
+                    Ok(None) => Ok(None),
+                    Err(e) => Err(to_py_err(e)),
+                },
+                OutputHandleInner::Remote(h) => match h.receive().await {
+                    Some(msg) => Python::with_gil(|py| {
+                        let msg_out = remote::msgout_from_remote(py, msg, h.ws_tx())?;
+                        Ok(Some(msg_out))
+                    }),
+                    None => Ok(None),
+                },
             }
         })
     }
@@ -659,13 +858,14 @@ pub struct GradbotClients {
 
 /// Create new GradbotClients with optional configuration.
 #[pyfunction]
-#[pyo3(signature = (gradium_api_key=None, gradium_base_url=None, llm_base_url=None, llm_model_name=None, max_completion_tokens=None))]
+#[pyo3(signature = (gradium_api_key=None, gradium_base_url=None, llm_base_url=None, llm_model_name=None, llm_api_key=None, max_completion_tokens=None))]
 fn create_clients<'py>(
     py: Python<'py>,
     gradium_api_key: Option<String>,
     gradium_base_url: Option<String>,
     llm_base_url: Option<String>,
     llm_model_name: Option<String>,
+    llm_api_key: Option<String>,
     max_completion_tokens: Option<u32>,
 ) -> PyResult<Bound<'py, PyAny>> {
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -674,11 +874,14 @@ fn create_clients<'py>(
             gradium_base_url.as_deref(),
             llm_base_url.as_deref(),
             llm_model_name.as_deref(),
+            llm_api_key.as_deref(),
             max_completion_tokens,
         )
         .await
         .map_err(to_py_err)?;
-        Ok(GradbotClients { inner: Arc::new(clients) })
+        Ok(GradbotClients {
+            inner: Arc::new(clients),
+        })
     })
 }
 
@@ -713,8 +916,12 @@ impl GradbotClients {
                 .await
                 .map_err(to_py_err)?;
             Ok((
-                SessionInputHandle { inner: Arc::new(Mutex::new(Some(input))) },
-                SessionOutputHandle { inner: Arc::new(Mutex::new(Some(output))) },
+                SessionInputHandle {
+                    inner: Arc::new(Mutex::new(Some(InputHandleInner::Local(input)))),
+                },
+                SessionOutputHandle {
+                    inner: Arc::new(Mutex::new(Some(OutputHandleInner::Local(output)))),
+                },
             ))
         })
     }
@@ -722,23 +929,51 @@ impl GradbotClients {
 
 /// Create clients and start a session in one call.
 ///
+/// When `gradbot_url` is provided, connects to a remote gradbot_server instead of
+/// creating local STT/LLM/TTS clients. The session behaves identically from the
+/// caller's perspective.
+///
 /// # Arguments
 ///
+/// * `gradbot_url` - WebSocket URL of a gradbot_server (e.g. "wss://server.com/ws"). Enables remote mode.
+/// * `gradbot_api_key` - API key sent as Bearer token to gradbot_server (used for STT/TTS billing).
 /// * `input_format` - Audio format for incoming audio (default: PCM at 24kHz)
 /// * `output_format` - Audio format for outgoing audio (default: OggOpus)
 #[pyfunction]
-#[pyo3(signature = (gradium_api_key=None, gradium_base_url=None, llm_base_url=None, llm_model_name=None, max_completion_tokens=None, session_config=None, input_format=AudioFormat::Pcm, output_format=AudioFormat::OggOpus))]
+#[pyo3(signature = (gradium_api_key=None, gradium_base_url=None, llm_base_url=None, llm_model_name=None, llm_api_key=None, max_completion_tokens=None, session_config=None, input_format=AudioFormat::Pcm, output_format=AudioFormat::OggOpus, gradbot_url=None, gradbot_api_key=None))]
 fn run<'py>(
     py: Python<'py>,
     gradium_api_key: Option<String>,
     gradium_base_url: Option<String>,
     llm_base_url: Option<String>,
     llm_model_name: Option<String>,
+    llm_api_key: Option<String>,
     max_completion_tokens: Option<u32>,
     session_config: Option<SessionConfig>,
     input_format: AudioFormat,
     output_format: AudioFormat,
+    gradbot_url: Option<String>,
+    gradbot_api_key: Option<String>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    // Remote mode
+    if let Some(url) = gradbot_url {
+        let wire_config = session_config.as_ref().map(|c| c.to_wire()).transpose()?;
+        return pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let (remote_input, remote_output) = remote::connect(url, gradbot_api_key, wire_config)
+                .await
+                .map_err(to_py_err)?;
+            Ok((
+                SessionInputHandle {
+                    inner: Arc::new(Mutex::new(Some(InputHandleInner::Remote(remote_input)))),
+                },
+                SessionOutputHandle {
+                    inner: Arc::new(Mutex::new(Some(OutputHandleInner::Remote(remote_output)))),
+                },
+            ))
+        });
+    }
+
+    // Local mode (original behavior)
     let lib_config = session_config.map(|c| c.to_lib()).transpose()?;
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         let (input, output) = gradbot_lib::run(
@@ -746,6 +981,7 @@ fn run<'py>(
             gradium_base_url.as_deref(),
             llm_base_url.as_deref(),
             llm_model_name.as_deref(),
+            llm_api_key.as_deref(),
             max_completion_tokens,
             lib_config,
             gradbot_lib::IoFormat {
@@ -756,8 +992,12 @@ fn run<'py>(
         .await
         .map_err(to_py_err)?;
         Ok((
-            SessionInputHandle { inner: Arc::new(Mutex::new(Some(input))) },
-            SessionOutputHandle { inner: Arc::new(Mutex::new(Some(output))) },
+            SessionInputHandle {
+                inner: Arc::new(Mutex::new(Some(InputHandleInner::Local(input)))),
+            },
+            SessionOutputHandle {
+                inner: Arc::new(Mutex::new(Some(OutputHandleInner::Local(output)))),
+            },
         ))
     })
 }

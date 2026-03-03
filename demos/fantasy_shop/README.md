@@ -40,7 +40,7 @@ uv sync
 
 ```bash
 export GRADIUM_API_KEY=your_key_here
-export OPENAI_API_KEY=your_llm_key
+export LLM_API_KEY=your_llm_key
 export LLM_BASE_URL=your_llm_endpoint
 
 uv run uvicorn main:app --reload

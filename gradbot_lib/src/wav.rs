@@ -107,13 +107,22 @@ impl FmtChunk {
         let sample_rate = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
         let bits_per_sample = u16::from_le_bytes([data[22], data[23]]);
 
-        let fmt = Self { audio_format, channels, sample_rate, bits_per_sample };
+        let fmt = Self {
+            audio_format,
+            channels,
+            sample_rate,
+            bits_per_sample,
+        };
         Ok(Parsed::Complete(fmt, &data[24..]))
     }
 }
 
 fn extend_from_vec<T: Clone>(v: &mut Vec<T>, other: Vec<T>) {
-    if v.is_empty() { *v = other } else { v.extend_from_slice(&other) }
+    if v.is_empty() {
+        *v = other
+    } else {
+        v.extend_from_slice(&other)
+    }
 }
 
 /// A resampler that handles buffering internally.
@@ -144,7 +153,11 @@ impl BufResampler {
             )?;
             Some(Box::new(resampler))
         };
-        Ok(Self { resampler, input_buffer: vec![], buffer_samples_by })
+        Ok(Self {
+            resampler,
+            input_buffer: vec![],
+            buffer_samples_by,
+        })
     }
 
     fn push(&mut self, sample: f32) {
@@ -185,7 +198,11 @@ impl BufResampler {
 enum DecoderState {
     WaitingForMasterChunk,
     ReadingChunks,
-    ReadingData { fmt: FmtChunk, resampler: BufResampler, remaining_data: usize },
+    ReadingData {
+        fmt: FmtChunk,
+        resampler: BufResampler,
+        remaining_data: usize,
+    },
 }
 
 pub struct Decoder {
@@ -268,7 +285,11 @@ impl Decoder {
                         self.buffer = b[8 + chunk_size..].to_vec();
                     }
                 }
-                DecoderState::ReadingData { fmt, resampler, remaining_data } => {
+                DecoderState::ReadingData {
+                    fmt,
+                    resampler,
+                    remaining_data,
+                } => {
                     if *remaining_data == 0 {
                         self.state = DecoderState::ReadingChunks;
                         continue;
@@ -295,7 +316,11 @@ impl Decoder {
                                         b[sample_start],
                                         b[sample_start + 1],
                                         b[sample_start + 2],
-                                        if (b[sample_start + 2] & 0x80) != 0 { 0xff } else { 0x00 },
+                                        if (b[sample_start + 2] & 0x80) != 0 {
+                                            0xff
+                                        } else {
+                                            0x00
+                                        },
                                     ]);
                                     raw as f32 / 8388608.0
                                 }

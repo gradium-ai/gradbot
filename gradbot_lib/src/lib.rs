@@ -16,7 +16,7 @@
 //! use gradbot_lib::{GradbotClients, MsgOut, SessionConfig};
 //!
 //! // 1. Create clients (uses environment variables for API keys)
-//! let clients = GradbotClients::new(None, None, None, None, None).await?;
+//! let clients = GradbotClients::new(None, None, None, None, None, None).await?;
 //!
 //! // 2. Start a session
 //! let (input, mut output) = clients.start_session(Some(config), Format::OggOpus).await?;
@@ -42,7 +42,7 @@
 //!
 //! - `GRADIUM_API_KEY` - API key for Gradium STT/TTS services
 //! - `GRADIUM_BASE_URL` - Base URL for Gradium services (optional, defaults to `https://api.gradium.ai`)
-//! - `OPENAI_API_KEY` - API key for OpenAI-compatible LLM API
+//! - `LLM_API_KEY` - API key for OpenAI-compatible LLM API (falls back to `OPENAI_API_KEY`)
 //! - `LLM_BASE_URL` - Base URL for LLM API (optional, defaults to OpenAI's API)
 //! - `LLM_MODEL` - LLM model name (optional, auto-detected if single model available)
 //!
@@ -322,7 +322,11 @@ static FLAGSHIP_VOICE_LOOKUP: std::sync::OnceLock<std::collections::HashMap<Stri
 
 fn get_flagship_voice_lookup() -> &'static std::collections::HashMap<String, usize> {
     FLAGSHIP_VOICE_LOOKUP.get_or_init(|| {
-        FLAGSHIP_VOICES.iter().enumerate().map(|(i, v)| (v.name.to_lowercase(), i)).collect()
+        FLAGSHIP_VOICES
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (v.name.to_lowercase(), i))
+            .collect()
     })
 }
 
@@ -361,7 +365,7 @@ pub fn flagship_voice(name: &str) -> Result<FlagshipVoice> {
 ///
 /// ```ignore
 /// // Create clients with defaults (reads API keys from environment)
-/// let clients = GradbotClients::new(None, None, None, None, None).await?;
+/// let clients = GradbotClients::new(None, None, None, None, None, None).await?;
 ///
 /// // Start a session
 /// let io = IoFormat { input: decoder::Format::OggOpus, output: encoder::Format::OggOpus };
@@ -384,6 +388,7 @@ pub struct GradbotClients {
 /// * `gradium_base_url` - Base URL for Gradium services. Falls back to `GRADIUM_BASE_URL` env var, then `https://api.gradium.ai`.
 /// * `llm_base_url` - Base URL for OpenAI-compatible LLM API. Falls back to `LLM_BASE_URL` env var, then OpenAI's API.
 /// * `llm_model_name` - LLM model name. Resolution order: this parameter > `LLM_MODEL` env var > auto-detect.
+/// * `llm_api_key` - API key for LLM API. Resolution: this parameter > `LLM_API_KEY` env var > `OPENAI_API_KEY` env var.
 /// * `max_completion_tokens` - Maximum tokens for LLM responses. Defaults to 4096.
 /// * `session_config` - Initial session configuration.
 /// * `io_format` - Audio format pair for input decoding and output encoding.
@@ -392,7 +397,7 @@ pub struct GradbotClients {
 ///
 /// ```ignore
 /// let (input, mut output) = gradbot_lib::run(
-///     None, None, None, None, None,
+///     None, None, None, None, None, None,
 ///     Some(config),
 ///     IoFormat { input: decoder::Format::pcm(24000), output: encoder::Format::OggOpus },
 /// ).await?;
@@ -402,6 +407,7 @@ pub async fn run(
     gradium_base_url: Option<&str>,
     llm_base_url: Option<&str>,
     llm_model_name: Option<&str>,
+    llm_api_key: Option<&str>,
     max_completion_tokens: Option<u32>,
     session_config: Option<SessionConfig>,
     io_format: IoFormat,
@@ -411,6 +417,7 @@ pub async fn run(
         gradium_base_url,
         llm_base_url,
         llm_model_name,
+        llm_api_key,
         max_completion_tokens,
     )
     .await?;
@@ -426,34 +433,57 @@ impl GradbotClients {
     /// * `gradium_base_url` - Base URL for Gradium services. Falls back to `GRADIUM_BASE_URL` env var, then `https://api.gradium.ai`.
     /// * `llm_base_url` - Base URL for OpenAI-compatible LLM API. Falls back to `LLM_BASE_URL` env var, then OpenAI's API.
     /// * `llm_model_name` - LLM model name. Resolution order: this parameter > `LLM_MODEL` env var > auto-detect (uses single available model).
+    /// * `llm_api_key` - API key for LLM API. Resolution: this parameter > `LLM_API_KEY` env var > `OPENAI_API_KEY` env var.
     /// * `max_completion_tokens` - Maximum tokens for LLM responses. Defaults to 4096.
     pub async fn new(
         gradium_api_key: Option<&str>,
         gradium_base_url: Option<&str>,
         llm_base_url: Option<&str>,
         llm_model_name: Option<&str>,
+        llm_api_key: Option<&str>,
         max_completion_tokens: Option<u32>,
     ) -> Result<Self> {
         let gradium_base_url = gradium_base_url
             .map(|s| s.to_string())
             .or_else(|| std::env::var("GRADIUM_BASE_URL").ok())
             .unwrap_or_else(|| DEFAULT_GRADIUM_BASE_URL.to_string());
-        let llm_base_url =
-            llm_base_url.map(|s| s.to_string()).or_else(|| std::env::var("LLM_BASE_URL").ok());
+        let llm_base_url = llm_base_url.map(|s| s.to_string());
         let max_completion_tokens = max_completion_tokens.unwrap_or(4096);
 
-        tracing::info!(gradium_base_url, llm_base_url = llm_base_url.as_deref().unwrap_or("(default)"), "creating clients");
-
-        let tts_client = Arc::new(TtsClient::new(gradium_api_key, &gradium_base_url).context(format!("TTS: failed to create client (base_url={gradium_base_url})"))?);
-        let stt_client = Arc::new(SttClient::new(gradium_api_key, &gradium_base_url).context(format!("STT: failed to create client (base_url={gradium_base_url})"))?);
-        let llm_base_url_display = llm_base_url.as_deref().unwrap_or("https://api.openai.com/v1").to_string();
-        let llm = Arc::new(
-            Llm::new(llm_base_url, max_completion_tokens, llm_model_name.map(|s| s.to_string()))
-                .await
-                .context(format!("LLM: failed to create client (base_url={llm_base_url_display})"))?,
+        tracing::info!(
+            gradium_base_url,
+            llm_base_url = llm_base_url.as_deref().unwrap_or("(default)"),
+            "creating clients"
         );
 
-        Ok(Self { tts_client, stt_client, llm })
+        let tts_client = Arc::new(TtsClient::new(gradium_api_key, &gradium_base_url).context(
+            format!("TTS: failed to create client (base_url={gradium_base_url})"),
+        )?);
+        let stt_client = Arc::new(SttClient::new(gradium_api_key, &gradium_base_url).context(
+            format!("STT: failed to create client (base_url={gradium_base_url})"),
+        )?);
+        let llm_base_url_display = llm_base_url
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1")
+            .to_string();
+        let llm = Arc::new(
+            Llm::new(
+                llm_base_url,
+                max_completion_tokens,
+                llm_model_name.map(|s| s.to_string()),
+                llm_api_key.map(|s| s.to_string()),
+            )
+            .await
+            .context(format!(
+                "LLM: failed to create client (base_url={llm_base_url_display})"
+            ))?,
+        );
+
+        Ok(Self {
+            tts_client,
+            stt_client,
+            llm,
+        })
     }
 
     /// Start a new voice AI session.

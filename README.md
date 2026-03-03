@@ -8,6 +8,7 @@ A Rust-based voice AI framework for building real-time conversational agents wit
 gradbot/
 ├── gradbot_lib/         # Core library (STT/LLM/TTS multiplexing)
 ├── pygradbot/           # Python bindings (PyO3 + maturin)
+├── gradbot_server/      # Standalone WebSocket server (remote mode)
 ├── src/                 # Server binary (OpenAI & Twilio WebSocket protocols)
 ├── js_audio_processor/  # Browser audio worklet (Opus encode/decode, jitter buffer)
 ├── demos/               # Example applications (see below)
@@ -29,7 +30,7 @@ Set your API keys:
 export GRADIUM_API_KEY=your_gradium_key
 
 # Point to a fast LLM that supports tool calls (e.g., GPT-4o-mini, Claude, Groq)
-export OPENAI_API_KEY=your_llm_key
+export LLM_API_KEY=your_llm_key
 export LLM_BASE_URL=...  # any OpenAI-compatible endpoint (LM Studio, Ollama, etc.)
 ```
 
@@ -164,4 +165,59 @@ The multiplexer handles interruptions (user speaks while AI is talking), turn tr
 - OpenAI Realtime API compatible (`ws-openai`)
 - Twilio Media Streams (`twilio`)
 
+**gradbot_server** is a standalone WebSocket server for hosted deployment. It runs the STT/LLM/TTS coordination loop remotely while Python clients connect over WS to stream audio and handle tool calls. See [Remote Mode](#remote-mode) below.
+
 **Browser audio** (`js_audio_processor/`) provides an AudioWorklet-based pipeline with Opus encoding/decoding, jitter buffering, and synchronized text display.
+
+## Remote Mode
+
+For hosted deployment, `gradbot_server` runs the coordination loop on a server with its own LLM credentials, while clients connect over WebSocket. This lets you host the server centrally and only distribute a `GRADIUM_API_KEY` to clients for STT/TTS billing.
+
+### Running the server
+
+```bash
+cargo run -p gradbot_server -- --config server.toml
+```
+
+Example `server.toml`:
+
+```toml
+addr = "0.0.0.0"
+port = 8080
+gradium_base_url = "https://api.gradium.ai/api"
+
+llm_base_url = "https://api.openai.com/v1"
+llm_api_key = "$LLM_API_KEY"
+llm_model_name = "gpt-4o"
+
+[pinned]
+# Fields here override any client-provided values (e.g., lock down LLM config)
+# llm_extra_config = '{"reasoning": {"effort": "none"}}'
+```
+
+### Connecting from Python
+
+Demos automatically use remote mode when `gradbot_server` is configured in `config.yaml`:
+
+```yaml
+gradbot_server:
+  url: "wss://your-server.com/ws"
+  api_key: "grd_..."
+```
+
+No code changes needed — `pygradbot.run()` transparently proxies over the WebSocket. You can also connect explicitly:
+
+```python
+input_handle, output_handle = await pygradbot.run(
+    gradbot_url="wss://your-server.com/ws",
+    gradbot_api_key="grd_...",
+    session_config=config,
+    input_format=pygradbot.AudioFormat.OggOpus,
+    output_format=pygradbot.AudioFormat.OggOpus,
+)
+# Same handles, same API — tool calls, events, everything works identically
+```
+
+### Config pinning
+
+The server can pin config fields (e.g., LLM credentials) so clients can't override them. On connection, the server reports which fields were pinned (field names only, never values).

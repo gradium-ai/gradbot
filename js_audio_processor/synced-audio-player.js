@@ -39,6 +39,7 @@ class SyncedAudioPlayer {
     this._endOfTurnTimeout = null;
     this._started = false;
     this._messageBuffer = []; // Buffer messages received before start()
+    this._processingChain = Promise.resolve(); // Serializes async message processing
 
     // Timing state
     // lastStopS = timestamp at END of buffer (latest audio that arrived)
@@ -92,10 +93,17 @@ class SyncedAudioPlayer {
     if (this._messageBuffer.length > 0) {
       console.log('[SyncedAudio] Replaying', this._messageBuffer.length, 'buffered messages');
       for (const data of this._messageBuffer) {
-        this._processMessage(data);
+        await this._processMessage(data);
       }
       this._messageBuffer = [];
     }
+  }
+
+  /**
+   * Wait for all queued messages to finish processing.
+   */
+  drain() {
+    return this._processingChain;
   }
 
   stop() {
@@ -110,6 +118,7 @@ class SyncedAudioPlayer {
     this._reset();
     this._started = false;
     this._messageBuffer = [];
+    this._processingChain = Promise.resolve();
   }
 
   _reset() {
@@ -198,13 +207,17 @@ class SyncedAudioPlayer {
    * Call this from ws.onmessage.
    * Can be called before start() - messages will be buffered and replayed.
    */
-  async handleMessage(data) {
+  handleMessage(data) {
     if (!this._started) {
       // Buffer messages until start() completes
       this._messageBuffer.push(data);
       return;
     }
-    await this._processMessage(data);
+    // Chain onto previous processing to ensure messages are handled sequentially.
+    // Without this, concurrent Blob.arrayBuffer() awaits cause audio_timing/blob pairs
+    // to interleave, corrupting pendingAudioStopS/pendingAudioTurnIdx and triggering
+    // a cascade of decoder recreations that freezes the browser.
+    this._processingChain = this._processingChain.then(() => this._processMessage(data));
   }
 
   /** @private Process a message (after start) */

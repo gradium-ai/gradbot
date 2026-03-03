@@ -33,14 +33,16 @@ import feedparser
 pygradbot.init_logging()
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
+DEBUG = os.environ.get("DEBUG") == "1"
 FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from demo_config import load_config, session_config_overrides, merge_overrides
+from demo_config import load_config, session_config_overrides, merge_overrides, client_config
 
 _YAML_CFG = load_config(Path(__file__).parent)
 _OVERRIDES = session_config_overrides(_YAML_CFG)
+_CLIENT_CONFIG = client_config(_YAML_CFG)
 
 # WMO weather codes to human-readable descriptions
 WMO_CODES = {
@@ -433,6 +435,7 @@ async def websocket_chat(websocket: WebSocket):
 
         # Start session
         input_handle, output_handle = await pygradbot.run(
+            **_CLIENT_CONFIG,
             session_config=config,
             input_format=pygradbot.AudioFormat.OggOpus,
             output_format=pygradbot.AudioFormat.Pcm
@@ -584,7 +587,7 @@ async def websocket_chat(websocket: WebSocket):
                     print(f"Output processing error: {e}")
                     try:
                         await websocket.send_json(
-                            {"type": "error", "message": str(e)}
+                            {"type": "error", "message": str(e) if DEBUG else "An error occurred during the session"}
                         )
                     except:
                         pass
@@ -625,6 +628,12 @@ async def websocket_chat(websocket: WebSocket):
         import traceback
 
         traceback.print_exc()
+        try:
+            await websocket.send_json(
+                {"type": "error", "message": str(e) if DEBUG else "An error occurred while starting the session"}
+            )
+        except:
+            pass
     finally:
         try:
             await websocket.close()

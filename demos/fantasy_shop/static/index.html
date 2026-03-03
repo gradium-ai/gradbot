@@ -256,6 +256,10 @@
             color: #4ade80;
         }
 
+        .status.error {
+            color: #f44336;
+        }
+
         /* Overlays */
         .overlay {
             position: fixed;
@@ -805,8 +809,9 @@
                         handleMessage(msg);
                     },
                     onError: (error) => {
-                        console.error('Player error:', error);
                         status.textContent = 'Error: ' + error.message;
+                        status.className = 'status error';
+                        stopGame();
                     },
                     onEndOfTurn: (turnIdx) => {
                         console.log('End of turn:', turnIdx, 'pendingEndState:', pendingEndState, 'endGameTurnIdx:', endGameTurnIdx);
@@ -851,28 +856,30 @@
                     player.handleMessage(event.data);
                 };
 
-                ws.onclose = () => {
+                ws.onclose = async () => {
+                    // Drain any queued messages (e.g. error sent just before close)
+                    if (player) await player.drain();
                     // If game ended, don't stop yet - let onEndOfTurn handle showing the end screen
                     if (pendingEndState) {
                         status.textContent = 'Finishing narration...';
                         // Don't call stopGame() - let buffer drain first
                         // Set ws to null so stopGame() doesn't try to close it again
                         ws = null;
-                    } else {
+                    } else if (!status.textContent.startsWith('Error')) {
                         status.textContent = 'Disconnected';
                         status.className = 'status';
                         stopGame();
                     }
                 };
 
-                ws.onerror = (e) => {
-                    console.error('WebSocket error:', e);
+                ws.onerror = () => {
                     status.textContent = 'Connection error';
+                    status.className = 'status error';
                 };
 
             } catch (e) {
-                console.error('Failed to start:', e);
                 status.textContent = 'Failed to connect';
+                status.className = 'status error';
             }
         }
 

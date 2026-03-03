@@ -6,6 +6,18 @@ Values from the YAML are merged into SessionConfig kwargs.
 
 Example config.yaml:
 
+    llm:
+      model: "mistralai/mistral-small-3.1-24b-instruct"
+      base_url: "https://openrouter.ai/api/v1"
+      api_key: "sk-or-..."
+      extra_config:
+        reasoning:
+          effort: "none"
+
+    gradium:
+      api_key: "your-gradium-key"
+      base_url: "https://api.gradium.ai/api"
+
     tts:
       padding_bonus: 1.5
       rewrite_rules: "en"
@@ -23,6 +35,7 @@ Example config.yaml:
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +53,49 @@ def load_config(demo_dir: str | Path) -> dict[str, Any]:
     return config
 
 
+def client_config(config: dict[str, Any]) -> dict[str, Any]:
+    """
+    Extract client-level config (LLM and Gradium) from YAML config.
+
+    Returns a dict with keys suitable for pygradbot.run() or pygradbot.create_clients():
+        llm_model_name, llm_base_url, llm_api_key, gradium_api_key, gradium_base_url
+
+    Only includes keys that are actually set in the YAML.
+
+    Usage:
+        _CLIENT_CONFIG = client_config(config)
+        await pygradbot.run(**_CLIENT_CONFIG, session_config=config, ...)
+    """
+    result: dict[str, Any] = {}
+
+    llm = config.get("llm", {})
+    gradium = config.get("gradium", {})
+
+    if "model" in llm:
+        result["llm_model_name"] = llm["model"]
+    if "base_url" in llm:
+        result["llm_base_url"] = llm["base_url"]
+    if "api_key" in llm:
+        result["llm_api_key"] = llm["api_key"]
+
+    if "api_key" in gradium:
+        result["gradium_api_key"] = gradium["api_key"]
+    if "base_url" in gradium:
+        result["gradium_base_url"] = gradium["base_url"]
+
+    gradbot_server = config.get("gradbot_server", {})
+    if "url" in gradbot_server:
+        result["gradbot_url"] = gradbot_server["url"]
+    elif env_url := os.environ.get("GRADBOT_URL"):
+        result["gradbot_url"] = env_url
+    if "api_key" in gradbot_server:
+        result["gradbot_api_key"] = gradbot_server["api_key"]
+    elif env_key := os.environ.get("GRADBOT_API_KEY"):
+        result["gradbot_api_key"] = env_key
+
+    return result
+
+
 def session_config_overrides(config: dict[str, Any]) -> dict[str, Any]:
     """
     Convert YAML config into kwargs suitable for pygradbot.SessionConfig().
@@ -53,9 +109,14 @@ def session_config_overrides(config: dict[str, Any]) -> dict[str, Any]:
 
     overrides: dict[str, Any] = {}
 
+    llm = config.get("llm", {})
     tts = config.get("tts", {})
     stt = config.get("stt", {})
     session = config.get("session", {})
+
+    # LLM settings
+    if "extra_config" in llm:
+        overrides["llm_extra_config"] = json.dumps(llm["extra_config"])
 
     # TTS settings
     if "padding_bonus" in tts:

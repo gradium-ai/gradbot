@@ -23,14 +23,16 @@ import pygradbot
 pygradbot.init_logging()
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
+DEBUG = os.environ.get("DEBUG") == "1"
 FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from demo_config import load_config, session_config_overrides, merge_overrides
+from demo_config import load_config, session_config_overrides, merge_overrides, client_config
 
 _YAML_CFG = load_config(Path(__file__).parent)
 _OVERRIDES = session_config_overrides(_YAML_CFG)
+_CLIENT_CONFIG = client_config(_YAML_CFG)
 
 
 @dataclass
@@ -119,8 +121,9 @@ YOUR PERSONALITY:
 
 SPEAKING STYLE:
 - Keep responses to 2-3 sentences maximum
-- NEVER use action annotations like *sighs* or *dramatic pause* - just speak naturally
-- Let your voice convey emotion, don't describe your actions
+- CRITICAL: Your text is spoken aloud by text-to-speech. There is NO visual rendering.
+  If you write *grunts* or *leans forward*, the TTS will literally say "grunts" or "leans forward" out loud, which sounds broken and ruins immersion.
+  Never use asterisks, parenthetical actions, or stage directions. Express everything through your words and phrasing alone.
 
 IMPORTANT RULES:
 1. If the customer offers a fair price (140+ gold), accept it enthusiastically
@@ -172,9 +175,10 @@ YOUR PERSONALITY:
 
 SPEAKING STYLE:
 - Keep responses to 2-3 sentences maximum
-- NEVER use action annotations like *sighs* or *smiles warmly* - just speak naturally
-- Let your voice convey emotion, don't describe your actions
 - Always speak in first person ("I", "me", "my") - NEVER refer to yourself in third person
+- CRITICAL: Your text is spoken aloud by text-to-speech. There is NO visual rendering.
+  If you write *smiles warmly* or *sighs*, the TTS will literally say "smiles warmly" or "sighs" out loud, which sounds broken and ruins immersion.
+  Never use asterisks, parenthetical actions, or stage directions. Express everything through your words and phrasing alone.
 
 IMPORTANT RULES:
 1. You can offer a 25 gold discount using apply_discount, BUT ONLY if the customer convinces you the sword is to DEFEND THE VILLAGE or FIGHT A DRAGON
@@ -423,6 +427,7 @@ async def websocket_game(websocket: WebSocket):
         )
 
         input_handle, output_handle = await pygradbot.run(
+            **_CLIENT_CONFIG,
             session_config=config,
             input_format=pygradbot.AudioFormat.OggOpus,
             output_format=pygradbot.AudioFormat.Pcm if USE_PCM else pygradbot.AudioFormat.OggOpus,
@@ -730,6 +735,13 @@ async def websocket_game(websocket: WebSocket):
                     print(f"Output processing error: {e}")
                     import traceback
                     traceback.print_exc()
+                    try:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e) if DEBUG else "An error occurred during the session",
+                        })
+                    except:
+                        pass
                     break
 
         async def receive_audio():
@@ -765,6 +777,13 @@ async def websocket_game(websocket: WebSocket):
         print(f"WebSocket error: {e}")
         import traceback
         traceback.print_exc()
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": str(e) if DEBUG else "An error occurred while starting the session",
+            })
+        except:
+            pass
     finally:
         try:
             await websocket.close()

@@ -46,7 +46,9 @@ impl MockSttClient {
     ///
     /// The client will output each text in order when `end_of_turn` is triggered.
     pub fn new(texts: Vec<String>) -> Self {
-        Self { texts: Arc::new(Mutex::new(texts)) }
+        Self {
+            texts: Arc::new(Mutex::new(texts)),
+        }
     }
 
     pub async fn stt_stream(&self) -> Result<(MockSttStreamSender, MockSttStreamReceiver)> {
@@ -117,7 +119,11 @@ impl MockSttStreamReceiver {
                         self.text_index += 1;
                     }
 
-                    return Ok(Some(Msg::Step { end_of_turn: true, current_s, inactivity_prob: 0.0 }));
+                    return Ok(Some(Msg::Step {
+                        end_of_turn: true,
+                        current_s,
+                        inactivity_prob: 0.0,
+                    }));
                 }
 
                 // Reset end_of_turn flag when we get non-silence
@@ -125,7 +131,11 @@ impl MockSttStreamReceiver {
                     self.end_of_turn_triggered = false;
                 }
 
-                Ok(Some(Msg::Step { end_of_turn: false, current_s, inactivity_prob: 0.0 }))
+                Ok(Some(Msg::Step {
+                    end_of_turn: false,
+                    current_s,
+                    inactivity_prob: 0.0,
+                }))
             }
             None => Ok(None),
         }
@@ -141,7 +151,9 @@ impl MockLlm {
     }
 
     pub fn session(&self) -> Result<MockLlmSession> {
-        Ok(MockLlmSession { transmitted: Arc::new(Mutex::new(vec![])) })
+        Ok(MockLlmSession {
+            transmitted: Arc::new(Mutex::new(vec![])),
+        })
     }
 }
 
@@ -163,7 +175,11 @@ impl MockLlmSession {
     pub async fn incorporate_previous_generation(&mut self) -> Result<Option<String>> {
         let mut transmitted = self.transmitted.lock().await;
         let v: Vec<String> = std::mem::take(&mut *transmitted);
-        if v.is_empty() { Ok(None) } else { Ok(Some(v.join(" "))) }
+        if v.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(v.join(" ")))
+        }
     }
 
     pub async fn push(
@@ -172,8 +188,10 @@ impl MockLlmSession {
         _config: Arc<crate::llm::LlmConfig>,
     ) -> Result<MockLlmResponseStream> {
         // Repeat each word twice
-        let words: Vec<String> =
-            user_msg.split_whitespace().flat_map(|w| vec![w.to_string(), w.to_string()]).collect();
+        let words: Vec<String> = user_msg
+            .split_whitespace()
+            .flat_map(|w| vec![w.to_string(), w.to_string()])
+            .collect();
 
         let (tx, rx) = tokio::sync::mpsc::channel(8);
 
@@ -223,7 +241,12 @@ impl MockTtsClient {
 
         Ok((
             MockTtsStreamSender { tx: text_tx },
-            MockTtsStreamReceiver { text_rx, sample_rate, current_time_s: 0.0, pending: vec![] },
+            MockTtsStreamReceiver {
+                text_rx,
+                sample_rate,
+                current_time_s: 0.0,
+                pending: vec![],
+            },
         ))
     }
 }
@@ -256,8 +279,16 @@ impl MockTtsStreamSender {
 }
 
 enum PendingTtsOut {
-    Audio { pcm: Vec<f32>, start_s: f64, stop_s: f64 },
-    Text { text: String, start_s: f64, stop_s: f64 },
+    Audio {
+        pcm: Vec<f32>,
+        start_s: f64,
+        stop_s: f64,
+    },
+    Text {
+        text: String,
+        start_s: f64,
+        stop_s: f64,
+    },
 }
 
 pub struct MockTtsStreamReceiver {
@@ -277,12 +308,27 @@ impl MockTtsStreamReceiver {
         // Process any pending outputs first
         if let Some(out) = self.pending.pop() {
             return Ok(Some(match out {
-                PendingTtsOut::Audio { pcm, start_s, stop_s } => {
-                    TtsOut::Audio { pcm, start_s, stop_s, turn_idx, interrupted: false }
-                }
-                PendingTtsOut::Text { text, start_s, stop_s } => {
-                    TtsOut::Text { text, start_s, stop_s, turn_idx }
-                }
+                PendingTtsOut::Audio {
+                    pcm,
+                    start_s,
+                    stop_s,
+                } => TtsOut::Audio {
+                    pcm,
+                    start_s,
+                    stop_s,
+                    turn_idx,
+                    interrupted: false,
+                },
+                PendingTtsOut::Text {
+                    text,
+                    start_s,
+                    stop_s,
+                } => TtsOut::Text {
+                    text,
+                    start_s,
+                    stop_s,
+                    turn_idx,
+                },
             }));
         }
 
@@ -311,8 +357,16 @@ impl MockTtsStreamReceiver {
                         let pcm = vec![0.0f32; samples];
 
                         // Audio comes first, then text
-                        items.push(PendingTtsOut::Audio { pcm, start_s, stop_s });
-                        items.push(PendingTtsOut::Text { text: word, start_s, stop_s });
+                        items.push(PendingTtsOut::Audio {
+                            pcm,
+                            start_s,
+                            stop_s,
+                        });
+                        items.push(PendingTtsOut::Text {
+                            text: word,
+                            start_s,
+                            stop_s,
+                        });
                     }
                     self.current_time_s = time_s;
 
@@ -323,12 +377,27 @@ impl MockTtsStreamReceiver {
                     // Return the first item
                     if let Some(out) = self.pending.pop() {
                         return Ok(Some(match out {
-                            PendingTtsOut::Audio { pcm, start_s, stop_s } => {
-                                TtsOut::Audio { pcm, start_s, stop_s, turn_idx, interrupted: false }
-                            }
-                            PendingTtsOut::Text { text, start_s, stop_s } => {
-                                TtsOut::Text { text, start_s, stop_s, turn_idx }
-                            }
+                            PendingTtsOut::Audio {
+                                pcm,
+                                start_s,
+                                stop_s,
+                            } => TtsOut::Audio {
+                                pcm,
+                                start_s,
+                                stop_s,
+                                turn_idx,
+                                interrupted: false,
+                            },
+                            PendingTtsOut::Text {
+                                text,
+                                start_s,
+                                stop_s,
+                            } => TtsOut::Text {
+                                text,
+                                start_s,
+                                stop_s,
+                                turn_idx,
+                            },
                         }));
                     }
                 }
@@ -365,12 +434,24 @@ mod tests {
         // Simulate user speaking (send non-silent audio)
         stt_tx.send_audio(&[0.5; 1920]).await.unwrap();
         let msg = stt_rx.next_message().await.unwrap().unwrap();
-        assert!(matches!(msg, crate::speech_to_text::Msg::Step { end_of_turn: false, .. }));
+        assert!(matches!(
+            msg,
+            crate::speech_to_text::Msg::Step {
+                end_of_turn: false,
+                ..
+            }
+        ));
 
         // User stops speaking (send silence to trigger end_of_turn)
         stt_tx.send_audio(&[0.0; 1920]).await.unwrap();
         let msg = stt_rx.next_message().await.unwrap().unwrap();
-        assert!(matches!(msg, crate::speech_to_text::Msg::Step { end_of_turn: true, .. }));
+        assert!(matches!(
+            msg,
+            crate::speech_to_text::Msg::Step {
+                end_of_turn: true,
+                ..
+            }
+        ));
 
         // Get transcribed text
         let msg = stt_rx.next_message().await.unwrap().unwrap();
@@ -469,7 +550,9 @@ mod tests {
         // Get first TTS output (audio for "hello")
         let tts_msg = tts_rx.next_message(0).await.unwrap().unwrap();
         match tts_msg {
-            crate::text_to_speech::TtsOut::Audio { start_s, stop_s, .. } => {
+            crate::text_to_speech::TtsOut::Audio {
+                start_s, stop_s, ..
+            } => {
                 assert!((start_s - 0.0).abs() < 0.001);
                 assert!((stop_s - 1.0).abs() < 0.001);
             }
@@ -484,7 +567,13 @@ mod tests {
         stt_tx.send_audio(&[0.5; 1920]).await.unwrap();
         let msg = stt_rx.next_message().await.unwrap().unwrap();
         // Should not be end_of_turn since it's non-silent audio
-        assert!(matches!(msg, crate::speech_to_text::Msg::Step { end_of_turn: false, .. }));
+        assert!(matches!(
+            msg,
+            crate::speech_to_text::Msg::Step {
+                end_of_turn: false,
+                ..
+            }
+        ));
 
         // User stops
         stt_tx.send_audio(&[0.0; 1920]).await.unwrap();
@@ -514,12 +603,24 @@ mod tests {
         // Send some audio
         tx.send_audio(&[0.5; 1920]).await.unwrap();
         let msg = rx.next_message().await.unwrap().unwrap();
-        assert!(matches!(msg, crate::speech_to_text::Msg::Step { end_of_turn: false, .. }));
+        assert!(matches!(
+            msg,
+            crate::speech_to_text::Msg::Step {
+                end_of_turn: false,
+                ..
+            }
+        ));
 
         // Send silence to trigger end_of_turn
         tx.send_audio(&[0.0; 1920]).await.unwrap();
         let msg = rx.next_message().await.unwrap().unwrap();
-        assert!(matches!(msg, crate::speech_to_text::Msg::Step { end_of_turn: true, .. }));
+        assert!(matches!(
+            msg,
+            crate::speech_to_text::Msg::Step {
+                end_of_turn: true,
+                ..
+            }
+        ));
 
         // Should get text
         let msg = rx.next_message().await.unwrap().unwrap();
@@ -562,7 +663,10 @@ mod tests {
         // Audio and text are emitted for each word (audio first, then text)
         // First word: "hello"
         let msg = rx.next_message(0).await.unwrap().unwrap();
-        if let crate::text_to_speech::TtsOut::Audio { start_s, stop_s, .. } = msg {
+        if let crate::text_to_speech::TtsOut::Audio {
+            start_s, stop_s, ..
+        } = msg
+        {
             assert!((start_s - 0.0).abs() < 0.001);
             assert!((stop_s - 1.0).abs() < 0.001);
         } else {
@@ -570,7 +674,13 @@ mod tests {
         }
 
         let msg = rx.next_message(0).await.unwrap().unwrap();
-        if let crate::text_to_speech::TtsOut::Text { text, start_s, stop_s, .. } = msg {
+        if let crate::text_to_speech::TtsOut::Text {
+            text,
+            start_s,
+            stop_s,
+            ..
+        } = msg
+        {
             assert_eq!(text, "hello");
             assert!((start_s - 0.0).abs() < 0.001);
             assert!((stop_s - 1.0).abs() < 0.001);
@@ -580,7 +690,10 @@ mod tests {
 
         // Second word: "world"
         let msg = rx.next_message(0).await.unwrap().unwrap();
-        if let crate::text_to_speech::TtsOut::Audio { start_s, stop_s, .. } = msg {
+        if let crate::text_to_speech::TtsOut::Audio {
+            start_s, stop_s, ..
+        } = msg
+        {
             assert!((start_s - 1.0).abs() < 0.001);
             assert!((stop_s - 2.0).abs() < 0.001);
         } else {
@@ -588,7 +701,13 @@ mod tests {
         }
 
         let msg = rx.next_message(0).await.unwrap().unwrap();
-        if let crate::text_to_speech::TtsOut::Text { text, start_s, stop_s, .. } = msg {
+        if let crate::text_to_speech::TtsOut::Text {
+            text,
+            start_s,
+            stop_s,
+            ..
+        } = msg
+        {
             assert_eq!(text, "world");
             assert!((start_s - 1.0).abs() < 0.001);
             assert!((stop_s - 2.0).abs() < 0.001);

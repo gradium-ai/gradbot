@@ -49,7 +49,7 @@ asyncio.run(main())
 
 - `GRADIUM_API_KEY` - API key for Gradium STT/TTS services (required)
 - `GRADIUM_BASE_URL` - Base URL for Gradium services (optional)
-- `OPENAI_API_KEY` - API key for OpenAI-compatible LLM API (required)
+- `LLM_API_KEY` - API key for OpenAI-compatible LLM API (required)
 - `LLM_BASE_URL` - Base URL for LLM API (optional, defaults to OpenAI)
 - `LLM_MODEL` - LLM model name (optional, auto-detected if single model available)
 
@@ -96,6 +96,20 @@ input_handle, output_handle = await pygradbot.run(
     output_format=pygradbot.AudioFormat.OggOpus,
 )
 ```
+
+**Remote mode** — connect to a `gradbot_server` instead of running STT/LLM/TTS locally:
+
+```python
+input_handle, output_handle = await pygradbot.run(
+    gradbot_url="wss://your-server.com/ws",
+    gradbot_api_key="grd_...",
+    session_config=config,
+    input_format=pygradbot.AudioFormat.OggOpus,
+    output_format=pygradbot.AudioFormat.OggOpus,
+)
+```
+
+When `gradbot_url` is set, all other client params (`gradium_api_key`, `llm_*`, etc.) are ignored — the server handles STT/LLM/TTS. The returned handles behave identically to local mode.
 
 ### Classes
 
