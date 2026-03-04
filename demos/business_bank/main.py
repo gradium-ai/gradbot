@@ -523,6 +523,7 @@ async def websocket_chat(websocket: WebSocket):
                 flush_duration_s=FLUSH_FOR_S,
                 padding_bonus=padding_bonus,
                 rewrite_rules=lang,
+                assistant_speaks_first=True,
             ),
         )
 

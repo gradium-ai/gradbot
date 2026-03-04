@@ -169,6 +169,7 @@ async def websocket_chat(websocket: WebSocket):
             **merge_overrides(_OVERRIDES,
                 flush_duration_s=FLUSH_FOR_S,
                 rewrite_rules=voice.language.rewrite_rules,
+                assistant_speaks_first=True,
             ),
         )
 

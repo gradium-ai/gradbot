@@ -365,6 +365,7 @@ async def websocket_game(websocket: WebSocket):
             **merge_overrides(_OVERRIDES,
                 flush_duration_s=FLUSH_FOR_S,
                 rewrite_rules=LANG_MAP[state.language].rewrite_rules,
+                assistant_speaks_first=True,
             ),
         )
 

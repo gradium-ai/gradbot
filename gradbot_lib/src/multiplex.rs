@@ -11,6 +11,8 @@ const INPUT_SAMPLE_RATE: usize = 24000;
 enum InternalCmd {
     /// Restart the STT stream to clear stuck state.
     RestartStt,
+    /// Trigger the initial greeting (assistant speaks first).
+    Greet,
 }
 
 /// Returns the internal reset_asr tool definition.
@@ -370,6 +372,16 @@ impl Session {
                         Some(InternalCmd::RestartStt) => {
                             tracing::info!("reset_asr tool: restarting STT stream");
                             self.restart_stt().await?;
+                        }
+                        Some(InternalCmd::Greet) => {
+                            tracing::info!("assistant_speaks_first: triggering initial greeting");
+                            if let Some(jh) = self.llm_tts("[start]", 0).await {
+                                *self.state.lock().await = State::Processing {
+                                    since_s: 0.0,
+                                    turn_idx: 0,
+                                    _jh: jh,
+                                };
+                            }
                         }
                         None => break, // Channel closed
                     }
@@ -1288,7 +1300,7 @@ async fn run(
     )
     .await?;
     // If assistant speaks first, trigger initial greeting
-    if assistant_speaks_first && let Some(jh) = session.llm_tts("", 0).await {
+    if assistant_speaks_first && let Some(jh) = session.llm_tts("[start]", 0).await {
         *session.state.lock().await = State::Processing {
             since_s: 0.0,
             turn_idx: 0,
@@ -1446,16 +1458,24 @@ async fn run(
             Ok::<(), anyhow::Error>(())
         }
     };
+    let internal_cmd_tx = session.internal_cmd_tx.clone();
     let tr_loop = async move { session.transcription_receive_loop().await };
     let recv_loop = async move {
         let mut sender = sender;
+        let mut greeted = assistant_speaks_first; // true = already greeted at startup
         let mut decoder =
             crate::decoder::Decoder::new(input_format, INPUT_SAMPLE_RATE, INPUT_FRAME_SIZE)?;
         while let Some(msg) = msg_in_rx.recv().await {
             match msg {
                 MsgIn::Config(config) => {
-                    tracing::info!(?config, "received session configuration");
+                    let should_greet =
+                        !greeted && config.assistant_speaks_first;
+                    tracing::info!(?config, should_greet, "received session configuration");
                     *session_config.lock().await = Some(config);
+                    if should_greet {
+                        greeted = true;
+                        let _ = internal_cmd_tx.send(InternalCmd::Greet).await;
+                    }
                 }
                 MsgIn::Audio(audio) => {
                     if session_config.lock().await.is_none() {
