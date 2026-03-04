@@ -575,9 +575,12 @@
 
                     <div class="agent-card">
                         <div class="agent-info">
-                            <h2>Leo</h2>
-                            <span class="role">Conseiller Mutuelle</span>
+                            <h2>Conseiller Mutuelle</h2>
                         </div>
+                        <select id="agentSelect" style="margin-left: auto; margin-right: 0.75rem; padding: 0.35rem 0.5rem; border-radius: 8px; background: rgba(255,255,255,0.08); color: #e8edf5; border: 1px solid rgba(74,222,128,0.25); font-size: 0.85rem; cursor: pointer;">
+                            <option value="Leo" selected>Leo</option>
+                            <option value="Constance">Constance</option>
+                        </select>
                         <div class="recording-indicator" id="recordingIndicator">
                             <span class="recording-dot"></span>
                             <span>À l'écoute...</span>
@@ -609,7 +612,7 @@
                             <span id="paddingValue" style="min-width: 2em; text-align: center;">0</span>
                         </div>
 
-                        <button class="btn btn-primary" id="startBtn">Appeler Leo</button>
+                        <button class="btn btn-primary" id="startBtn">Appeler</button>
                         <button class="btn btn-secondary" id="stopBtn" style="display: none;">Raccrocher</button>
                     </div>
                 </div>
@@ -647,7 +650,7 @@
             </table>
         </div>
 
-        <div class="status idle" id="status">Cliquez sur "Appeler Leo" pour contacter votre conseiller mutuelle</div>
+        <div class="status idle" id="status">Cliquez sur "Appeler" pour contacter votre conseiller mutuelle</div>
     </div>
 
     <script src="/static/js/opus-encoder.js"></script>
@@ -675,6 +678,7 @@
         const paddingValue = document.getElementById('paddingValue');
         const clientCardsEl = document.getElementById('clientCards');
         const customerSelect = document.getElementById('customerSelect');
+        const agentSelect = document.getElementById('agentSelect');
 
         paddingSlider.addEventListener('input', () => {
             paddingValue.textContent = paddingSlider.value;
@@ -804,7 +808,7 @@
                 bubble.className = 'transcript-entry assistant';
                 const sp = document.createElement('div');
                 sp.className = 'transcript-speaker';
-                sp.textContent = 'Leo';
+                sp.textContent = agentSelect.value;
                 bubble.appendChild(sp);
                 const tx = document.createElement('span');
                 tx.className = 'transcript-text';
@@ -925,9 +929,11 @@
                 ws = new WebSocket(wsUrl);
 
                 ws.onopen = () => {
-                    setStatus('Connecté — Parlez à Leo', 'connected');
+                    const agentName = agentSelect.value;
+                    setStatus(`Connecté — Parlez à ${agentName}`, 'connected');
                     transcript.innerHTML = '';
-                    ws.send(JSON.stringify({ type: 'start', customer: customerSelect.value, padding_bonus: parseFloat(paddingSlider.value) }));
+                    ws.send(JSON.stringify({ type: 'start', agent: agentName, customer: customerSelect.value, padding_bonus: parseFloat(paddingSlider.value) }));
+                    agentSelect.disabled = true;
                     customerSelect.disabled = true;
                     paddingSlider.disabled = true;
                     isRecording = true;
@@ -962,6 +968,7 @@
             startBtn.style.display = 'inline-block';
             stopBtn.style.display = 'none';
             recordingIndicator.classList.remove('active');
+            agentSelect.disabled = false;
             customerSelect.disabled = false;
             paddingSlider.disabled = false;
 

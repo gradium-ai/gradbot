@@ -264,12 +264,13 @@ class InsuranceSession:
 # System prompts
 # ---------------------------------------------------------------------------
 
-def get_auth_prompt() -> str:
-    return """You are Leo, a professional and friendly health insurance (mutuelle) phone agent at Mutuelle Santé.
+def get_auth_prompt(agent_name: str = "Leo", customer_name: str = "") -> str:
+    caller_line = f"\nThe caller's name is {customer_name}. Always address them as {customer_name}." if customer_name else ""
+    return f"""You are {agent_name}, a professional and friendly health insurance (mutuelle) phone agent at Mutuelle Santé.
 
 IMPORTANT: You ALWAYS speak in French. Every word you say must be in French.
 
-You help members authenticate and access their account.
+You help members authenticate and access their account.{caller_line}
 
 YOUR PERSONALITY:
 - Professional, calm, and reassuring
@@ -315,8 +316,9 @@ Your job is to interpret whatever they say as the most likely digits and call th
 """
 
 
-def get_service_prompt(client_name: str, formule: str) -> str:
-    return f"""You are Leo, a professional and friendly health insurance (mutuelle) phone agent at Mutuelle Santé.
+def get_service_prompt(client_name: str, formule: str, agent_name: str = "Leo", customer_name: str = "") -> str:
+    caller_line = f"\nThe caller's name is {customer_name}. Always address them as {customer_name}." if customer_name else ""
+    return f"""You are {agent_name}, a professional and friendly health insurance (mutuelle) phone agent at Mutuelle Santé.
 
 IMPORTANT: You ALWAYS speak in French. Every word you say must be in French.
 
@@ -329,7 +331,7 @@ SPEAKING STYLE:
 - Keep responses to 2-3 sentences maximum
 - NEVER use action annotations like *smiles* or *typing* — just speak naturally
 - Be conversational and natural, like a real phone call
-- You ALWAYS speak French
+- You ALWAYS speak French{caller_line}
 
 CURRENT PHASE: SERVICES
 Authenticated member: {client_name}
@@ -472,16 +474,27 @@ async def websocket_chat(websocket: WebSocket):
             await websocket.close(code=4000, reason="Expected start message")
             return
 
-        customer_name = start_msg.get("customer", "Martin")
+        customer_last_name = start_msg.get("customer", "Martin")
+        CUSTOMER_TITLES = {
+            "Martin": "Madame Martin",
+            "Dubois": "Monsieur Dubois",
+            "Leroy": "Madame Leroy",
+        }
+        customer_name = CUSTOMER_TITLES.get(customer_last_name, customer_last_name)
+        agent_name = start_msg.get("agent", "Leo")
         padding_bonus = float(start_msg.get("padding_bonus", 0.0))
-        print(f"Starting insurance chat (customer: {customer_name}, padding_bonus: {padding_bonus})")
+        print(f"Starting insurance chat (agent: {agent_name}, customer: {customer_name}, padding_bonus: {padding_bonus})")
 
-        voice = pygradbot.flagship_voice("Leo")
+        AGENT_VOICES = {
+            "Leo": pygradbot.flagship_voice("Leo").voice_id,
+            "Constance": "Y4iYxS8PBX",
+        }
+        voice_id = AGENT_VOICES.get(agent_name, AGENT_VOICES["Leo"])
         tools = build_tools()
 
         config = pygradbot.SessionConfig(
-            voice_id=voice.voice_id,
-            instructions=get_auth_prompt(),
+            voice_id=voice_id,
+            instructions=get_auth_prompt(agent_name),
             language=pygradbot.Lang.Fr,
             tools=tools,
             **merge_overrides(_OVERRIDES,
@@ -503,7 +516,7 @@ async def websocket_chat(websocket: WebSocket):
 
         def make_config(instructions: str) -> pygradbot.SessionConfig:
             return pygradbot.SessionConfig(
-                voice_id=voice.voice_id,
+                voice_id=voice_id,
                 instructions=instructions,
                 language=pygradbot.Lang.Fr,
                 tools=tools,
@@ -533,7 +546,7 @@ async def websocket_chat(websocket: WebSocket):
                 await tool_handle.send(json.dumps({
                     "success": True,
                     "client_name": client["name"],
-                    "message": f"Numéro d'adhérent confirmé. C'est le compte de {client['name']}. Dis 'Bon retour, {customer_name} !' puis demande le code PIN à 4 chiffres.",
+                    "message": f"Numéro d'adhérent confirmé. C'est le compte de {client['name']}. The caller should be addressed as {customer_name}. Welcome them and ask for their 4-digit PIN.",
                 }))
                 print(f"Account confirmed: {client['name']} (digits: {digits})")
 
@@ -558,13 +571,13 @@ async def websocket_chat(websocket: WebSocket):
                         "client": client["name"],
                     })
 
-                    phase2 = get_service_prompt(client["name"], client["formule"])
+                    phase2 = get_service_prompt(client["name"], client["formule"], agent_name, customer_name)
                     await input_handle.send_config(make_config(phase2))
                     print(f"Authenticated: {client['name']}, switched to phase 2")
 
                     await tool_handle.send(json.dumps({
                         "success": True,
-                        "message": f"PIN vérifié. L'appelant est authentifié en tant que {client['name']}, formule {client['formule']}. Souhaite-lui la bienvenue et demande comment tu peux l'aider — commander une nouvelle carte, ajouter un enfant, ou consulter un remboursement.",
+                        "message": f"PIN verified. The caller is authenticated as {customer_name}, plan {client['formule']}. Welcome them and ask how you can help.",
                     }))
                 else:
                     await tool_handle.send(json.dumps({
