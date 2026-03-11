@@ -1003,8 +1003,8 @@ fn run<'py>(
 }
 
 /// Python module for gradbot voice AI library.
-#[pymodule]
-fn gradbot(m: &Bound<'_, PyModule>) -> PyResult<()> {
+#[pymodule(name = "gradbot")]
+fn gradbot_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Lang>()?;
     m.add_class::<Gender>()?;
     m.add_class::<Country>()?;
