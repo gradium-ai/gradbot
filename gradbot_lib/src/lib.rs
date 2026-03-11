@@ -98,8 +98,8 @@ use std::sync::Arc;
 // Re-export public API
 pub use llm::{Llm, LlmConfig, ToolCall, ToolCallHandle, ToolDef, ToolResult};
 pub use multiplex::{
-    DEFAULT_FLUSH_FOR_S, Event, MsgIn, MsgOut, SessionConfig, SessionInputHandle,
-    SessionOutputHandle, start_session,
+    start_session, Event, MsgIn, MsgOut, SessionConfig, SessionInputHandle, SessionOutputHandle,
+    DEFAULT_FLUSH_FOR_S,
 };
 pub use speech_to_text::SttClient;
 pub use system_prompt::Lang;
@@ -402,6 +402,7 @@ pub struct GradbotClients {
 ///     IoFormat { input: decoder::Format::pcm(24000), output: encoder::Format::OggOpus },
 /// ).await?;
 /// ```
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     gradium_api_key: Option<&str>,
     gradium_base_url: Option<&str>,

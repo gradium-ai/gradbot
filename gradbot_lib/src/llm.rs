@@ -716,10 +716,10 @@ impl LlmSession {
 
                     for choice in chunk.choices {
                         // Handle text content
-                        if let Some(c) = choice.delta.content {
-                            if !c.is_empty() {
-                                tx.send(LlmResponseItem::Text(c)).await?;
-                            }
+                        if let Some(c) = choice.delta.content
+                            && !c.is_empty()
+                        {
+                            tx.send(LlmResponseItem::Text(c)).await?;
                         }
 
                         // Handle tool calls (streamed as chunks)
