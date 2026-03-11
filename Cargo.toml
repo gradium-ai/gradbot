@@ -18,6 +18,7 @@ categories = ["multimedia::audio"]
 [workspace.dependencies]
 anyhow = "1"
 async-openai = "0.29.3"
+audiopus_sys = "0.2.2"
 axum = { version = "0.8.1", features = ["ws"] }
 base64 = "0.21.7"
 base64-serde = "0.8.0"
@@ -84,6 +85,3 @@ tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
-
-[patch.crates-io]
-audiopus_sys = { path = "audiopus_sys-0.2.2" }
