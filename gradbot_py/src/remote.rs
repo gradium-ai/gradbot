@@ -288,7 +288,7 @@ pub fn msgout_from_remote(
             })
         }
         RemoteMsgOut::Event { time_s, event } => {
-            // Parse event string — it's a JSON-serialized gradbot_lib::Event
+            // Parse event string — it's a JSON-serialized gradbot::Event
             let event_obj = Event {
                 event_type: event,
                 data: None,

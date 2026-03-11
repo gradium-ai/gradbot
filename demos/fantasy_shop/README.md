@@ -34,7 +34,7 @@ cd gradbot/demos/fantasy_shop
 uv sync
 ```
 
-> **After changing gradbot Rust code**, re-run with `uv sync --reinstall-package pygradbot` to rebuild the package.
+> **After changing gradbot Rust code**, re-run with `uv sync --reinstall-package gradbot` to rebuild the package.
 
 ## Run
 

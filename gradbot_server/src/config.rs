@@ -15,7 +15,7 @@ fn default_log_dir() -> String {
 
 fn default_gradium_base_url() -> String {
     std::env::var("GRADIUM_BASE_URL")
-        .unwrap_or_else(|_| gradbot_lib::DEFAULT_GRADIUM_BASE_URL.to_string())
+        .unwrap_or_else(|_| gradbot::DEFAULT_GRADIUM_BASE_URL.to_string())
 }
 
 #[derive(Debug, Deserialize)]

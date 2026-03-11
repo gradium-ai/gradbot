@@ -1,4 +1,4 @@
-# pygradbot
+# gradbot
 
 Python bindings for the gradbot voice AI library.
 
@@ -7,7 +7,7 @@ Python bindings for the gradbot voice AI library.
 Build and install in development mode:
 
 ```bash
-cd pygradbot
+cd gradbot_py
 maturin develop
 ```
 
@@ -15,28 +15,28 @@ Or build a wheel:
 
 ```bash
 maturin build --release
-pip install target/wheels/pygradbot-*.whl
+pip install target/wheels/gradbot-*.whl
 ```
 
 ## Quick Start
 
 ```python
 import asyncio
-import pygradbot
+import gradbot
 
 # Initialize logging (optional)
-pygradbot.init_logging()
+gradbot.init_logging()
 
 async def main():
     # Create session with default settings
-    input_handle, output_handle = await pygradbot.run(
-        session_config=pygradbot.SessionConfig(
+    input_handle, output_handle = await gradbot.run(
+        session_config=gradbot.SessionConfig(
             voice_id="YTpq7expH9539ERJ",  # Emma voice
             instructions="You are a helpful assistant.",
-            language=pygradbot.Lang.En,
+            language=gradbot.Lang.En,
         ),
-        input_format=pygradbot.AudioFormat.OggOpus,
-        output_format=pygradbot.AudioFormat.OggOpus,
+        input_format=gradbot.AudioFormat.OggOpus,
+        output_format=gradbot.AudioFormat.OggOpus,
     )
 
     # Send audio and receive responses
@@ -64,7 +64,7 @@ Initialize tracing subscriber for debug logging. Call once at startup.
 Returns all available flagship voices.
 
 ```python
-for voice in pygradbot.flagship_voices():
+for voice in gradbot.flagship_voices():
     print(f"{voice.name}: {voice.voice_id} ({voice.language})")
 ```
 
@@ -72,7 +72,7 @@ for voice in pygradbot.flagship_voices():
 Look up a flagship voice by name (case-insensitive).
 
 ```python
-voice = pygradbot.flagship_voice("emma")
+voice = gradbot.flagship_voice("emma")
 print(voice.voice_id)  # "YTpq7expH9539ERJ"
 ```
 
@@ -80,7 +80,7 @@ print(voice.voice_id)  # "YTpq7expH9539ERJ"
 Create reusable clients for multiple sessions.
 
 ```python
-clients = await pygradbot.create_clients(
+clients = await gradbot.create_clients(
     gradium_api_key="...",  # or use GRADIUM_API_KEY env var
     llm_base_url="https://api.openai.com/v1",
 )
@@ -90,22 +90,22 @@ clients = await pygradbot.create_clients(
 Create clients and start a session in one call.
 
 ```python
-input_handle, output_handle = await pygradbot.run(
+input_handle, output_handle = await gradbot.run(
     session_config=config,
-    input_format=pygradbot.AudioFormat.OggOpus,
-    output_format=pygradbot.AudioFormat.OggOpus,
+    input_format=gradbot.AudioFormat.OggOpus,
+    output_format=gradbot.AudioFormat.OggOpus,
 )
 ```
 
 **Remote mode** — connect to a `gradbot_server` instead of running STT/LLM/TTS locally:
 
 ```python
-input_handle, output_handle = await pygradbot.run(
+input_handle, output_handle = await gradbot.run(
     gradbot_url="wss://your-server.com/ws",
     gradbot_api_key="grd_...",
     session_config=config,
-    input_format=pygradbot.AudioFormat.OggOpus,
-    output_format=pygradbot.AudioFormat.OggOpus,
+    input_format=gradbot.AudioFormat.OggOpus,
+    output_format=gradbot.AudioFormat.OggOpus,
 )
 ```
 
@@ -132,10 +132,10 @@ Audio encoding format:
 Session configuration:
 
 ```python
-config = pygradbot.SessionConfig(
+config = gradbot.SessionConfig(
     voice_id="YTpq7expH9539ERJ",      # Voice ID or None for default
     instructions="Be helpful.",        # System prompt
-    language=pygradbot.Lang.En,       # Language
+    language=gradbot.Lang.En,       # Language
     assistant_speaks_first=True,       # Start with greeting
     silence_timeout_s=5.0,             # Silence before prompting
     tools=[...],                       # Tool definitions for LLM
@@ -146,7 +146,7 @@ config = pygradbot.SessionConfig(
 Tool definition for LLM function calling:
 
 ```python
-tool = pygradbot.ToolDef(
+tool = gradbot.ToolDef(
     name="get_weather",
     description="Get current weather for a location",
     parameters_json='{"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}'
@@ -208,12 +208,12 @@ See `demos/fantasy_shop/main.py` for a complete example using FastAPI, WebSocket
 ```python
 import asyncio
 import json
-import pygradbot
+import gradbot
 
 async def handle_session(websocket):
     # Define tools
     tools = [
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="get_time",
             description="Get the current time",
             parameters_json='{"type": "object", "properties": {}, "required": []}'
@@ -221,14 +221,14 @@ async def handle_session(websocket):
     ]
 
     # Start session
-    config = pygradbot.SessionConfig(
+    config = gradbot.SessionConfig(
         instructions="You are a helpful assistant with access to tools.",
         tools=tools,
     )
-    input_handle, output_handle = await pygradbot.run(
+    input_handle, output_handle = await gradbot.run(
         session_config=config,
-        input_format=pygradbot.AudioFormat.OggOpus,
-        output_format=pygradbot.AudioFormat.OggOpus,
+        input_format=gradbot.AudioFormat.OggOpus,
+        output_format=gradbot.AudioFormat.OggOpus,
     )
 
     # Process messages

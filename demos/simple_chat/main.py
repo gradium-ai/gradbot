@@ -18,10 +18,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-import pygradbot
+import gradbot
 
 # Initialize Rust logging (outputs to stderr)
-pygradbot.init_logging()
+gradbot.init_logging()
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
@@ -36,32 +36,32 @@ _OVERRIDES = session_config_overrides(_YAML_CFG)
 _CLIENT_CONFIG = client_config(_YAML_CFG)
 
 
-def lang_to_code(lang: pygradbot.Lang) -> str:
+def lang_to_code(lang: gradbot.Lang) -> str:
     """Convert Lang enum to language code."""
-    if lang == pygradbot.Lang.En:
+    if lang == gradbot.Lang.En:
         return "en"
-    elif lang == pygradbot.Lang.Fr:
+    elif lang == gradbot.Lang.Fr:
         return "fr"
-    elif lang == pygradbot.Lang.De:
+    elif lang == gradbot.Lang.De:
         return "de"
-    elif lang == pygradbot.Lang.Es:
+    elif lang == gradbot.Lang.Es:
         return "es"
-    elif lang == pygradbot.Lang.Pt:
+    elif lang == gradbot.Lang.Pt:
         return "pt"
     return "en"
 
 
-def lang_to_name(lang: pygradbot.Lang) -> str:
+def lang_to_name(lang: gradbot.Lang) -> str:
     """Convert Lang enum to language name."""
-    if lang == pygradbot.Lang.En:
+    if lang == gradbot.Lang.En:
         return "English"
-    elif lang == pygradbot.Lang.Fr:
+    elif lang == gradbot.Lang.Fr:
         return "French"
-    elif lang == pygradbot.Lang.De:
+    elif lang == gradbot.Lang.De:
         return "German"
-    elif lang == pygradbot.Lang.Es:
+    elif lang == gradbot.Lang.Es:
         return "Spanish"
-    elif lang == pygradbot.Lang.Pt:
+    elif lang == gradbot.Lang.Pt:
         return "Portuguese"
     return "English"
 
@@ -89,15 +89,15 @@ async def list_voices():
             "gender": str(v.gender),
             "description": v.description,
         }
-        for v in pygradbot.flagship_voices()
+        for v in gradbot.flagship_voices()
     ]
     return JSONResponse(content={"voices": voices})
 
 
-def make_session_config(voice_name: str, prompt: str) -> pygradbot.SessionConfig:
+def make_session_config(voice_name: str, prompt: str) -> gradbot.SessionConfig:
     """Create a SessionConfig from voice name and prompt."""
-    voice = pygradbot.flagship_voice(voice_name)
-    return pygradbot.SessionConfig(
+    voice = gradbot.flagship_voice(voice_name)
+    return gradbot.SessionConfig(
         voice_id=voice.voice_id,
         instructions=prompt,
         language=voice.language,
@@ -146,11 +146,11 @@ async def websocket_chat(websocket: WebSocket):
 
         # Create clients and start session
         # Uses GRADIUM_API_KEY, GRADIUM_BASE_URL, LLM_BASE_URL env vars
-        input_handle, output_handle = await pygradbot.run(
+        input_handle, output_handle = await gradbot.run(
             **_CLIENT_CONFIG,
             session_config=config,
-            input_format=pygradbot.AudioFormat.OggOpus,
-            output_format=pygradbot.AudioFormat.Pcm if USE_PCM else pygradbot.AudioFormat.OggOpus,
+            input_format=gradbot.AudioFormat.OggOpus,
+            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
         )
 
         stop_event = asyncio.Event()

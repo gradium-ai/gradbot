@@ -1468,8 +1468,7 @@ async fn run(
         while let Some(msg) = msg_in_rx.recv().await {
             match msg {
                 MsgIn::Config(config) => {
-                    let should_greet =
-                        !greeted && config.assistant_speaks_first;
+                    let should_greet = !greeted && config.assistant_speaks_first;
                     tracing::info!(?config, should_greet, "received session configuration");
                     *session_config.lock().await = Some(config);
                     if should_greet {

@@ -2,14 +2,14 @@
 
 ## ✅ Completed
 - [x] **Project Structure**: Created `voice_text_adventure/` directory
-- [x] **Dependencies**: Created `pyproject.toml` with required packages (FastAPI, uvicorn, websockets, pygradbot, jericho)
+- [x] **Dependencies**: Created `pyproject.toml` with required packages (FastAPI, uvicorn, websockets, gradbot, jericho)
 - [x] **Documentation**: Created `AGENTS.md` with project context for crash recovery
 - [x] **Core Server**: Created `main.py` with Jericho integration and Gradbot voice agent
 - [x] **Frontend**: Created `static/index.html` for game selection and voice interface
 - [x] **JS Setup**: Symlinked `synced-audio-player.js` to static/js
 
 ### Main.py Implementation (Complete)
-- [x] Import required packages (fastapi, jericho, pygradbot, etc.)
+- [x] Import required packages (fastapi, jericho, gradbot, etc.)
 - [x] Create FastAPI app with lifespan management
 - [x] Implement game management:
   - [x] List available Jericho games (`/api/games`)

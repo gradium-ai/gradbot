@@ -1,6 +1,6 @@
 //! Twilio Media Streams server implementation.
 //!
-//! This module demonstrates using the `gradbot_lib::run()` API which creates
+//! This module demonstrates using the `gradbot::run()` API which creates
 //! clients and starts a session in a single call. For the `GradbotClients` API
 //! which allows reusing clients across sessions, see `openai_server.rs`.
 
@@ -9,14 +9,14 @@ use anyhow::Result;
 use axum::extract::ws;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
-use gradbot_lib::{MsgOut, SessionInputHandle, SessionOutputHandle};
+use gradbot::{MsgOut, SessionInputHandle, SessionOutputHandle};
 use std::sync::Arc;
 
 const DEFAULT_VOICE_ID: &str = "X8-_I8yFvYONny54";
 
 pub struct State {
     config: Arc<Config>,
-    session_config: gradbot_lib::SessionConfig,
+    session_config: gradbot::SessionConfig,
     cnt: std::sync::atomic::AtomicU64,
 }
 
@@ -25,7 +25,7 @@ struct TimedEvent {
     wall_time_s: f64,
     time_s: f64,
     #[serde(flatten)]
-    event: gradbot_lib::Event,
+    event: gradbot::Event,
 }
 
 pub type WebSocketSender = futures::stream::SplitSink<ws::WebSocket, ws::Message>;
@@ -189,9 +189,9 @@ pub async fn realtime(
             None
         };
 
-        // Using gradbot_lib::run() - creates clients and starts session in one call.
+        // Using gradbot::run() - creates clients and starts session in one call.
         // Model listing is cached globally, so subsequent calls are fast.
-        let (input, output) = match gradbot_lib::run(
+        let (input, output) = match gradbot::run(
             Some(&state.config.gradium_api_key),
             Some(&state.config.gradium_base_url),
             state.config.llm_base_url.as_deref(),
@@ -199,9 +199,9 @@ pub async fn realtime(
             None, // API key from env vars
             state.config.max_completion_tokens,
             Some(state.session_config.clone()),
-            gradbot_lib::IoFormat {
-                input: gradbot_lib::decoder::Format::ulaw(8000),
-                output: gradbot_lib::encoder::Format::ulaw(8000),
+            gradbot::IoFormat {
+                input: gradbot::decoder::Format::ulaw(8000),
+                output: gradbot::encoder::Format::ulaw(8000),
             },
         )
         .await
@@ -267,14 +267,14 @@ pub async fn serve(config: Config, twilio_config: TwilioConfig) -> Result<()> {
         .voice_id
         .clone()
         .unwrap_or_else(|| DEFAULT_VOICE_ID.to_string());
-    let session_config = gradbot_lib::SessionConfig {
+    let session_config = gradbot::SessionConfig {
         voice_id: Some(voice_id),
         instructions: Some(twilio_config.system_prompt.clone()),
         language: twilio_config.language,
         assistant_speaks_first: true,
         silence_timeout_s: 5.0,
         tools: vec![],
-        flush_duration_s: gradbot_lib::DEFAULT_FLUSH_FOR_S,
+        flush_duration_s: gradbot::DEFAULT_FLUSH_FOR_S,
         padding_bonus: 0.0,
         rewrite_rules: None,
         stt_extra_config: None,

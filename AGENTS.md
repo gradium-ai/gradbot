@@ -14,7 +14,7 @@ Gradbot is a Rust-based voice AI framework that provides real-time speech-to-tex
 gradbot/
 ├── Cargo.toml           # Standalone workspace root
 ├── gradbot_lib/        # Core library (STT/LLM/TTS coordination)
-├── pygradbot/          # Python bindings via PyO3
+├── gradbot_py/       # Python bindings via PyO3
 ├── src/                 # Server binary (OpenAI/Twilio protocols)
 ├── demos/               # Example applications
 │   ├── simple_chat/     # Basic voice chat demo
@@ -26,7 +26,7 @@ gradbot/
 
 ### Architecture
 
-- **gradbot_lib**: Self-contained core library with STT, LLM, TTS clients and multiplexing
+- **gradbot**: Self-contained core library with STT, LLM, TTS clients and multiplexing
 - **Transport Layer**: Server supports OpenAI WebSocket (`ws-openai`) and Twilio protocols
 - **Multiplex Module**: Coordinates STT, LLM, and TTS with interruption handling
 - **Audio Processing**: 24kHz input, 48kHz output, using OGG Opus encoding
@@ -44,8 +44,8 @@ cargo build
 cargo build --release
 
 # Build specific crate
-cargo build -p gradbot_lib
-cargo build -p pygradbot
+cargo build -p gradbot
+cargo build -p gradbot_py
 ```
 
 ### Running Demos
@@ -61,11 +61,11 @@ uv sync
 uv run uvicorn main:app --reload
 ```
 
-> **After changing gradbot/pygradbot Rust code**, you must reinstall the package in each demo venv:
+> **After changing gradbot_py Rust code**, you must reinstall the package in each demo venv:
 > ```bash
-> uv sync --reinstall-package pygradbot
+> uv sync --reinstall-package gradbot
 > ```
-> A plain `uv sync` will not rebuild pygradbot if the version number hasn't changed.
+> A plain `uv sync` will not rebuild gradbot if the version number hasn't changed.
 
 ### Running Server Binary
 ```bash
@@ -79,7 +79,7 @@ cargo run --release -- --config ../configs/gradbot.toml
 cargo test
 
 # Run library tests only
-cargo test -p gradbot_lib
+cargo test -p gradbot
 
 # Run with output
 cargo test -- --nocapture
@@ -87,7 +87,7 @@ cargo test -- --nocapture
 
 ### Building Python Bindings
 ```bash
-cd pygradbot
+cd gradbot_py
 maturin develop  # Install in development mode
 maturin build --release  # Build wheel
 ```
@@ -127,11 +127,11 @@ src/                     # Server binary
 ├── openai_protocol.rs   # OpenAI Realtime API events
 └── twilio_protocol.rs   # Twilio event types
 
-pygradbot/src/          # Python bindings
-└── lib.rs               # PyO3 bindings for gradbot_lib
+gradbot_py/src/       # Python bindings
+└── lib.rs               # PyO3 bindings for gradbot
 ```
 
-### Key Types (gradbot_lib)
+### Key Types (gradbot)
 - `GradbotClients`: Shared TTS/STT/LLM clients for creating sessions
 - `SessionConfig`: Voice, language, instructions, tools configuration
 - `SessionInputHandle`/`SessionOutputHandle`: Async handles for session I/O
@@ -279,7 +279,7 @@ When adding dependencies:
 2. **Run `cargo check -p gradbot`** to catch type errors quickly
 3. **Run `cargo clippy -p gradbot`** to fix warnings
 4. **Run `cargo test -p gradbot`** to verify tests pass
-5. **If you changed pygradbot or gradbot_lib**: run `uv sync --reinstall-package pygradbot` in the demo directory to pick up changes
+5. **If you changed gradbot_py or gradbot**: run `uv sync --reinstall-package gradbot` in the demo directory to pick up changes
 6. **Optional**: Run example client to test manually:
    ```bash
    cargo run -p gradbot --bin gradbot -- --config configs/gradbot.toml

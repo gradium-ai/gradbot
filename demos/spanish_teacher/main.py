@@ -20,10 +20,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-import pygradbot
+import gradbot
 
 # Initialize Rust logging (outputs to stderr)
-pygradbot.init_logging()
+gradbot.init_logging()
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
@@ -108,10 +108,10 @@ SENTENCES = [
 ]
 
 
-def build_tools() -> list[pygradbot.ToolDef]:
+def build_tools() -> list[gradbot.ToolDef]:
     """Build tool definitions for the Spanish teacher."""
     return [
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="get_next_sentence",
             description="Get the next Spanish sentence to teach. Call this when the student has successfully repeated the current sentence or when starting the lesson.",
             parameters_json=json.dumps({
@@ -120,7 +120,7 @@ def build_tools() -> list[pygradbot.ToolDef]:
                 "required": [],
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="record_success",
             description="Record that the student successfully repeated the sentence. Call this when the student's pronunciation was close enough to the target.",
             parameters_json=json.dumps({
@@ -134,7 +134,7 @@ def build_tools() -> list[pygradbot.ToolDef]:
                 "required": ["feedback"],
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="record_failure",
             description="Record that the student needs more practice. Call this when the pronunciation was too far from the target after an attempt.",
             parameters_json=json.dumps({
@@ -240,13 +240,13 @@ async def websocket_chat(websocket: WebSocket):
         state = SessionState()
 
         # Get Valentina's voice (Spanish, Mexican)
-        voice = pygradbot.flagship_voice("Valentina")
+        voice = gradbot.flagship_voice("Valentina")
 
         # Build tools
         tools = build_tools()
 
         # Create session config
-        config = pygradbot.SessionConfig(
+        config = gradbot.SessionConfig(
             voice_id=voice.voice_id,
             instructions=get_system_prompt(),
             language=voice.language,
@@ -259,11 +259,11 @@ async def websocket_chat(websocket: WebSocket):
         )
 
         # Create clients and start session
-        input_handle, output_handle = await pygradbot.run(
+        input_handle, output_handle = await gradbot.run(
             **_CLIENT_CONFIG,
             session_config=config,
-            input_format=pygradbot.AudioFormat.OggOpus,
-            output_format=pygradbot.AudioFormat.Pcm if USE_PCM else pygradbot.AudioFormat.OggOpus,
+            input_format=gradbot.AudioFormat.OggOpus,
+            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
         )
 
         stop_event = asyncio.Event()

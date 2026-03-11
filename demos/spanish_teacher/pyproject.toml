@@ -7,9 +7,9 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.20.0",
     "python-dotenv>=1.0.0",
-    "pygradbot",
+    "gradbot",
     "pyyaml>=6.0",
 ]
 
 [tool.uv.sources]
-pygradbot = { path = "../../pygradbot", editable = true }
+gradbot = { path = "../../gradbot_py", editable = true }

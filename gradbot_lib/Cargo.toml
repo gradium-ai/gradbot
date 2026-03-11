@@ -1,5 +1,5 @@
 [package]
-name = "gradbot_lib"
+name = "gradbot"
 version.workspace = true
 edition.workspace = true
 description = "Core library for gradbot voice AI multiplexing"

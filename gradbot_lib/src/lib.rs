@@ -1,4 +1,4 @@
-//! # gradbot_lib
+//! # gradbot
 //!
 //! Core library for building voice AI applications with real-time speech-to-text,
 //! LLM processing, and text-to-speech.
@@ -13,7 +13,7 @@
 //! ## Quick Start
 //!
 //! ```ignore
-//! use gradbot_lib::{GradbotClients, MsgOut, SessionConfig};
+//! use gradbot::{GradbotClients, MsgOut, SessionConfig};
 //!
 //! // 1. Create clients (uses environment variables for API keys)
 //! let clients = GradbotClients::new(None, None, None, None, None, None).await?;
@@ -306,7 +306,7 @@ pub const FLAGSHIP_VOICES: &[FlagshipVoice] = &[
 /// # Example
 ///
 /// ```
-/// use gradbot_lib::flagship_voices;
+/// use gradbot::flagship_voices;
 ///
 /// for voice in flagship_voices() {
 ///     println!("{}: {} ({:?})", voice.name, voice.voice_id, voice.language);
@@ -342,7 +342,7 @@ fn get_flagship_voice_lookup() -> &'static std::collections::HashMap<String, usi
 /// # Example
 ///
 /// ```
-/// use gradbot_lib::{flagship_voice, Lang};
+/// use gradbot::{flagship_voice, Lang};
 ///
 /// let voice = flagship_voice("emma").unwrap();
 /// assert_eq!(voice.voice_id, "YTpq7expH9539ERJ");
@@ -396,7 +396,7 @@ pub struct GradbotClients {
 /// # Example
 ///
 /// ```ignore
-/// let (input, mut output) = gradbot_lib::run(
+/// let (input, mut output) = gradbot::run(
 ///     None, None, None, None, None, None,
 ///     Some(config),
 ///     IoFormat { input: decoder::Format::pcm(24000), output: encoder::Format::OggOpus },

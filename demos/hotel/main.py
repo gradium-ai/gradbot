@@ -19,9 +19,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-import pygradbot
+import gradbot
 
-pygradbot.init_logging()
+gradbot.init_logging()
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
@@ -217,7 +217,7 @@ Available cities: {_AVAILABLE_CITIES} (keys: {', '.join(_CITY_KEYS)})
 """
 
 
-def build_tools() -> list[pygradbot.ToolDef]:
+def build_tools() -> list[gradbot.ToolDef]:
     city_keys = ", ".join(HOTEL_DATA["cities"].keys())
     all_hotel_ids = []
     for city_data in HOTEL_DATA["cities"].values():
@@ -226,7 +226,7 @@ def build_tools() -> list[pygradbot.ToolDef]:
     hotel_ids_str = ", ".join(all_hotel_ids)
 
     return [
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="search_hotels",
             description=f"Search for available hotels in a city. Takes some time to query the system. Keep chatting with the caller about the destination while waiting for results! Available cities: {city_keys}",
             parameters_json=json.dumps({
@@ -240,7 +240,7 @@ def build_tools() -> list[pygradbot.ToolDef]:
                 "required": ["city"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="get_hotel_details",
             description=f"Get detailed room information and prices for a specific hotel. You MUST call this before you can talk about rooms or prices. Takes some time - keep chatting with the caller! Known hotel IDs: {hotel_ids_str}",
             parameters_json=json.dumps({
@@ -254,7 +254,7 @@ def build_tools() -> list[pygradbot.ToolDef]:
                 "required": ["hotel_id"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="book_room",
             description="Book a room at a hotel. Use this when the caller has decided on a hotel, room type, dates, and number of guests.",
             parameters_json=json.dumps({
@@ -318,13 +318,13 @@ async def websocket_chat(websocket: WebSocket):
         voice_key = AGENT_VOICES.get(agent_name, "Eva")
         print(f"Starting hotel reservation chat with {agent_name} (voice: {voice_key}, padding_bonus: {padding_bonus})")
 
-        voice = pygradbot.flagship_voice(voice_key)
+        voice = gradbot.flagship_voice(voice_key)
         tools = build_tools()
 
-        config = pygradbot.SessionConfig(
+        config = gradbot.SessionConfig(
             voice_id=voice.voice_id,
             instructions=get_phase1_prompt(agent_name),
-            language=pygradbot.Lang.En,
+            language=gradbot.Lang.En,
             tools=tools,
             **merge_overrides(_OVERRIDES,
                 flush_duration_s=FLUSH_FOR_S,
@@ -334,20 +334,20 @@ async def websocket_chat(websocket: WebSocket):
             ),
         )
 
-        input_handle, output_handle = await pygradbot.run(
+        input_handle, output_handle = await gradbot.run(
             **_CLIENT_CONFIG,
             session_config=config,
-            input_format=pygradbot.AudioFormat.OggOpus,
-            output_format=pygradbot.AudioFormat.Pcm if USE_PCM else pygradbot.AudioFormat.OggOpus,
+            input_format=gradbot.AudioFormat.OggOpus,
+            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
         )
 
         stop_event = asyncio.Event()
 
-        def make_config(instructions: str) -> pygradbot.SessionConfig:
-            return pygradbot.SessionConfig(
+        def make_config(instructions: str) -> gradbot.SessionConfig:
+            return gradbot.SessionConfig(
                 voice_id=voice.voice_id,
                 instructions=instructions,
-                language=pygradbot.Lang.En,
+                language=gradbot.Lang.En,
                 tools=tools,
                 **merge_overrides(_OVERRIDES,
                     flush_duration_s=FLUSH_FOR_S,

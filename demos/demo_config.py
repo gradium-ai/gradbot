@@ -57,14 +57,14 @@ def client_config(config: dict[str, Any]) -> dict[str, Any]:
     """
     Extract client-level config (LLM and Gradium) from YAML config.
 
-    Returns a dict with keys suitable for pygradbot.run() or pygradbot.create_clients():
+    Returns a dict with keys suitable for gradbot.run() or gradbot.create_clients():
         llm_model_name, llm_base_url, llm_api_key, gradium_api_key, gradium_base_url
 
     Only includes keys that are actually set in the YAML.
 
     Usage:
         _CLIENT_CONFIG = client_config(config)
-        await pygradbot.run(**_CLIENT_CONFIG, session_config=config, ...)
+        await gradbot.run(**_CLIENT_CONFIG, session_config=config, ...)
     """
     result: dict[str, Any] = {}
 
@@ -98,11 +98,11 @@ def client_config(config: dict[str, Any]) -> dict[str, Any]:
 
 def session_config_overrides(config: dict[str, Any]) -> dict[str, Any]:
     """
-    Convert YAML config into kwargs suitable for pygradbot.SessionConfig().
+    Convert YAML config into kwargs suitable for gradbot.SessionConfig().
 
     Returns a dict that can be unpacked into SessionConfig:
         overrides = session_config_overrides(config)
-        pygradbot.SessionConfig(voice_id=..., instructions=..., **overrides)
+        gradbot.SessionConfig(voice_id=..., instructions=..., **overrides)
     """
     if not config:
         return {}
@@ -150,7 +150,7 @@ def merge_overrides(overrides: dict[str, Any], **base_kwargs: Any) -> dict[str, 
             flush_duration_s=FLUSH_FOR_S,
             rewrite_rules=voice.language.rewrite_rules,
         )
-        config = pygradbot.SessionConfig(
+        config = gradbot.SessionConfig(
             voice_id=..., instructions=..., language=..., tools=...,
             **sc,
         )

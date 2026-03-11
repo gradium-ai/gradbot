@@ -27,10 +27,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-import pygradbot
+import gradbot
 
 # Initialize Rust logging (outputs to stderr)
-pygradbot.init_logging()
+gradbot.init_logging()
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
@@ -116,26 +116,26 @@ class SessionState:
     pending_tasks: list[asyncio.Task] = field(default_factory=list)
 
 
-def lang_to_code(lang: pygradbot.Lang) -> str:
+def lang_to_code(lang: gradbot.Lang) -> str:
     """Convert Lang enum to language code."""
-    if lang == pygradbot.Lang.En:
+    if lang == gradbot.Lang.En:
         return "en"
-    elif lang == pygradbot.Lang.Fr:
+    elif lang == gradbot.Lang.Fr:
         return "fr"
-    elif lang == pygradbot.Lang.De:
+    elif lang == gradbot.Lang.De:
         return "de"
-    elif lang == pygradbot.Lang.Es:
+    elif lang == gradbot.Lang.Es:
         return "es"
-    elif lang == pygradbot.Lang.Pt:
+    elif lang == gradbot.Lang.Pt:
         return "pt"
     return "en"
 
 
-def build_voice_tools() -> list[pygradbot.ToolDef]:
+def build_voice_tools() -> list[gradbot.ToolDef]:
     """Build tool definitions for each voice."""
     tools = []
-    for voice in pygradbot.flagship_voices():
-        tool = pygradbot.ToolDef(
+    for voice in gradbot.flagship_voices():
+        tool = gradbot.ToolDef(
             name=f"switch_to_{voice.name.lower()}",
             description=f"Switch to {voice.name}'s voice. {voice.description}",
             parameters_json=json.dumps(
@@ -150,9 +150,9 @@ def build_voice_tools() -> list[pygradbot.ToolDef]:
     return tools
 
 
-def build_card_tools() -> list[pygradbot.ToolDef]:
+def build_card_tools() -> list[gradbot.ToolDef]:
     """Build tool definitions for card search and lookup."""
-    search_tool = pygradbot.ToolDef(
+    search_tool = gradbot.ToolDef(
         name="search_cards",
         description=(
             "Search for Magic: The Gathering cards by criteria. Uses Scryfall search syntax. "
@@ -179,7 +179,7 @@ def build_card_tools() -> list[pygradbot.ToolDef]:
         ),
     )
 
-    details_tool = pygradbot.ToolDef(
+    details_tool = gradbot.ToolDef(
         name="get_card_details",
         description=(
             "Look up a specific Magic: The Gathering card by name. "
@@ -205,7 +205,7 @@ def build_card_tools() -> list[pygradbot.ToolDef]:
 
 def get_system_prompt(current_voice_name: str) -> str:
     """Build the system prompt for the MTG adviser."""
-    voice = pygradbot.flagship_voice(current_voice_name)
+    voice = gradbot.flagship_voice(current_voice_name)
 
     return f"""You are {voice.name}, an expert Magic: The Gathering strategy adviser who helps beginners learn deck construction and card strategy.
 
@@ -279,7 +279,7 @@ async def list_voices():
             "gender": str(v.gender),
             "description": v.description,
         }
-        for v in pygradbot.flagship_voices()
+        for v in gradbot.flagship_voices()
     ]
     return JSONResponse(content={"voices": voices})
 
@@ -316,7 +316,7 @@ async def websocket_chat(websocket: WebSocket):
 
         # Validate voice
         try:
-            voice = pygradbot.flagship_voice(voice_name)
+            voice = gradbot.flagship_voice(voice_name)
         except RuntimeError:
             await websocket.close(
                 code=4001, reason=f"Unknown voice: {voice_name}"
@@ -335,7 +335,7 @@ async def websocket_chat(websocket: WebSocket):
         )
 
         # Create session config
-        config = pygradbot.SessionConfig(
+        config = gradbot.SessionConfig(
             voice_id=voice.voice_id,
             instructions=get_system_prompt(voice_name),
             language=voice.language,
@@ -348,11 +348,11 @@ async def websocket_chat(websocket: WebSocket):
         )
 
         # Create clients and start session
-        input_handle, output_handle = await pygradbot.run(
+        input_handle, output_handle = await gradbot.run(
             **_CLIENT_CONFIG,
             session_config=config,
-            input_format=pygradbot.AudioFormat.OggOpus,
-            output_format=pygradbot.AudioFormat.Pcm if USE_PCM else pygradbot.AudioFormat.OggOpus,
+            input_format=gradbot.AudioFormat.OggOpus,
+            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
         )
 
         stop_event = asyncio.Event()
@@ -479,17 +479,17 @@ async def websocket_chat(websocket: WebSocket):
             if tool_name.startswith("switch_to_"):
                 new_voice_name = tool_name[len("switch_to_"):].capitalize()
                 # Handle multi-word names
-                for v in pygradbot.flagship_voices():
+                for v in gradbot.flagship_voices():
                     if v.name.lower() == tool_name[len("switch_to_"):]:
                         new_voice_name = v.name
                         break
 
                 try:
-                    new_voice = pygradbot.flagship_voice(new_voice_name)
+                    new_voice = gradbot.flagship_voice(new_voice_name)
                     state.current_voice = new_voice_name
 
                     # Update session config with new voice
-                    new_config = pygradbot.SessionConfig(
+                    new_config = gradbot.SessionConfig(
                         voice_id=new_voice.voice_id,
                         instructions=get_system_prompt(new_voice_name),
                         language=new_voice.language,

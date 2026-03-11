@@ -76,6 +76,9 @@ impl TtsClient {
             voice_id,
             voice: None,
             output_format: gradium::protocol::AudioFormat::Pcm,
+            client_req_id: None,
+            close_ws_on_eos: None,
+            pronunciation_id: None,
             json_config,
         };
         let stream = self
@@ -140,7 +143,7 @@ impl TtsStreamReceiver {
                 Response::Ready(_) => {
                     tracing::debug!("TTS Ready received");
                 }
-                Response::EndOfStream => {
+                Response::EndOfStream { client_req_id: _ } => {
                     tracing::debug!("TTS EndOfStream received");
                 }
             }

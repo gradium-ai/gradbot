@@ -24,7 +24,7 @@
                           ┌─────────────────┐
                           │   Gradbot      │
                           │ Voice Agent     │
-                          │ (pygradbot)    │
+                          │ (gradbot)    │
                           └─────────────────┘
 ```
 
@@ -45,7 +45,7 @@
 ## Required Files
 
 ### ✅ Completed:
-- `pyproject.toml` - Python dependencies (FastAPI, uvicorn, websockets, pygradbot, jericho)
+- `pyproject.toml` - Python dependencies (FastAPI, uvicorn, websockets, gradbot, jericho)
 
 ### ❌ Missing:
 - `main.py` - FastAPI server with Jericho integration

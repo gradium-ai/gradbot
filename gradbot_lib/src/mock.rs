@@ -1,4 +1,4 @@
-//! Mock implementations for testing gradbot_lib.
+//! Mock implementations for testing gradbot.
 //!
 //! This module provides mock STT, TTS, and LLM clients for unit testing
 //! without requiring network access.

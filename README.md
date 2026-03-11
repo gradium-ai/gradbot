@@ -7,7 +7,7 @@ A Rust-based voice AI framework for building real-time conversational agents wit
 ```
 gradbot/
 ├── gradbot_lib/         # Core library (STT/LLM/TTS multiplexing)
-├── pygradbot/           # Python bindings (PyO3 + maturin)
+├── gradbot_py/         # Python bindings (PyO3 + maturin)
 ├── gradbot_server/      # Standalone WebSocket server (remote mode)
 ├── src/                 # Server binary (OpenAI & Twilio WebSocket protocols)
 ├── js_audio_processor/  # Browser audio worklet (Opus encode/decode, jitter buffer)
@@ -21,7 +21,7 @@ The easiest way to get started is with one of the demos using the Python binding
 
 ```bash
 cd demos/simple_chat
-uv sync                  # builds pygradbot from source via maturin
+uv sync                  # builds gradbot from source via maturin
 ```
 
 Set your API keys:
@@ -102,7 +102,7 @@ The core loop in every `main.py` looks like this:
 ```python
 # 1. Define tools
 tools = [
-    pygradbot.ToolDef(
+    gradbot.ToolDef(
         name="add_to_order",
         description="Add a pizza to the order",
         parameters_json='{"type": "object", "properties": {"pizza": {"type": "string"}}, "required": ["pizza"]}'
@@ -110,17 +110,17 @@ tools = [
 ]
 
 # 2. Start session with a system prompt and tools
-config = pygradbot.SessionConfig(
+config = gradbot.SessionConfig(
     voice_id=voice.voice_id,
     instructions="You are Marco, a friendly pizzaiolo...",
-    language=pygradbot.Lang.En,
+    language=gradbot.Lang.En,
     tools=tools,
     assistant_speaks_first=True,
 )
-input_handle, output_handle = await pygradbot.run(
+input_handle, output_handle = await gradbot.run(
     session_config=config,
-    input_format=pygradbot.AudioFormat.OggOpus,
-    output_format=pygradbot.AudioFormat.OggOpus,
+    input_format=gradbot.AudioFormat.OggOpus,
+    output_format=gradbot.AudioFormat.OggOpus,
 )
 
 # 3. Handle tool calls in the output loop
@@ -136,7 +136,7 @@ if msg.msg_type == "tool_call":
 - **Start from `simple_chat`** for basic conversations, or **`fantasy_shop`** if you need tool calling and game state.
 - **Don't overthink the frontend** — the AI assistant can update the HTML for you. Describe the UI you want.
 - **Deferred tool calls** — if a tool takes time (API call, search), just delay the `tool_handle.send()`. The AI will keep talking naturally while waiting. See `hotel` and `web_search` for examples.
-- **Voice selection** — use `pygradbot.flagship_voices()` to list all 14 voices, or `pygradbot.flagship_voice("emma")` to pick one by name.
+- **Voice selection** — use `gradbot.flagship_voices()` to list all 14 voices, or `gradbot.flagship_voice("emma")` to pick one by name.
 - **Mid-conversation config changes** — call `input_handle.send_config(new_config)` to switch voice, language, or system prompt without restarting.
 
 ## Building from source
@@ -149,11 +149,11 @@ cargo clippy             # lint
 
 ## Python bindings
 
-See [pygradbot/README.md](pygradbot/README.md) for the full Python API reference.
+See [gradbot_py/README.md](gradbot_py/README.md) for the full Python API reference.
 
 ## Architecture
 
-**gradbot_lib** coordinates three services in a real-time multiplexing loop:
+**gradbot** (the core library) coordinates three services in a real-time multiplexing loop:
 
 - **STT** (Speech-to-Text) — streams microphone audio to Gradium ASR
 - **LLM** — sends transcriptions to an OpenAI-compatible API, handles tool calls
@@ -205,15 +205,15 @@ gradbot_server:
   api_key: "grd_..."
 ```
 
-No code changes needed — `pygradbot.run()` transparently proxies over the WebSocket. You can also connect explicitly:
+No code changes needed — `gradbot.run()` transparently proxies over the WebSocket. You can also connect explicitly:
 
 ```python
-input_handle, output_handle = await pygradbot.run(
+input_handle, output_handle = await gradbot.run(
     gradbot_url="wss://your-server.com/ws",
     gradbot_api_key="grd_...",
     session_config=config,
-    input_format=pygradbot.AudioFormat.OggOpus,
-    output_format=pygradbot.AudioFormat.OggOpus,
+    input_format=gradbot.AudioFormat.OggOpus,
+    output_format=gradbot.AudioFormat.OggOpus,
 )
 # Same handles, same API — tool calls, events, everything works identically
 ```

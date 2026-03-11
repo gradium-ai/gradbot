@@ -636,9 +636,9 @@ wheels = [
 ]
 
 [[package]]
-name = "pygradbot"
+name = "gradbot"
 version = "0.1.0"
-source = { directory = "../../pygradbot" }
+source = { directory = "../../gradbot_py" }
 
 [[package]]
 name = "python-dotenv"
@@ -1027,7 +1027,7 @@ dependencies = [
     { name = "en-core-web-sm" },
     { name = "fastapi" },
     { name = "jericho" },
-    { name = "pygradbot" },
+    { name = "gradbot" },
     { name = "pyyaml" },
     { name = "spacy" },
     { name = "uvicorn", extra = ["standard"] },
@@ -1039,7 +1039,7 @@ requires-dist = [
     { name = "en-core-web-sm", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" },
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "jericho", specifier = ">=0.1.0" },
-    { name = "pygradbot", directory = "../../pygradbot" },
+    { name = "gradbot", directory = "../../gradbot_py" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "spacy", specifier = ">=3.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.23.0" },

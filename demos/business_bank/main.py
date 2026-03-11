@@ -19,9 +19,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-import pygradbot
+import gradbot
 
-pygradbot.init_logging()
+gradbot.init_logging()
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
@@ -395,9 +395,9 @@ RÈGLES :
 # Tools
 # ---------------------------------------------------------------------------
 
-def build_tools() -> list[pygradbot.ToolDef]:
+def build_tools() -> list[gradbot.ToolDef]:
     return [
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="check_account",
             description="Verify the last 3 digits of a business account number. Call this as soon as the caller provides their digits.",
             parameters_json=json.dumps({
@@ -411,7 +411,7 @@ def build_tools() -> list[pygradbot.ToolDef]:
                 "required": ["digits"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="check_pin",
             description="Verify a business caller's 4-digit PIN after their account has been confirmed. Returns success or failure.",
             parameters_json=json.dumps({
@@ -429,7 +429,7 @@ def build_tools() -> list[pygradbot.ToolDef]:
                 "required": ["business_name", "pin"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="order_replacement_card",
             description="Order a replacement debit card for an authenticated business.",
             parameters_json=json.dumps({
@@ -443,7 +443,7 @@ def build_tools() -> list[pygradbot.ToolDef]:
                 "required": ["business_name"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="get_rate",
             description="Look up pre-approved business loan terms (maximum amount and interest rate) for an authenticated business. This takes some time to query the system — keep chatting with the caller while waiting!",
             parameters_json=json.dumps({
@@ -457,7 +457,7 @@ def build_tools() -> list[pygradbot.ToolDef]:
                 "required": ["business_name"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="confirm_loan",
             description="Confirm and disburse a business loan. The amount must not exceed the pre-approved maximum.",
             parameters_json=json.dumps({
@@ -508,13 +508,13 @@ async def websocket_chat(websocket: WebSocket):
         customer_name = start_msg.get("customer", "Jamie")
         padding_bonus = float(start_msg.get("padding_bonus", 0.0))
         voice_key, lang = AGENT_VOICES.get(agent_name, ("Eva", "en"))
-        lang_enum = {"en": pygradbot.Lang.En, "fr": pygradbot.Lang.Fr}.get(lang, pygradbot.Lang.En)
+        lang_enum = {"en": gradbot.Lang.En, "fr": gradbot.Lang.Fr}.get(lang, gradbot.Lang.En)
         print(f"Starting business bank chat with {agent_name} (voice: {voice_key}, lang: {lang}, customer: {customer_name}, padding_bonus: {padding_bonus})")
 
-        voice = pygradbot.flagship_voice(voice_key)
+        voice = gradbot.flagship_voice(voice_key)
         tools = build_tools()
 
-        config = pygradbot.SessionConfig(
+        config = gradbot.SessionConfig(
             voice_id=voice.voice_id,
             instructions=get_auth_prompt(agent_name, customer_name, lang),
             language=lang_enum,
@@ -527,17 +527,17 @@ async def websocket_chat(websocket: WebSocket):
             ),
         )
 
-        input_handle, output_handle = await pygradbot.run(
+        input_handle, output_handle = await gradbot.run(
             **_CLIENT_CONFIG,
             session_config=config,
-            input_format=pygradbot.AudioFormat.OggOpus,
-            output_format=pygradbot.AudioFormat.Pcm if USE_PCM else pygradbot.AudioFormat.OggOpus,
+            input_format=gradbot.AudioFormat.OggOpus,
+            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
         )
 
         stop_event = asyncio.Event()
 
-        def make_config(instructions: str) -> pygradbot.SessionConfig:
-            return pygradbot.SessionConfig(
+        def make_config(instructions: str) -> gradbot.SessionConfig:
+            return gradbot.SessionConfig(
                 voice_id=voice.voice_id,
                 instructions=instructions,
                 language=lang_enum,

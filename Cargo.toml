@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "gradbot_lib",
-    "pygradbot",
+    "gradbot_py",
     "gradbot_server",
 ]
 resolver = "2"
@@ -25,7 +25,7 @@ byteorder = "1.5.0"
 clap = { version = "4.4.12", features = ["derive"] }
 futures = "0.3.28"
 futures-util = "0.3.30"
-gradium = "0.1.6"
+gradium = "0.1.7"
 kaudio = "0.2.1"
 law-encoder = "0.1.0"
 log = "0.4.20"
@@ -47,7 +47,7 @@ tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.18", features = ["json", "env-filter"] }
 
 [package]
-name = "gradbot"
+name = "gradbot_bin"
 version.workspace = true
 edition.workspace = true
 description.workspace = true
@@ -57,7 +57,7 @@ categories.workspace = true
 license.workspace = true
 
 [dependencies]
-gradbot_lib = { path = "gradbot_lib" }
+gradbot = { path = "gradbot_lib" }
 anyhow = { workspace = true }
 async-openai = { workspace = true }
 axum = { workspace = true }

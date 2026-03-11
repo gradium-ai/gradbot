@@ -1,6 +1,6 @@
 # Voice Text Adventure Demo
 
-A voice-narrated text adventure demo using pygradbot and Jericho.
+A voice-narrated text adventure demo using gradbot and Jericho.
 
 Speak commands to a voice AI narrator who plays classic Z-machine interactive fiction games (Zork, Enchanter, Planetfall, etc.) with you.
 
@@ -15,7 +15,7 @@ cd gradbot/demos/voice_text_adventure
 uv sync
 ```
 
-> **After changing gradbot Rust code**, re-run with `uv sync --reinstall-package pygradbot` to rebuild the package.
+> **After changing gradbot Rust code**, re-run with `uv sync --reinstall-package gradbot` to rebuild the package.
 
 ### Download games
 

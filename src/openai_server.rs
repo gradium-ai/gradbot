@@ -8,7 +8,7 @@ use crate::{Config, openai_protocol};
 use anyhow::Result;
 use axum::extract::ws;
 use futures::StreamExt;
-use gradbot_lib::{
+use gradbot::{
     Event, Lang, Llm, MsgOut, SessionConfig, SessionInputHandle, SessionOutputHandle, SttClient,
     ToolCallHandle, TtsClient,
 };
@@ -144,7 +144,7 @@ async fn msg_in_producer(
                         assistant_speaks_first: true,
                         silence_timeout_s: 5.0,
                         tools: vec![],
-                        flush_duration_s: gradbot_lib::DEFAULT_FLUSH_FOR_S,
+                        flush_duration_s: gradbot::DEFAULT_FLUSH_FOR_S,
                         padding_bonus: 0.0,
                         rewrite_rules: None,
                         stt_extra_config: None,
@@ -200,14 +200,14 @@ pub async fn realtime(
             None
         };
 
-        let (input, output) = match gradbot_lib::start_session(
+        let (input, output) = match gradbot::start_session(
             state.tts_client.clone(),
             state.stt_client.clone(),
             state.llm.clone(),
             None, // Session config will be sent via message
-            gradbot_lib::IoFormat {
-                input: gradbot_lib::decoder::Format::pcm(24000),
-                output: gradbot_lib::encoder::Format::OggOpus,
+            gradbot::IoFormat {
+                input: gradbot::decoder::Format::pcm(24000),
+                output: gradbot::encoder::Format::OggOpus,
             },
         )
         .await

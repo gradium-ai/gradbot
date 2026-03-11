@@ -1,21 +1,21 @@
 # Vibe Coding a Voice Agent with Claude
 
-You can build a fully working voice AI agent in under an hour using Claude and `pygradbot`. No boilerplate, no complex pipelines — just describe what you want your agent to do, and Claude writes the code.
+You can build a fully working voice AI agent in under an hour using Claude and `gradbot`. No boilerplate, no complex pipelines — just describe what you want your agent to do, and Claude writes the code.
 
 This guide is everything you need. It covers the API, the patterns, and — most importantly — the prompt engineering lessons we've learned from building a dozen voice demos.
 
 ## What you're building
 
-A real-time voice agent: the user talks, your agent listens (STT), thinks (LLM), speaks back (TTS), and can call tools mid-conversation. All coordinated by `pygradbot`, which handles the audio pipeline so you only write Python.
+A real-time voice agent: the user talks, your agent listens (STT), thinks (LLM), speaks back (TTS), and can call tools mid-conversation. All coordinated by `gradbot`, which handles the audio pipeline so you only write Python.
 
 ## Setup
 
 ### Option A: pip install
 
 ```bash
-pip install pygradbot
+pip install gradbot
 # or
-uv pip install pygradbot
+uv pip install gradbot
 ```
 
 ### Option B: clone the repo
@@ -30,7 +30,7 @@ The repo includes 12 working demos you can study, modify, or use as starting poi
 
 ### Get your API keys
 
-pygradbot uses the Gradium API for STT and TTS orchestration. Register at [gradium.ai](https://gradium.ai) to get an API key with free credits to get started.
+gradbot uses the Gradium API for STT and TTS orchestration. Register at [gradium.ai](https://gradium.ai) to get an API key with free credits to get started.
 
 We do not provide the LLM — bring your own. Any OpenAI-compatible API will work. We recommend a model that handles tool calls properly but is small enough to be fast and non-thinking. We've had success with Mistral and Qwen.
 
@@ -50,9 +50,9 @@ Here's the smallest working agent — about 60 lines of actual logic:
 import asyncio
 import json
 from fastapi import FastAPI, WebSocket
-import pygradbot
+import gradbot
 
-pygradbot.init_logging()
+gradbot.init_logging()
 app = FastAPI()
 
 @app.websocket("/ws/chat")
@@ -60,10 +60,10 @@ async def websocket_chat(websocket: WebSocket):
     await websocket.accept()
 
     # Pick a voice
-    voice = pygradbot.flagship_voice("Emma")
+    voice = gradbot.flagship_voice("Emma")
 
     # Configure the session
-    config = pygradbot.SessionConfig(
+    config = gradbot.SessionConfig(
         voice_id=voice.voice_id,
         instructions="You are a friendly assistant. Keep responses to 2-3 sentences.",
         language=voice.language,
@@ -72,10 +72,10 @@ async def websocket_chat(websocket: WebSocket):
     )
 
     # Start the voice pipeline
-    input_handle, output_handle = await pygradbot.run(
+    input_handle, output_handle = await gradbot.run(
         session_config=config,
-        input_format=pygradbot.AudioFormat.OggOpus,
-        output_format=pygradbot.AudioFormat.OggOpus,
+        input_format=gradbot.AudioFormat.OggOpus,
+        output_format=gradbot.AudioFormat.OggOpus,
     )
 
     stop = asyncio.Event()
@@ -112,7 +112,7 @@ Run it:
 uvicorn main:app --reload
 ```
 
-That's a working voice agent. The browser sends audio over WebSocket, pygradbot coordinates STT → LLM → TTS, and you get audio back.
+That's a working voice agent. The browser sends audio over WebSocket, gradbot coordinates STT → LLM → TTS, and you get audio back.
 
 ## The API surface
 
@@ -120,10 +120,10 @@ That's a working voice agent. The browser sends audio over WebSocket, pygradbot 
 
 ```python
 # List all available voices
-voices = pygradbot.flagship_voices()
+voices = gradbot.flagship_voices()
 
 # Pick one by name
-voice = pygradbot.flagship_voice("Emma")
+voice = gradbot.flagship_voice("Emma")
 # voice.name          → "Emma"
 # voice.voice_id      → "YTpq7expH9539ERJ"
 # voice.language      → Lang.En
@@ -135,7 +135,7 @@ voice = pygradbot.flagship_voice("Emma")
 ### SessionConfig
 
 ```python
-config = pygradbot.SessionConfig(
+config = gradbot.SessionConfig(
     voice_id=voice.voice_id,           # Required: which voice to use
     instructions="...",                 # Required: system prompt
     language=voice.language,            # Required: Lang.En, Fr, Es, De, Pt
@@ -151,7 +151,7 @@ config = pygradbot.SessionConfig(
 ### Tools
 
 ```python
-tool = pygradbot.ToolDef(
+tool = gradbot.ToolDef(
     name="get_weather",
     description="Get current weather for a city",
     parameters_json=json.dumps({
@@ -204,8 +204,8 @@ Always handle tool calls in a separate `asyncio.create_task()` — never block t
 You can swap voices, prompts, or tools during a live session:
 
 ```python
-new_voice = pygradbot.flagship_voice("Leo")
-new_config = pygradbot.SessionConfig(
+new_voice = gradbot.flagship_voice("Leo")
+new_config = gradbot.SessionConfig(
     voice_id=new_voice.voice_id,
     instructions=new_prompt,
     language=new_voice.language,
@@ -427,7 +427,7 @@ The description is part of the prompt. Use it.
 
 ## Connecting MCP servers
 
-The `mcp_demo` in the repo shows how to connect any MCP server to a voice agent. It dynamically discovers tools via the MCP protocol and bridges them to pygradbot.
+The `mcp_demo` in the repo shows how to connect any MCP server to a voice agent. It dynamically discovers tools via the MCP protocol and bridges them to gradbot.
 
 The demo connects to filesystem and memory servers by default, configurable via `config.yaml`:
 
@@ -466,22 +466,22 @@ The repo includes 12 working demos, from simple to complex:
 | `voice_text_adventure` | Complex | Interactive fiction with state management |
 | `mcp_demo` | Advanced | Dynamic MCP server integration |
 
-Each demo follows the same structure: `main.py` (FastAPI + pygradbot), `static/index.html` (browser UI), `pyproject.toml` (dependencies).
+Each demo follows the same structure: `main.py` (FastAPI + gradbot), `static/index.html` (browser UI), `pyproject.toml` (dependencies).
 
 ## Quick reference
 
 ```python
-import pygradbot
+import gradbot
 
 # Voices
-voice = pygradbot.flagship_voice("Emma")     # Get a specific voice
-voices = pygradbot.flagship_voices()          # List all voices
+voice = gradbot.flagship_voice("Emma")     # Get a specific voice
+voices = gradbot.flagship_voices()          # List all voices
 
 # Languages: Lang.En, Lang.Fr, Lang.Es, Lang.De, Lang.Pt
 
 # Session
-config = pygradbot.SessionConfig(voice_id=..., instructions=..., language=..., tools=[...])
-input_handle, output_handle = await pygradbot.run(session_config=config, ...)
+config = gradbot.SessionConfig(voice_id=..., instructions=..., language=..., tools=[...])
+input_handle, output_handle = await gradbot.run(session_config=config, ...)
 
 # Input
 await input_handle.send_audio(bytes)          # Send audio

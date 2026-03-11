@@ -1,15 +1,15 @@
 [package]
-name = "pygradbot"
+name = "gradbot_py"
 version.workspace = true
 edition.workspace = true
-description = "Python bindings for gradbot_lib"
+description = "Python bindings for gradbot"
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 license.workspace = true
 
 [lib]
-name = "pygradbot"
+name = "gradbot"
 crate-type = ["cdylib"]
 
 [dependencies]
@@ -23,7 +23,7 @@ tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-gradbot_lib = { path = "../gradbot_lib" }
+gradbot = { path = "../gradbot_lib" }
 
 [features]
 extension = ["pyo3/extension-module"]

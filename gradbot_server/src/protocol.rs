@@ -63,7 +63,7 @@ pub enum ServerMessage {
 }
 
 // ---------------------------------------------------------------------------
-// SessionConfigWire — fully-optional mirror of gradbot_lib::SessionConfig
+// SessionConfigWire — fully-optional mirror of gradbot::SessionConfig
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -105,37 +105,37 @@ pub struct ToolDefWire {
 // Conversion helpers
 // ---------------------------------------------------------------------------
 
-fn parse_lang(s: &str) -> gradbot_lib::Lang {
+fn parse_lang(s: &str) -> gradbot::Lang {
     match s {
-        "fr" => gradbot_lib::Lang::Fr,
-        "de" => gradbot_lib::Lang::De,
-        "es" => gradbot_lib::Lang::Es,
-        "pt" => gradbot_lib::Lang::Pt,
-        _ => gradbot_lib::Lang::En,
+        "fr" => gradbot::Lang::Fr,
+        "de" => gradbot::Lang::De,
+        "es" => gradbot::Lang::Es,
+        "pt" => gradbot::Lang::Pt,
+        _ => gradbot::Lang::En,
     }
 }
 
-fn lang_to_str(lang: gradbot_lib::Lang) -> &'static str {
+fn lang_to_str(lang: gradbot::Lang) -> &'static str {
     match lang {
-        gradbot_lib::Lang::En => "en",
-        gradbot_lib::Lang::Fr => "fr",
-        gradbot_lib::Lang::De => "de",
-        gradbot_lib::Lang::Es => "es",
-        gradbot_lib::Lang::Pt => "pt",
+        gradbot::Lang::En => "en",
+        gradbot::Lang::Fr => "fr",
+        gradbot::Lang::De => "de",
+        gradbot::Lang::Es => "es",
+        gradbot::Lang::Pt => "pt",
     }
 }
 
 impl SessionConfigWire {
-    /// Convert to a `gradbot_lib::SessionConfig`, using defaults for missing fields.
-    pub fn to_lib(&self) -> gradbot_lib::SessionConfig {
-        gradbot_lib::SessionConfig {
+    /// Convert to a `gradbot::SessionConfig`, using defaults for missing fields.
+    pub fn to_lib(&self) -> gradbot::SessionConfig {
+        gradbot::SessionConfig {
             voice_id: self.voice_id.clone(),
             instructions: self.instructions.clone(),
             language: self
                 .language
                 .as_deref()
                 .map(parse_lang)
-                .unwrap_or(gradbot_lib::Lang::En),
+                .unwrap_or(gradbot::Lang::En),
             assistant_speaks_first: self.assistant_speaks_first.unwrap_or(true),
             silence_timeout_s: self.silence_timeout_s.unwrap_or(5.0),
             tools: self
@@ -145,7 +145,7 @@ impl SessionConfigWire {
                 .unwrap_or_default(),
             flush_duration_s: self
                 .flush_duration_s
-                .unwrap_or(gradbot_lib::DEFAULT_FLUSH_FOR_S),
+                .unwrap_or(gradbot::DEFAULT_FLUSH_FOR_S),
             padding_bonus: self.padding_bonus.unwrap_or(0.0),
             rewrite_rules: self.rewrite_rules.clone(),
             stt_extra_config: self.stt_extra_config.clone(),
@@ -155,8 +155,8 @@ impl SessionConfigWire {
     }
 }
 
-impl From<&gradbot_lib::SessionConfig> for SessionConfigWire {
-    fn from(c: &gradbot_lib::SessionConfig) -> Self {
+impl From<&gradbot::SessionConfig> for SessionConfigWire {
+    fn from(c: &gradbot::SessionConfig) -> Self {
         Self {
             voice_id: c.voice_id.clone(),
             instructions: c.instructions.clone(),
@@ -175,8 +175,8 @@ impl From<&gradbot_lib::SessionConfig> for SessionConfigWire {
 }
 
 impl ToolDefWire {
-    fn to_lib(&self) -> gradbot_lib::ToolDef {
-        gradbot_lib::ToolDef {
+    fn to_lib(&self) -> gradbot::ToolDef {
+        gradbot::ToolDef {
             name: self.name.clone(),
             description: self.description.clone(),
             parameters: self.parameters.clone(),
@@ -184,8 +184,8 @@ impl ToolDefWire {
     }
 }
 
-impl From<&gradbot_lib::ToolDef> for ToolDefWire {
-    fn from(t: &gradbot_lib::ToolDef) -> Self {
+impl From<&gradbot::ToolDef> for ToolDefWire {
+    fn from(t: &gradbot::ToolDef) -> Self {
         Self {
             name: t.name.clone(),
             description: t.description.clone(),
@@ -203,7 +203,7 @@ impl From<&gradbot_lib::ToolDef> for ToolDefWire {
 pub fn merge_with_pinned(
     client: SessionConfigWire,
     pinned: &SessionConfigWire,
-) -> (gradbot_lib::SessionConfig, Vec<String>) {
+) -> (gradbot::SessionConfig, Vec<String>) {
     let mut pinned_fields = Vec::new();
 
     macro_rules! pick {

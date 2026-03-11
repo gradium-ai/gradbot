@@ -2,7 +2,7 @@ use crate::protocol::{ClientMessage, ServerMessage, SessionConfigWire, merge_wit
 use anyhow::Result;
 use axum::extract::ws;
 use futures::StreamExt;
-use gradbot_lib::{
+use gradbot::{
     Llm, MsgOut, SessionInputHandle, SessionOutputHandle, SttClient, ToolCallHandle, TtsClient,
 };
 use std::collections::HashMap;
@@ -64,12 +64,12 @@ async fn handle_connection_inner(
     let stt = Arc::new(SttClient::new(api_key, &state.gradium_base_url)?);
 
     // Start session — no initial config, wait for client's session.config message
-    let io_format = gradbot_lib::IoFormat {
-        input: gradbot_lib::decoder::Format::OggOpus,
-        output: gradbot_lib::encoder::Format::OggOpus,
+    let io_format = gradbot::IoFormat {
+        input: gradbot::decoder::Format::OggOpus,
+        output: gradbot::encoder::Format::OggOpus,
     };
     let (input, output) =
-        gradbot_lib::start_session(tts, stt, state.llm.clone(), None, io_format).await?;
+        gradbot::start_session(tts, stt, state.llm.clone(), None, io_format).await?;
 
     let (ws_tx, ws_rx) = socket.split();
     let pending_tool_calls: PendingToolCalls = Arc::new(Mutex::new(HashMap::new()));
@@ -93,7 +93,7 @@ async fn handle_connection_inner(
     Ok(())
 }
 
-/// Consumer loop: reads MsgOut from gradbot_lib, sends to WebSocket client.
+/// Consumer loop: reads MsgOut from gradbot, sends to WebSocket client.
 async fn msg_out_consumer(
     ws_tx: Arc<Mutex<WebSocketSender>>,
     mut output: SessionOutputHandle,
@@ -214,7 +214,7 @@ async fn msg_out_consumer(
     Ok(())
 }
 
-/// Producer loop: reads from WebSocket client, dispatches to gradbot_lib session.
+/// Producer loop: reads from WebSocket client, dispatches to gradbot session.
 async fn msg_in_producer(
     mut ws_rx: WebSocketReceiver,
     input: SessionInputHandle,

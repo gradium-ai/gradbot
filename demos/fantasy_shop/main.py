@@ -17,10 +17,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-import pygradbot
+import gradbot
 
 # Initialize Rust logging
-pygradbot.init_logging()
+gradbot.init_logging()
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
@@ -51,11 +51,11 @@ class GameState:
 
 
 LANG_MAP = {
-    "en": pygradbot.Lang.En,
-    "fr": pygradbot.Lang.Fr,
-    "de": pygradbot.Lang.De,
-    "es": pygradbot.Lang.Es,
-    "pt": pygradbot.Lang.Pt,
+    "en": gradbot.Lang.En,
+    "fr": gradbot.Lang.Fr,
+    "de": gradbot.Lang.De,
+    "es": gradbot.Lang.Es,
+    "pt": gradbot.Lang.Pt,
 }
 
 LANG_NAMES = {
@@ -84,7 +84,7 @@ VOICE_MAP = {
 }
 
 
-def get_voice_for_role(language: str, role: str) -> tuple[pygradbot.FlagshipVoice, str]:
+def get_voice_for_role(language: str, role: str) -> tuple[gradbot.FlagshipVoice, str]:
     """Get the appropriate voice and character name for a role in a language.
 
     Args:
@@ -96,7 +96,7 @@ def get_voice_for_role(language: str, role: str) -> tuple[pygradbot.FlagshipVoic
     """
     gender = "masculine" if role == "attendant" else "feminine"
     voice_name, char_name = VOICE_MAP.get((language, gender), VOICE_MAP[("en", gender)])
-    voice = pygradbot.flagship_voice(voice_name)
+    voice = gradbot.flagship_voice(voice_name)
     return voice, char_name
 
 
@@ -201,9 +201,9 @@ Start by simply greeting the customer and asking how {char_name} can help them. 
 """
 
 
-def build_language_tool() -> pygradbot.ToolDef:
+def build_language_tool() -> gradbot.ToolDef:
     """Tool for changing language when customer speaks another language."""
-    return pygradbot.ToolDef(
+    return gradbot.ToolDef(
         name="change_language",
         description="Change the conversation language when the customer speaks in a different language. Supported: en (English), fr (French), de (German), es (Spanish), pt (Portuguese).",
         parameters_json=json.dumps({
@@ -220,11 +220,11 @@ def build_language_tool() -> pygradbot.ToolDef:
     )
 
 
-def build_attendant_tools() -> list[pygradbot.ToolDef]:
+def build_attendant_tools() -> list[gradbot.ToolDef]:
     """Tools available to the shop attendant."""
     return [
         build_language_tool(),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="get_sword_price",
             description="Check the current price of the sword. Call this to see the current price after any changes.",
             parameters_json=json.dumps({
@@ -233,7 +233,7 @@ def build_attendant_tools() -> list[pygradbot.ToolDef]:
                 "required": []
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="kick_out_of_shop",
             description="Kick the customer out of the shop. Use when they try to scam you with fake gems or become abusive. This ends the game.",
             parameters_json=json.dumps({
@@ -247,7 +247,7 @@ def build_attendant_tools() -> list[pygradbot.ToolDef]:
                 "required": ["reason"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="call_manager",
             description="Call the shop manager to handle a special discount request. Use when the customer needs a bigger discount than you can offer.",
             parameters_json=json.dumps({
@@ -261,7 +261,7 @@ def build_attendant_tools() -> list[pygradbot.ToolDef]:
                 "required": ["reason"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="apply_discount",
             description="Try to apply a discount to the sword. As attendant, you can TRY but may not have authority.",
             parameters_json=json.dumps({
@@ -275,7 +275,7 @@ def build_attendant_tools() -> list[pygradbot.ToolDef]:
                 "required": ["reason"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="sell_sword",
             description="Complete the sale of the sword to the customer. Use when the customer agrees to buy at the current price and has enough gold.",
             parameters_json=json.dumps({
@@ -292,11 +292,11 @@ def build_attendant_tools() -> list[pygradbot.ToolDef]:
     ]
 
 
-def build_manager_tools() -> list[pygradbot.ToolDef]:
+def build_manager_tools() -> list[gradbot.ToolDef]:
     """Tools available to the manager."""
     return [
         build_language_tool(),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="get_sword_price",
             description="Check the current price of the sword. Call this to see the current price after any changes.",
             parameters_json=json.dumps({
@@ -305,7 +305,7 @@ def build_manager_tools() -> list[pygradbot.ToolDef]:
                 "required": []
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="kick_out_of_shop",
             description="Kick the customer out of the shop. Use when their intentions for the sword are unworthy (selfish, harmful). This ends the game.",
             parameters_json=json.dumps({
@@ -319,7 +319,7 @@ def build_manager_tools() -> list[pygradbot.ToolDef]:
                 "required": ["reason"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="apply_discount",
             description="Apply a 25 gold coin discount to the sword. Use ONLY when convinced the customer will use the sword to defend the village or fight dragons.",
             parameters_json=json.dumps({
@@ -333,7 +333,7 @@ def build_manager_tools() -> list[pygradbot.ToolDef]:
                 "required": ["reason"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="sell_sword",
             description="Complete the sale of the sword to the customer. Use when the customer agrees to buy at the current price and has enough gold.",
             parameters_json=json.dumps({
@@ -347,7 +347,7 @@ def build_manager_tools() -> list[pygradbot.ToolDef]:
                 "required": ["final_price"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="accept_ruby_gift",
             description="Accept the ruby as a gift from the customer and give them a 25 gold discount in return. Use when the customer offers you their ruby/gem as a gift (not as payment). This removes the ruby from their inventory and reduces the sword price.",
             parameters_json=json.dumps({
@@ -415,7 +415,7 @@ async def websocket_game(websocket: WebSocket):
 
         # Create initial session with attendant
         tools = build_attendant_tools()
-        config = pygradbot.SessionConfig(
+        config = gradbot.SessionConfig(
             voice_id=attendant_voice.voice_id,
             instructions=get_attendant_prompt(state, state.character_name),
             language=LANG_MAP[state.language],
@@ -427,11 +427,11 @@ async def websocket_game(websocket: WebSocket):
             ),
         )
 
-        input_handle, output_handle = await pygradbot.run(
+        input_handle, output_handle = await gradbot.run(
             **_CLIENT_CONFIG,
             session_config=config,
-            input_format=pygradbot.AudioFormat.OggOpus,
-            output_format=pygradbot.AudioFormat.Pcm if USE_PCM else pygradbot.AudioFormat.OggOpus,
+            input_format=gradbot.AudioFormat.OggOpus,
+            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
         )
 
         stop_event = asyncio.Event()
@@ -475,7 +475,7 @@ async def websocket_game(websocket: WebSocket):
                     manager_voice, state.character_name = get_voice_for_role(state.language, "manager")
 
                     # Update to manager
-                    new_config = pygradbot.SessionConfig(
+                    new_config = gradbot.SessionConfig(
                         voice_id=manager_voice.voice_id,
                         instructions=get_manager_prompt(state, state.character_name),
                         language=LANG_MAP[state.language],
@@ -531,7 +531,7 @@ async def websocket_game(websocket: WebSocket):
                         role_desc = "attendant"
 
                     # Update session with new voice and language
-                    new_config = pygradbot.SessionConfig(
+                    new_config = gradbot.SessionConfig(
                         voice_id=new_voice.voice_id,
                         instructions=prompt,
                         language=LANG_MAP[new_lang],

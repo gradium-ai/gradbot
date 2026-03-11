@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use futures_util::StreamExt;
-use gradbot::openai_protocol as oai;
+use gradbot_bin::openai_protocol as oai;
 use std::sync::{Arc, Mutex};
 use tokio_tungstenite::tungstenite as ws;
 

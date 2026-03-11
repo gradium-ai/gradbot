@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 // Re-export core library
-pub use gradbot_lib::{
+pub use gradbot::{
     self, DEFAULT_GRADIUM_BASE_URL, Event, GradbotClients, Lang, Llm, LlmConfig, MsgIn, MsgOut,
     SessionConfig, SessionInputHandle, SessionOutputHandle, SttClient, TtsClient, run,
     start_session,

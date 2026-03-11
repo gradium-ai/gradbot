@@ -19,9 +19,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-import pygradbot
+import gradbot
 
-pygradbot.init_logging()
+gradbot.init_logging()
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
@@ -361,9 +361,9 @@ The lookup takes a few seconds. While waiting, mention the other available servi
 # Tools
 # ---------------------------------------------------------------------------
 
-def build_tools() -> list[pygradbot.ToolDef]:
+def build_tools() -> list[gradbot.ToolDef]:
     return [
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="verifier_compte",
             description="Vérifier les 3 derniers chiffres du numéro d'adhérent. Appeler dès que l'appelant fournit ses chiffres.",
             parameters_json=json.dumps({
@@ -377,7 +377,7 @@ def build_tools() -> list[pygradbot.ToolDef]:
                 "required": ["digits"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="verifier_pin",
             description="Vérifier le code PIN à 4 chiffres d'un adhérent après confirmation du numéro. Retourne succès ou échec.",
             parameters_json=json.dumps({
@@ -395,7 +395,7 @@ def build_tools() -> list[pygradbot.ToolDef]:
                 "required": ["client_name", "pin"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="commander_carte",
             description="Commander une nouvelle carte de mutuelle pour un adhérent authentifié.",
             parameters_json=json.dumps({
@@ -409,7 +409,7 @@ def build_tools() -> list[pygradbot.ToolDef]:
                 "required": ["client_name"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="ajouter_enfant",
             description="Ajouter un enfant sur le contrat d'un adhérent authentifié.",
             parameters_json=json.dumps({
@@ -431,7 +431,7 @@ def build_tools() -> list[pygradbot.ToolDef]:
                 "required": ["client_name", "prenom", "age"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="consulter_remboursement",
             description="Consulter les niveaux de remboursement pour un type de soin selon la formule de l'adhérent. La recherche prend quelques secondes — continuez à discuter avec l'appelant en attendant !",
             parameters_json=json.dumps({
@@ -486,16 +486,16 @@ async def websocket_chat(websocket: WebSocket):
         print(f"Starting insurance chat (agent: {agent_name}, customer: {customer_name}, padding_bonus: {padding_bonus})")
 
         AGENT_VOICES = {
-            "Leo": pygradbot.flagship_voice("Leo").voice_id,
+            "Leo": gradbot.flagship_voice("Leo").voice_id,
             "Constance": "Y4iYxS8PBX",
         }
         voice_id = AGENT_VOICES.get(agent_name, AGENT_VOICES["Leo"])
         tools = build_tools()
 
-        config = pygradbot.SessionConfig(
+        config = gradbot.SessionConfig(
             voice_id=voice_id,
             instructions=get_auth_prompt(agent_name),
-            language=pygradbot.Lang.Fr,
+            language=gradbot.Lang.Fr,
             tools=tools,
             **merge_overrides(_OVERRIDES,
                 flush_duration_s=FLUSH_FOR_S,
@@ -505,20 +505,20 @@ async def websocket_chat(websocket: WebSocket):
             ),
         )
 
-        input_handle, output_handle = await pygradbot.run(
+        input_handle, output_handle = await gradbot.run(
             **_CLIENT_CONFIG,
             session_config=config,
-            input_format=pygradbot.AudioFormat.OggOpus,
-            output_format=pygradbot.AudioFormat.Pcm if USE_PCM else pygradbot.AudioFormat.OggOpus,
+            input_format=gradbot.AudioFormat.OggOpus,
+            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
         )
 
         stop_event = asyncio.Event()
 
-        def make_config(instructions: str) -> pygradbot.SessionConfig:
-            return pygradbot.SessionConfig(
+        def make_config(instructions: str) -> gradbot.SessionConfig:
+            return gradbot.SessionConfig(
                 voice_id=voice_id,
                 instructions=instructions,
-                language=pygradbot.Lang.Fr,
+                language=gradbot.Lang.Fr,
                 tools=tools,
                 **merge_overrides(_OVERRIDES,
                     flush_duration_s=FLUSH_FOR_S,

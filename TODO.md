@@ -114,23 +114,23 @@ Package the Python bindings for easy installation via pip.
 
 **Package structure**:
 ```
-pygradbot/
+gradbot_py/
 ├── pyproject.toml
 ├── Cargo.toml           # pyo3 crate
 ├── src/
 │   └── lib.rs           # pyo3 bindings
 ├── python/
-│   └── pygradbot/
+│   └── gradbot/
 │       ├── __init__.py  # Re-exports
 │       ├── py.typed     # PEP 561 marker
-│       └── _pygradbot.pyi  # Type stubs
+│       └── _gradbot.pyi  # Type stubs
 ├── README.md
 └── examples/
     ├── minimal.py
     └── with_tools.py
 ```
 
-**Type stubs (`_pygradbot.pyi`)**:
+**Type stubs (`_gradbot.pyi`)**:
 ```python
 from typing import Optional, List, Tuple
 from enum import Enum
@@ -287,5 +287,5 @@ jobs:
 
 **Installation**:
 ```bash
-pip install pygradbot
+pip install gradbot
 ```

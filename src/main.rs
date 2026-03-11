@@ -17,7 +17,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let config = gradbot::Config::load(args.config)?;
+    let config = gradbot_bin::Config::load(args.config)?;
 
     let _guard = tracing_init(
         &config.log_dir,
@@ -27,9 +27,9 @@ async fn main() -> Result<()> {
     )?;
     tracing::info!("starting gradbot...");
     match &config.transport {
-        gradbot::Transport::WsOpenai => gradbot::openai_server::serve(config).await?,
-        gradbot::Transport::Twilio(twilio_config) => {
-            gradbot::twilio_server::serve(config.clone(), twilio_config.clone()).await?
+        gradbot_bin::Transport::WsOpenai => gradbot_bin::openai_server::serve(config).await?,
+        gradbot_bin::Transport::Twilio(twilio_config) => {
+            gradbot_bin::twilio_server::serve(config.clone(), twilio_config.clone()).await?
         }
     }
 

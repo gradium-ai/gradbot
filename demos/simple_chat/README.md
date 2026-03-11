@@ -1,6 +1,6 @@
 # Simple Chat Demo
 
-A real-time voice chat demo using pygradbot.
+A real-time voice chat demo using gradbot.
 
 ## Setup
 
@@ -9,9 +9,9 @@ cd gradbot/demos/simple_chat
 uv sync
 ```
 
-This will build pygradbot from source using maturin.
+This will build gradbot from source using maturin.
 
-> **After changing gradbot Rust code**, re-run with `uv sync --reinstall-package pygradbot` to rebuild the package. A plain `uv sync` won't pick up changes if the version hasn't changed.
+> **After changing gradbot Rust code**, re-run with `uv sync --reinstall-package gradbot` to rebuild the package. A plain `uv sync` won't pick up changes if the version hasn't changed.
 
 ## Run
 

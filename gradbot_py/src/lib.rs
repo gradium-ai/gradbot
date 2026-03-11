@@ -11,7 +11,7 @@ fn init_logging() -> PyResult<()> {
     let env_filter = if std::env::var("RUST_LOG").is_ok() {
         tracing_subscriber::EnvFilter::from_default_env()
     } else {
-        tracing_subscriber::EnvFilter::new("gradbot_lib=info,pygradbot=info")
+        tracing_subscriber::EnvFilter::new("gradbot=info,gradbot_py=info")
     };
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
@@ -51,26 +51,26 @@ impl Lang {
     }
 }
 
-impl From<Lang> for gradbot_lib::Lang {
+impl From<Lang> for gradbot::Lang {
     fn from(lang: Lang) -> Self {
         match lang {
-            Lang::En => gradbot_lib::Lang::En,
-            Lang::Fr => gradbot_lib::Lang::Fr,
-            Lang::Es => gradbot_lib::Lang::Es,
-            Lang::De => gradbot_lib::Lang::De,
-            Lang::Pt => gradbot_lib::Lang::Pt,
+            Lang::En => gradbot::Lang::En,
+            Lang::Fr => gradbot::Lang::Fr,
+            Lang::Es => gradbot::Lang::Es,
+            Lang::De => gradbot::Lang::De,
+            Lang::Pt => gradbot::Lang::Pt,
         }
     }
 }
 
-impl From<gradbot_lib::Lang> for Lang {
-    fn from(lang: gradbot_lib::Lang) -> Self {
+impl From<gradbot::Lang> for Lang {
+    fn from(lang: gradbot::Lang) -> Self {
         match lang {
-            gradbot_lib::Lang::En => Lang::En,
-            gradbot_lib::Lang::Fr => Lang::Fr,
-            gradbot_lib::Lang::Es => Lang::Es,
-            gradbot_lib::Lang::De => Lang::De,
-            gradbot_lib::Lang::Pt => Lang::Pt,
+            gradbot::Lang::En => Lang::En,
+            gradbot::Lang::Fr => Lang::Fr,
+            gradbot::Lang::Es => Lang::Es,
+            gradbot::Lang::De => Lang::De,
+            gradbot::Lang::Pt => Lang::Pt,
         }
     }
 }
@@ -83,11 +83,11 @@ pub enum Gender {
     Feminine,
 }
 
-impl From<gradbot_lib::Gender> for Gender {
-    fn from(g: gradbot_lib::Gender) -> Self {
+impl From<gradbot::Gender> for Gender {
+    fn from(g: gradbot::Gender) -> Self {
         match g {
-            gradbot_lib::Gender::Masculine => Gender::Masculine,
-            gradbot_lib::Gender::Feminine => Gender::Feminine,
+            gradbot::Gender::Masculine => Gender::Masculine,
+            gradbot::Gender::Feminine => Gender::Feminine,
         }
     }
 }
@@ -115,16 +115,16 @@ pub enum Country {
     Br,
 }
 
-impl From<gradbot_lib::Country> for Country {
-    fn from(c: gradbot_lib::Country) -> Self {
+impl From<gradbot::Country> for Country {
+    fn from(c: gradbot::Country) -> Self {
         match c {
-            gradbot_lib::Country::Us => Country::Us,
-            gradbot_lib::Country::Gb => Country::Gb,
-            gradbot_lib::Country::Fr => Country::Fr,
-            gradbot_lib::Country::De => Country::De,
-            gradbot_lib::Country::Mx => Country::Mx,
-            gradbot_lib::Country::Es => Country::Es,
-            gradbot_lib::Country::Br => Country::Br,
+            gradbot::Country::Us => Country::Us,
+            gradbot::Country::Gb => Country::Gb,
+            gradbot::Country::Fr => Country::Fr,
+            gradbot::Country::De => Country::De,
+            gradbot::Country::Mx => Country::Mx,
+            gradbot::Country::Es => Country::Es,
+            gradbot::Country::Br => Country::Br,
         }
     }
 }
@@ -182,7 +182,7 @@ pub struct FlagshipVoice {
 ///         print(f"{voice.name}: {voice.voice_id} ({voice.language})")
 #[pyfunction]
 fn flagship_voices() -> Vec<FlagshipVoice> {
-    gradbot_lib::flagship_voices()
+    gradbot::flagship_voices()
         .iter()
         .map(|v| FlagshipVoice {
             name: v.name.to_string(),
@@ -209,7 +209,7 @@ fn flagship_voices() -> Vec<FlagshipVoice> {
 ///     print(voice.language)  # Lang.En
 #[pyfunction]
 fn flagship_voice(name: &str) -> PyResult<FlagshipVoice> {
-    let voice = gradbot_lib::flagship_voice(name).map_err(to_py_err)?;
+    let voice = gradbot::flagship_voice(name).map_err(to_py_err)?;
     Ok(FlagshipVoice {
         name: voice.name.to_string(),
         voice_id: voice.voice_id.to_string(),
@@ -248,12 +248,12 @@ impl ToolDef {
 }
 
 impl ToolDef {
-    fn to_lib(&self) -> PyResult<gradbot_lib::ToolDef> {
+    fn to_lib(&self) -> PyResult<gradbot::ToolDef> {
         let parameters: serde_json::Value =
             serde_json::from_str(&self.parameters_json).map_err(|e| {
                 pyo3::exceptions::PyValueError::new_err(format!("Invalid JSON parameters: {}", e))
             })?;
-        Ok(gradbot_lib::ToolDef {
+        Ok(gradbot::ToolDef {
             name: self.name.clone(),
             description: self.description.clone(),
             parameters,
@@ -336,9 +336,9 @@ impl SessionConfig {
 }
 
 impl SessionConfig {
-    fn to_lib(&self) -> PyResult<gradbot_lib::SessionConfig> {
+    fn to_lib(&self) -> PyResult<gradbot::SessionConfig> {
         let tools: PyResult<Vec<_>> = self.tools.iter().map(|t| t.to_lib()).collect();
-        Ok(gradbot_lib::SessionConfig {
+        Ok(gradbot::SessionConfig {
             voice_id: self.voice_id.clone(),
             instructions: self.instructions.clone(),
             language: self.language.into(),
@@ -407,8 +407,8 @@ pub struct Event {
     pub data: Option<PyObject>,
 }
 
-fn event_from_lib(py: Python<'_>, event: gradbot_lib::Event) -> Event {
-    use gradbot_lib::Event::*;
+fn event_from_lib(py: Python<'_>, event: gradbot::Event) -> Event {
+    use gradbot::Event::*;
     match event {
         Flushing {
             started_listening,
@@ -482,7 +482,7 @@ pub struct ToolCallInfo {
 // ---------------------------------------------------------------------------
 
 enum ToolCallHandleInner {
-    Local(gradbot_lib::ToolCallHandle),
+    Local(gradbot::ToolCallHandle),
     Remote {
         call_id: String,
         ws_tx: tokio::sync::mpsc::Sender<remote::WsOutMsg>,
@@ -608,8 +608,8 @@ pub struct MsgOut {
     pub interrupted: bool,
 }
 
-fn msgout_from_lib(py: Python<'_>, msg: gradbot_lib::MsgOut) -> PyResult<MsgOut> {
-    use gradbot_lib::MsgOut::*;
+fn msgout_from_lib(py: Python<'_>, msg: gradbot::MsgOut) -> PyResult<MsgOut> {
+    use gradbot::MsgOut::*;
     match msg {
         Audio {
             data,
@@ -713,12 +713,12 @@ fn msgout_from_lib(py: Python<'_>, msg: gradbot_lib::MsgOut) -> PyResult<MsgOut>
 // ---------------------------------------------------------------------------
 
 enum InputHandleInner {
-    Local(gradbot_lib::SessionInputHandle),
+    Local(gradbot::SessionInputHandle),
     Remote(remote::RemoteInputHandle),
 }
 
 enum OutputHandleInner {
-    Local(gradbot_lib::SessionOutputHandle),
+    Local(gradbot::SessionOutputHandle),
     Remote(remote::RemoteOutputHandle),
 }
 
@@ -833,19 +833,19 @@ const INPUT_SAMPLE_RATE: usize = 24000;
 const OUTPUT_SAMPLE_RATE: usize = 48000;
 
 impl AudioFormat {
-    fn to_encoder_format(self) -> gradbot_lib::encoder::Format {
+    fn to_encoder_format(self) -> gradbot::encoder::Format {
         match self {
-            AudioFormat::OggOpus => gradbot_lib::encoder::Format::OggOpus,
-            AudioFormat::Pcm => gradbot_lib::encoder::Format::pcm(OUTPUT_SAMPLE_RATE),
-            AudioFormat::Ulaw => gradbot_lib::encoder::Format::ulaw(OUTPUT_SAMPLE_RATE),
+            AudioFormat::OggOpus => gradbot::encoder::Format::OggOpus,
+            AudioFormat::Pcm => gradbot::encoder::Format::pcm(OUTPUT_SAMPLE_RATE),
+            AudioFormat::Ulaw => gradbot::encoder::Format::ulaw(OUTPUT_SAMPLE_RATE),
         }
     }
 
-    fn to_decoder_format(self) -> gradbot_lib::decoder::Format {
+    fn to_decoder_format(self) -> gradbot::decoder::Format {
         match self {
-            AudioFormat::OggOpus => gradbot_lib::decoder::Format::OggOpus,
-            AudioFormat::Pcm => gradbot_lib::decoder::Format::pcm(INPUT_SAMPLE_RATE),
-            AudioFormat::Ulaw => gradbot_lib::decoder::Format::ulaw(INPUT_SAMPLE_RATE),
+            AudioFormat::OggOpus => gradbot::decoder::Format::OggOpus,
+            AudioFormat::Pcm => gradbot::decoder::Format::pcm(INPUT_SAMPLE_RATE),
+            AudioFormat::Ulaw => gradbot::decoder::Format::ulaw(INPUT_SAMPLE_RATE),
         }
     }
 }
@@ -853,7 +853,7 @@ impl AudioFormat {
 /// Shared clients for creating voice AI sessions.
 #[pyclass]
 pub struct GradbotClients {
-    inner: Arc<gradbot_lib::GradbotClients>,
+    inner: Arc<gradbot::GradbotClients>,
 }
 
 /// Create new GradbotClients with optional configuration.
@@ -869,7 +869,7 @@ fn create_clients<'py>(
     max_completion_tokens: Option<u32>,
 ) -> PyResult<Bound<'py, PyAny>> {
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        let clients = gradbot_lib::GradbotClients::new(
+        let clients = gradbot::GradbotClients::new(
             gradium_api_key.as_deref(),
             gradium_base_url.as_deref(),
             llm_base_url.as_deref(),
@@ -908,7 +908,7 @@ impl GradbotClients {
             let (input, output) = inner
                 .start_session(
                     lib_config,
-                    gradbot_lib::IoFormat {
+                    gradbot::IoFormat {
                         input: input_format.to_decoder_format(),
                         output: output_format.to_encoder_format(),
                     },
@@ -976,7 +976,7 @@ fn run<'py>(
     // Local mode (original behavior)
     let lib_config = session_config.map(|c| c.to_lib()).transpose()?;
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        let (input, output) = gradbot_lib::run(
+        let (input, output) = gradbot::run(
             gradium_api_key.as_deref(),
             gradium_base_url.as_deref(),
             llm_base_url.as_deref(),
@@ -984,7 +984,7 @@ fn run<'py>(
             llm_api_key.as_deref(),
             max_completion_tokens,
             lib_config,
-            gradbot_lib::IoFormat {
+            gradbot::IoFormat {
                 input: input_format.to_decoder_format(),
                 output: output_format.to_encoder_format(),
             },
@@ -1004,7 +1004,7 @@ fn run<'py>(
 
 /// Python module for gradbot voice AI library.
 #[pymodule]
-fn pygradbot(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn gradbot(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Lang>()?;
     m.add_class::<Gender>()?;
     m.add_class::<Country>()?;

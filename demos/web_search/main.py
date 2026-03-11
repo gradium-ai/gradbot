@@ -19,9 +19,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from ddgs import DDGS
 
-import pygradbot
+import gradbot
 
-pygradbot.init_logging()
+gradbot.init_logging()
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
@@ -77,9 +77,9 @@ Start by greeting the user and asking what they'd like to search for.
 """
 
 
-def build_tools() -> list[pygradbot.ToolDef]:
+def build_tools() -> list[gradbot.ToolDef]:
     return [
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="web_search",
             description="Search the web for information. Use this whenever the user asks about anything. Keep chatting while waiting for results!",
             parameters_json=json.dumps({
@@ -147,13 +147,13 @@ async def websocket_chat(websocket: WebSocket):
         voice_key = AGENT_VOICES.get(agent_name, "Eva")
         print(f"Starting web search chat with {agent_name} (voice: {voice_key}, padding_bonus: {padding_bonus})")
 
-        voice = pygradbot.flagship_voice(voice_key)
+        voice = gradbot.flagship_voice(voice_key)
         tools = build_tools()
 
-        config = pygradbot.SessionConfig(
+        config = gradbot.SessionConfig(
             voice_id=voice.voice_id,
             instructions=get_prompt(agent_name),
-            language=pygradbot.Lang.En,
+            language=gradbot.Lang.En,
             tools=tools,
             **merge_overrides(_OVERRIDES,
                 flush_duration_s=FLUSH_FOR_S,
@@ -163,11 +163,11 @@ async def websocket_chat(websocket: WebSocket):
             ),
         )
 
-        input_handle, output_handle = await pygradbot.run(
+        input_handle, output_handle = await gradbot.run(
             **_CLIENT_CONFIG,
             session_config=config,
-            input_format=pygradbot.AudioFormat.OggOpus,
-            output_format=pygradbot.AudioFormat.Pcm if USE_PCM else pygradbot.AudioFormat.OggOpus,
+            input_format=gradbot.AudioFormat.OggOpus,
+            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
         )
 
         stop_event = asyncio.Event()

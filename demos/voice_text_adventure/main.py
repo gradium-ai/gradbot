@@ -20,10 +20,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import jericho
-import pygradbot
+import gradbot
 
 # Initialize Rust logging
-pygradbot.init_logging()
+gradbot.init_logging()
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
@@ -42,11 +42,11 @@ GAMES_DIR = Path(__file__).parent / "games"
 
 # Language mappings
 LANG_MAP = {
-    "en": pygradbot.Lang.En,
-    "fr": pygradbot.Lang.Fr,
-    "de": pygradbot.Lang.De,
-    "es": pygradbot.Lang.Es,
-    "pt": pygradbot.Lang.Pt,
+    "en": gradbot.Lang.En,
+    "fr": gradbot.Lang.Fr,
+    "de": gradbot.Lang.De,
+    "es": gradbot.Lang.Es,
+    "pt": gradbot.Lang.Pt,
 }
 
 LANG_NAMES = {
@@ -59,18 +59,18 @@ LANG_NAMES = {
 
 
 LANG_TO_CODE = {
-    pygradbot.Lang.En: "en",
-    pygradbot.Lang.Fr: "fr",
-    pygradbot.Lang.De: "de",
-    pygradbot.Lang.Es: "es",
-    pygradbot.Lang.Pt: "pt",
+    gradbot.Lang.En: "en",
+    gradbot.Lang.Fr: "fr",
+    gradbot.Lang.De: "de",
+    gradbot.Lang.Es: "es",
+    gradbot.Lang.Pt: "pt",
 }
 
 
 def get_voices_by_language() -> dict[str, list[dict]]:
     """Get all flagship voices organized by language."""
     voices_by_lang = {}
-    for voice in pygradbot.flagship_voices():
+    for voice in gradbot.flagship_voices():
         lang_code = LANG_TO_CODE.get(voice.language, "en")
 
         if lang_code not in voices_by_lang:
@@ -88,7 +88,7 @@ def get_voices_by_language() -> dict[str, list[dict]]:
 
 def get_all_voice_names() -> list[str]:
     """Get list of all available voice names."""
-    return [v.name for v in pygradbot.flagship_voices()]
+    return [v.name for v in gradbot.flagship_voices()]
 
 
 @dataclass
@@ -172,12 +172,12 @@ IMPORTANT:
 Start by reading the current location description to the player in {lang_name}."""
 
 
-def build_game_tools() -> list[pygradbot.ToolDef]:
+def build_game_tools() -> list[gradbot.ToolDef]:
     """Tools available to the voice narrator."""
     all_voices = get_all_voice_names()
 
     return [
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="execute_command",
             description="Execute a command in the text adventure game. Use this for any player action like movement (go north, south, east, west), object interaction (take, drop, open, examine), or other game commands.",
             parameters_json=json.dumps({
@@ -191,7 +191,7 @@ def build_game_tools() -> list[pygradbot.ToolDef]:
                 "required": ["command"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="get_valid_commands",
             description="Get a list of currently valid commands the player can use. Helpful when the player is stuck or asking what they can do.",
             parameters_json=json.dumps({
@@ -200,7 +200,7 @@ def build_game_tools() -> list[pygradbot.ToolDef]:
                 "required": []
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="get_game_state",
             description="Get the current game state including location description, score, and moves. Use this to remind yourself or the player of the current situation.",
             parameters_json=json.dumps({
@@ -209,7 +209,7 @@ def build_game_tools() -> list[pygradbot.ToolDef]:
                 "required": []
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="change_language",
             description="Change the narration language. Use when the player speaks in a different language. You are multilingual! Supported: en (English), fr (French), de (German), es (Spanish), pt (Portuguese).",
             parameters_json=json.dumps({
@@ -224,7 +224,7 @@ def build_game_tools() -> list[pygradbot.ToolDef]:
                 "required": ["language"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="change_voice",
             description=f"Change the narrator voice for dramatic effect. Use creatively: spooky voice for dark places, different voice for reading inscriptions, etc. Available voices: {', '.join(all_voices)}",
             parameters_json=json.dumps({
@@ -243,7 +243,7 @@ def build_game_tools() -> list[pygradbot.ToolDef]:
                 "required": ["voice_name"]
             }),
         ),
-        pygradbot.ToolDef(
+        gradbot.ToolDef(
             name="set_narrator_style",
             description="Change the narration style/mood. Use to match the game's atmosphere.",
             parameters_json=json.dumps({
@@ -354,10 +354,10 @@ async def websocket_game(websocket: WebSocket):
         })
 
         # Get initial voice for the narrator
-        voice = pygradbot.flagship_voice(state.voice_name)
+        voice = gradbot.flagship_voice(state.voice_name)
 
         # Create session with narrator tools
-        config = pygradbot.SessionConfig(
+        config = gradbot.SessionConfig(
             voice_id=voice.voice_id,
             instructions=get_narrator_prompt(state),
             language=LANG_MAP[state.language],
@@ -369,11 +369,11 @@ async def websocket_game(websocket: WebSocket):
             ),
         )
 
-        input_handle, output_handle = await pygradbot.run(
+        input_handle, output_handle = await gradbot.run(
             **_CLIENT_CONFIG,
             session_config=config,
-            input_format=pygradbot.AudioFormat.OggOpus,
-            output_format=pygradbot.AudioFormat.Pcm if USE_PCM else pygradbot.AudioFormat.OggOpus,
+            input_format=gradbot.AudioFormat.OggOpus,
+            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
         )
 
         stop_event = asyncio.Event()
@@ -486,8 +486,8 @@ async def websocket_game(websocket: WebSocket):
                         # Pick first voice of that language
                         state.voice_name = voices_by_lang[new_lang][0]["name"]
 
-                    voice = pygradbot.flagship_voice(state.voice_name)
-                    new_config = pygradbot.SessionConfig(
+                    voice = gradbot.flagship_voice(state.voice_name)
+                    new_config = gradbot.SessionConfig(
                         voice_id=voice.voice_id,
                         instructions=get_narrator_prompt(state),
                         language=LANG_MAP[new_lang],
@@ -521,10 +521,10 @@ async def websocket_game(websocket: WebSocket):
                 reason = args.get("reason", "dramatic effect")
 
                 try:
-                    voice = pygradbot.flagship_voice(voice_name)
+                    voice = gradbot.flagship_voice(voice_name)
                     state.voice_name = voice_name
 
-                    new_config = pygradbot.SessionConfig(
+                    new_config = gradbot.SessionConfig(
                         voice_id=voice.voice_id,
                         instructions=get_narrator_prompt(state),
                         language=LANG_MAP[state.language],
@@ -556,8 +556,8 @@ async def websocket_game(websocket: WebSocket):
                 state.narrator_style = style
 
                 # Update prompt with new style
-                voice = pygradbot.flagship_voice(state.voice_name)
-                new_config = pygradbot.SessionConfig(
+                voice = gradbot.flagship_voice(state.voice_name)
+                new_config = gradbot.SessionConfig(
                     voice_id=voice.voice_id,
                     instructions=get_narrator_prompt(state),
                     language=LANG_MAP[state.language],
