@@ -9,7 +9,7 @@ categories.workspace = true
 license.workspace = true
 
 [dependencies]
-gradbot = { path = "../gradbot_lib" }
+gradbot.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true

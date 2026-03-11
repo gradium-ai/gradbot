@@ -23,7 +23,7 @@ tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-gradbot = { path = "../gradbot_lib" }
+gradbot = { workspace = true }
 
 [features]
 extension = ["pyo3/extension-module"]

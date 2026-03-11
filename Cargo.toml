@@ -25,6 +25,7 @@ byteorder = "1.5.0"
 clap = { version = "4.4.12", features = ["derive"] }
 futures = "0.3.28"
 futures-util = "0.3.30"
+gradbot = { path = "gradbot_lib", version = "0.6.4" }
 gradium = "0.1.7"
 kaudio = "0.2.1"
 law-encoder = "0.1.0"
@@ -57,7 +58,7 @@ categories.workspace = true
 license.workspace = true
 
 [dependencies]
-gradbot = { path = "gradbot_lib" }
+gradbot = { workspace = true }
 anyhow = { workspace = true }
 async-openai = { workspace = true }
 axum = { workspace = true }
