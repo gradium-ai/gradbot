@@ -40,13 +40,13 @@ jobs:
           manylinux: auto
           before-script-linux: |
             if command -v yum &> /dev/null; then
-              yum install -y perl-core
+              yum install -y pkgconfig openssl-devel
             elif command -v dnf &> /dev/null; then
-              dnf install -y perl-core
+              dnf install -y pkgconfig openssl-devel
             elif command -v apk &> /dev/null; then
-              apk add perl
+              apk add pkgconf openssl-dev
             elif command -v apt-get &> /dev/null; then
-              apt-get update && apt-get install -y perl
+              apt-get update && apt-get install -y pkg-config libssl-dev
             fi
         env:
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
@@ -77,13 +77,13 @@ jobs:
           manylinux: musllinux_1_2
           before-script-linux: |
             if command -v yum &> /dev/null; then
-              yum install -y perl-core
+              yum install -y pkgconfig openssl-devel
             elif command -v dnf &> /dev/null; then
-              dnf install -y perl-core
+              dnf install -y pkgconfig openssl-devel
             elif command -v apk &> /dev/null; then
-              apk add perl
+              apk add pkgconf openssl-dev
             elif command -v apt-get &> /dev/null; then
-              apt-get update && apt-get install -y perl
+              apt-get update && apt-get install -y pkg-config libssl-dev
             fi
         env:
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"

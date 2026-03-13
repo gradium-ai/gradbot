@@ -14,7 +14,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = { workspace = true }
-openssl = { version = "0.10", features = ["vendored"] }
 futures-util = { workspace = true }
 pyo3 = { workspace = true }
 pyo3-async-runtimes = { version = "0.25", features = ["tokio-runtime"] }
