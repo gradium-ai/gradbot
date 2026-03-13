@@ -48,6 +48,8 @@ jobs:
             elif command -v apt-get &> /dev/null; then
               apt-get update && apt-get install -y perl
             fi
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
@@ -83,6 +85,8 @@ jobs:
             elif command -v apt-get &> /dev/null; then
               apt-get update && apt-get install -y perl
             fi
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
