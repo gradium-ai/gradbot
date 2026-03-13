@@ -20,8 +20,7 @@ gradbot/
 │   ├── simple_chat/     # Basic voice chat demo
 │   ├── voice_changer/   # Multi-voice demo
 │   └── fantasy_shop/    # Game with tool calling
-├── js_audio_processor/  # Browser audio (shared via symlinks)
-└── audiopus_sys-0.2.2/  # Patched Opus codec bindings
+└── js_audio_processor/  # Browser audio (shared via symlinks)
 ```
 
 ### Architecture
