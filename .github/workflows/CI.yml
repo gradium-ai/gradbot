@@ -43,14 +43,13 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter --manifest-path gradbot_py/Cargo.toml
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          container: messense/manylinux2014-cross:x86_64
           docker-options: |
             -e LIBOPUS_STATIC=1
             -e OPUS_STATIC=1
             -e LIBOPUS_NO_PKG=1
             -e OPUS_NO_PKG=1
           manylinux: auto
-        env:
-          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
@@ -81,8 +80,6 @@ jobs:
             -e LIBOPUS_NO_PKG=1
             -e OPUS_NO_PKG=1
           manylinux: musllinux_1_2
-        env:
-          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
@@ -109,8 +106,6 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter --manifest-path gradbot_py/Cargo.toml
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        env:
-          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
