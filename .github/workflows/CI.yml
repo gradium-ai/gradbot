@@ -68,7 +68,7 @@ jobs:
           args: --release --out dist --find-interpreter --manifest-path gradbot_py/Cargo.toml
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           manylinux: musllinux_1_2
-          before-script-linux: apk add openssl-dev perl
+          before-script-linux: apt-get update && apt-get install -y libssl-dev perl
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
