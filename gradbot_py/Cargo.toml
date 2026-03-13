@@ -9,7 +9,7 @@ categories.workspace = true
 license.workspace = true
 
 [lib]
-name = "gradbot"
+name = "_gradbot"
 crate-type = ["cdylib"]
 
 [dependencies]
