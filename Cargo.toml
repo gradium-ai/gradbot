@@ -34,13 +34,13 @@ log = "0.4.20"
 pyo3 = "0.25.0"
 rand = { version = "0.8.5", features = ["getrandom"] }
 regex = "1.10.3"
-reqwest = { version = "0.11", features = ["json", "multipart", "blocking"] }
+reqwest = { version = "0.11", features = ["json", "multipart", "blocking", "rustls-tls"], default-features = false }
 rubato = "0.15.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.115"
 timens = "0.1.10"
 tokio = { version = "1.35.1", features = ["full", "tracing"] }
-tokio-tungstenite = { version = "0.21.0", features = ["rustls", "native-tls"] }
+tokio-tungstenite = { version = "0.21.0", features = ["rustls-tls-webpki-roots"] }
 toml = "0.8.19"
 tower = "0.4.13"
 tower-http = { version = "0.5", features = ["full"] }
