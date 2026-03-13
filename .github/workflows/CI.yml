@@ -40,7 +40,6 @@ jobs:
           args: --release --out dist --find-interpreter --manifest-path gradbot_py/Cargo.toml
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           manylinux: auto
-          before-script-linux: yum install -y openssl-devel perl-IPC-Cmd
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
@@ -68,7 +67,6 @@ jobs:
           args: --release --out dist --find-interpreter --manifest-path gradbot_py/Cargo.toml
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           manylinux: musllinux_1_2
-          before-script-linux: apt-get update && apt-get install -y libssl-dev perl
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
