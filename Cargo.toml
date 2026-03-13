@@ -17,7 +17,7 @@ categories = ["multimedia::audio"]
 
 [workspace.dependencies]
 anyhow = "1"
-async-openai = "0.29.3"
+async-openai = { version = "0.29.3", default-features = false, features = ["rustls"] }
 audiopus_sys = "0.2.2"
 axum = { version = "0.8.1", features = ["ws"] }
 base64 = "0.21.7"
@@ -27,7 +27,7 @@ clap = { version = "4.4.12", features = ["derive"] }
 futures = "0.3.28"
 futures-util = "0.3.30"
 gradbot = { path = "gradbot_lib", version = "0.6.4" }
-gradium = "0.1.7"
+gradium = { version = "0.1.8", default-features = false, features = ["rustls"] }
 kaudio = "0.2.1"
 law-encoder = "0.1.0"
 log = "0.4.20"
