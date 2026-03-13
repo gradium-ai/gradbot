@@ -18,6 +18,12 @@ on:
 permissions:
   contents: read
 
+env:
+  LIBOPUS_STATIC: 1
+  OPUS_STATIC: 1
+  LIBOPUS_NO_PKG: 1
+  OPUS_NO_PKG: 1
+
 jobs:
   linux:
     runs-on: ${{ matrix.platform.runner }}
@@ -37,6 +43,11 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter --manifest-path gradbot_py/Cargo.toml
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          docker-options: |
+            -e LIBOPUS_STATIC=1
+            -e OPUS_STATIC=1
+            -e LIBOPUS_NO_PKG=1
+            -e OPUS_NO_PKG=1
           manylinux: auto
         env:
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
@@ -64,6 +75,11 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter --manifest-path gradbot_py/Cargo.toml
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          docker-options: |
+            -e LIBOPUS_STATIC=1
+            -e OPUS_STATIC=1
+            -e LIBOPUS_NO_PKG=1
+            -e OPUS_NO_PKG=1
           manylinux: musllinux_1_2
         env:
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
