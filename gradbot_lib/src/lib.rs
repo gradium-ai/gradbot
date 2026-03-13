@@ -98,8 +98,8 @@ use std::sync::Arc;
 // Re-export public API
 pub use llm::{Llm, LlmConfig, ToolCall, ToolCallHandle, ToolDef, ToolResult};
 pub use multiplex::{
-    start_session, Event, MsgIn, MsgOut, SessionConfig, SessionInputHandle, SessionOutputHandle,
-    DEFAULT_FLUSH_FOR_S,
+    DEFAULT_FLUSH_FOR_S, Event, MsgIn, MsgOut, SessionConfig, SessionInputHandle,
+    SessionOutputHandle, start_session,
 };
 pub use speech_to_text::SttClient;
 pub use system_prompt::Lang;
