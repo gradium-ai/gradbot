@@ -12,6 +12,11 @@ jobs:
         rust: [stable, nightly]
     steps:
       - uses: actions/checkout@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+      - name: Install CMake 3.x
+        run: pip install 'cmake<4'
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -30,6 +35,11 @@ jobs:
         rust: [stable, nightly]
     steps:
       - uses: actions/checkout@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+      - name: Install CMake 3.x
+        run: pip install 'cmake<4'
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
