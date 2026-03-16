@@ -16,7 +16,7 @@ Example config.yaml:
 
     gradium:
       api_key: "your-gradium-key"
-      base_url: "https://api.gradium.ai/api"
+      base_url: "https://eu.api.gradium.ai/api"
 
     tts:
       padding_bonus: 1.5

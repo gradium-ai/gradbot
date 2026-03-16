@@ -184,7 +184,7 @@ Example `server.toml`:
 ```toml
 addr = "0.0.0.0"
 port = 8080
-gradium_base_url = "https://api.gradium.ai/api"
+gradium_base_url = "https://eu.api.gradium.ai/api"
 
 llm_base_url = "https://api.openai.com/v1"
 llm_api_key = "$LLM_API_KEY"
