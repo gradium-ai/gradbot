@@ -17,11 +17,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 
 import gradbot
-from gradbot.fastapi import websocket_chat_handler
+from gradbot.fastapi import websocket_chat_handler, setup_demo_routes
 
 gradbot.init_logging()
 logger = logging.getLogger(__name__)
@@ -703,26 +702,7 @@ async def get_remboursements():
     ])
 
 
-@app.get("/api/audio-config")
-async def audio_config():
-    return JSONResponse(content={"pcm": USE_PCM})
-
-
-# Serve static files
-static_dir = Path(__file__).parent / "static"
-if static_dir.exists():
-    app.mount("/static", StaticFiles(directory=static_dir, follow_symlink=True), name="static")
-
-
-@app.get("/")
-async def index():
-    index_path = Path(__file__).parent / "static" / "index.html"
-    if index_path.exists():
-        return FileResponse(index_path)
-    return JSONResponse(
-        content={"error": "Frontend not found. Place index.html in static/"},
-        status_code=404,
-    )
+setup_demo_routes(app, static_dir=Path(__file__).parent / "static", use_pcm=USE_PCM)
 
 
 if __name__ == "__main__":

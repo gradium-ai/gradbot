@@ -38,9 +38,8 @@ pub enum Lang {
 
 #[pymethods]
 impl Lang {
-    /// Returns the language code string for use as TTS rewrite_rules.
-    #[getter]
-    fn rewrite_rules(&self) -> &str {
+    /// Returns the language code (e.g., "en", "fr").
+    fn code(&self) -> &str {
         match self {
             Lang::En => "en",
             Lang::Fr => "fr",
@@ -48,6 +47,12 @@ impl Lang {
             Lang::De => "de",
             Lang::Pt => "pt",
         }
+    }
+
+    /// Returns the language code string for use as TTS rewrite_rules.
+    #[getter]
+    fn rewrite_rules(&self) -> &str {
+        self.code()
     }
 }
 
