@@ -11,7 +11,7 @@ llm:
 
 gradium:
   # api_key: "your-gradium-key"    # Gradium API key (or set GRADIUM_API_KEY env var)
-  # base_url: "https://api.gradium.ai/api"  # Gradium base URL (or set GRADIUM_BASE_URL env var)
+  # base_url: "https://eu.api.gradium.ai/api"  # Gradium base URL (or set GRADIUM_BASE_URL env var)
 
 tts:
   # padding_bonus: 0.0        # -4.0 to 4.0, positive = wait longer before finalizing

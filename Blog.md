@@ -36,7 +36,7 @@ We do not provide the LLM — bring your own. Any OpenAI-compatible API will wor
 
 ```bash
 export GRADIUM_API_KEY="your-key"
-export GRADIUM_BASE_URL="https://api.gradium.ai"
+export GRADIUM_BASE_URL="https://eu.api.gradium.ai"
 export LLM_API_KEY="your-key"
 export LLM_BASE_URL="https://api.openai.com/v1"
 export LLM_MODEL="your-model"

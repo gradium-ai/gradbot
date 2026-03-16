@@ -41,7 +41,7 @@
 //! ## Environment Variables
 //!
 //! - `GRADIUM_API_KEY` - API key for Gradium STT/TTS services
-//! - `GRADIUM_BASE_URL` - Base URL for Gradium services (optional, defaults to `https://api.gradium.ai`)
+//! - `GRADIUM_BASE_URL` - Base URL for Gradium services (optional, defaults to `https://eu.api.gradium.ai`)
 //! - `LLM_API_KEY` - API key for OpenAI-compatible LLM API (falls back to `OPENAI_API_KEY`)
 //! - `LLM_BASE_URL` - Base URL for LLM API (optional, defaults to OpenAI's API)
 //! - `LLM_MODEL` - LLM model name (optional, auto-detected if single model available)
@@ -112,7 +112,7 @@ pub struct IoFormat {
 }
 
 /// Default Gradium API base URL.
-pub const DEFAULT_GRADIUM_BASE_URL: &str = "https://api.gradium.ai/api";
+pub const DEFAULT_GRADIUM_BASE_URL: &str = "https://eu.api.gradium.ai/api";
 
 /// Gender of a voice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -385,7 +385,7 @@ pub struct GradbotClients {
 /// # Arguments
 ///
 /// * `gradium_api_key` - API key for Gradium STT/TTS services. Defaults to `GRADIUM_API_KEY` env var.
-/// * `gradium_base_url` - Base URL for Gradium services. Falls back to `GRADIUM_BASE_URL` env var, then `https://api.gradium.ai`.
+/// * `gradium_base_url` - Base URL for Gradium services. Falls back to `GRADIUM_BASE_URL` env var, then `https://eu.api.gradium.ai`.
 /// * `llm_base_url` - Base URL for OpenAI-compatible LLM API. Falls back to `LLM_BASE_URL` env var, then OpenAI's API.
 /// * `llm_model_name` - LLM model name. Resolution order: this parameter > `LLM_MODEL` env var > auto-detect.
 /// * `llm_api_key` - API key for LLM API. Resolution: this parameter > `LLM_API_KEY` env var > `OPENAI_API_KEY` env var.
@@ -431,7 +431,7 @@ impl GradbotClients {
     /// # Arguments
     ///
     /// * `gradium_api_key` - API key for Gradium STT/TTS services. Defaults to `GRADIUM_API_KEY` env var.
-    /// * `gradium_base_url` - Base URL for Gradium services. Falls back to `GRADIUM_BASE_URL` env var, then `https://api.gradium.ai`.
+    /// * `gradium_base_url` - Base URL for Gradium services. Falls back to `GRADIUM_BASE_URL` env var, then `https://eu.api.gradium.ai`.
     /// * `llm_base_url` - Base URL for OpenAI-compatible LLM API. Falls back to `LLM_BASE_URL` env var, then OpenAI's API.
     /// * `llm_model_name` - LLM model name. Resolution order: this parameter > `LLM_MODEL` env var > auto-detect (uses single available model).
     /// * `llm_api_key` - API key for LLM API. Resolution: this parameter > `LLM_API_KEY` env var > `OPENAI_API_KEY` env var.
