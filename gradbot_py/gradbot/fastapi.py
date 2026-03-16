@@ -9,9 +9,12 @@ import asyncio
 import inspect
 import json
 import logging
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 import gradbot
 
@@ -218,3 +221,51 @@ async def _send_error(websocket: WebSocket, exc: Exception, debug: bool) -> None
         "type": "error",
         "message": str(exc) if debug else "An error occurred during the session",
     })
+
+
+def setup_demo_routes(
+    app,
+    *,
+    static_dir: Path | str | None = None,
+    use_pcm: bool = False,
+    voices: bool = False,
+) -> None:
+    """Register standard demo routes on a FastAPI app.
+
+    Parameters
+    ----------
+    app:
+        The FastAPI application instance.
+    static_dir:
+        Path to the static files directory. If provided, ``GET /`` serves
+        ``index.html`` from this directory and ``/static`` is mounted.
+    use_pcm:
+        Value returned by ``GET /api/audio-config``.
+    voices:
+        If *True*, registers ``GET /api/voices`` returning
+        :func:`gradbot.voices_json`.
+    """
+    if static_dir is not None:
+        static_dir = Path(static_dir)
+
+    @app.get("/api/audio-config")
+    async def audio_config():
+        return JSONResponse(content={"pcm": use_pcm})
+
+    if voices:
+        _voices_response = {"voices": gradbot.voices_json()}
+
+        @app.get("/api/voices")
+        async def list_voices():
+            return JSONResponse(content=_voices_response)
+
+    if static_dir is not None:
+        if static_dir.exists():
+            app.mount("/static", StaticFiles(directory=static_dir, follow_symlink=True), name="static")
+
+        @app.get("/")
+        async def index():
+            index_path = static_dir / "index.html"
+            if index_path.exists():
+                return FileResponse(index_path)
+            return JSONResponse(content={"error": "Frontend not found"}, status_code=404)

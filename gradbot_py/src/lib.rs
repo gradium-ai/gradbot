@@ -49,6 +49,11 @@ impl Lang {
             Lang::Pt => "pt",
         }
     }
+
+    /// Returns the language code (e.g., "en", "fr").
+    fn code(&self) -> &str {
+        self.rewrite_rules()
+    }
 }
 
 impl From<Lang> for gradbot::Lang {
