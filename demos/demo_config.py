@@ -43,13 +43,29 @@ import yaml
 
 
 def load_config(demo_dir: str | Path) -> dict[str, Any]:
-    """Load config.yaml from the given demo directory. Returns empty dict if not found."""
-    config_path = Path(demo_dir) / "config.yaml"
-    if not config_path.exists():
-        return {}
-    with open(config_path) as f:
-        config = yaml.safe_load(f) or {}
-    print(f"Loaded config from {config_path}")
+    """Load config.yaml from the demo directory, falling back to the shared demos/ directory.
+
+    Per-demo values override the shared config.
+    """
+    demo_dir = Path(demo_dir)
+    shared_path = demo_dir.parent / "config.yaml"
+    local_path = demo_dir / "config.yaml"
+
+    config: dict[str, Any] = {}
+    if shared_path.exists():
+        with open(shared_path) as f:
+            config = yaml.safe_load(f) or {}
+        print(f"Loaded shared config from {shared_path}")
+    if local_path.exists():
+        with open(local_path) as f:
+            local = yaml.safe_load(f) or {}
+        # Merge: local overrides shared (shallow per top-level key)
+        for key, val in local.items():
+            if isinstance(val, dict) and isinstance(config.get(key), dict):
+                config[key] = {**config[key], **val}
+            else:
+                config[key] = val
+        print(f"Loaded local config from {local_path}")
     return config
 
 

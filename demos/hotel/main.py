@@ -8,18 +8,21 @@ Run with: uvicorn main:app --reload
 """
 
 import asyncio
-import os
 import json
+import logging
+import os
 import random
+import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import gradbot
+from gradbot.fastapi import websocket_chat_handler
 
 gradbot.init_logging()
 
@@ -27,13 +30,14 @@ USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
 FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from demo_config import load_config, session_config_overrides, merge_overrides, client_config
 
 _YAML_CFG = load_config(Path(__file__).parent)
 _OVERRIDES = session_config_overrides(_YAML_CFG)
 _CLIENT_CONFIG = client_config(_YAML_CFG)
+
+logger = logging.getLogger(__name__)
 
 
 def compact_phone(phone: str) -> str:
@@ -56,7 +60,6 @@ class BookingState:
     check_out: str | None = None
     guests: int = 1
     booked: bool = False
-    pending_tasks: list[asyncio.Task] = field(default_factory=list)
 
 
 AGENT_VOICES = {
@@ -293,9 +296,9 @@ def build_tools() -> list[gradbot.ToolDef]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Starting Hotel Reservation Demo...")
+    logger.info("Starting Hotel Reservation Demo...")
     yield
-    print("Shutting down...")
+    logger.info("Shutting down...")
 
 
 app = FastAPI(title="Hotel Reservation Demo", lifespan=lifespan)
@@ -303,25 +306,260 @@ app = FastAPI(title="Hotel Reservation Demo", lifespan=lifespan)
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
-    await websocket.accept()
-
     state = BookingState()
+    tools = build_tools()
 
-    try:
-        start_msg = await websocket.receive_json()
-        if start_msg.get("type") != "start":
-            await websocket.close(code=4000, reason="Expected start message")
+    # These will be set from the start message
+    agent_name = "Sophie"
+    padding_bonus = 0.0
+    voice = None
+
+    def make_config(instructions: str) -> gradbot.SessionConfig:
+        return gradbot.SessionConfig(
+            voice_id=voice.voice_id,
+            instructions=instructions,
+            language=gradbot.Lang.En,
+            tools=tools,
+            **merge_overrides(_OVERRIDES,
+                flush_duration_s=FLUSH_FOR_S,
+                padding_bonus=padding_bonus,
+                rewrite_rules="en",
+            ),
+        )
+
+    async def handle_search_hotels(city_key: str, tool_handle, input_handle, websocket: WebSocket):
+        """Search hotels with a realistic delay."""
+        city_names = {k: v["name"] for k, v in HOTEL_DATA["cities"].items()}
+        city_name = city_names.get(city_key, city_key)
+
+        await websocket.send_json({
+            "type": "tool_started",
+            "tool": "search_hotels",
+            "message": f"Searching hotels in {city_name}...",
+        })
+
+        delay = random.uniform(8, 15)
+        logger.info("Searching hotels in %s (delay: %.1fs)", city_key, delay)
+        await asyncio.sleep(delay)
+
+        city_data = HOTEL_DATA["cities"].get(city_key)
+        if not city_data:
+            available = ", ".join(HOTEL_DATA["cities"].keys())
+            await tool_handle.send(json.dumps({
+                "success": False,
+                "message": f"City '{city_key}' not found. Available cities: {available}.",
+            }))
             return
 
-        agent_name = start_msg.get("agent", "Sophie")
-        padding_bonus = float(start_msg.get("padding_bonus", 0.0))
+        state.current_city = city_key
+
+        hotel_summaries = []
+        hotels_for_frontend = []
+        for hotel in city_data["hotels"]:
+            price_range = [r["price_per_night"] for r in hotel["rooms"]]
+            summary = {
+                "id": hotel["id"],
+                "name": hotel["name"],
+                "stars": hotel["stars"],
+                "description": hotel["description"],
+                "phone": compact_phone(hotel.get("phone", "")),
+                "price_range": f"${min(price_range)} - ${max(price_range)} per night",
+                "amenities": hotel["amenities"],
+            }
+            hotel_summaries.append(summary)
+            hotels_for_frontend.append({
+                **summary,
+                "phone": hotel.get("phone", ""),
+                "image_url": hotel["image_url"],
+            })
+
+        await websocket.send_json({
+            "type": "hotel_results",
+            "city": city_data["name"],
+            "city_image": city_data["image_url"],
+            "hotels": hotels_for_frontend,
+        })
+
+        # Swap to phase 2 prompt
+        phase2 = get_phase2_prompt(agent_name, city_data["name"], hotel_summaries)
+        await input_handle.send_config(make_config(phase2))
+        logger.info("Switched to phase 2 prompt for %s", city_data["name"])
+
+        await tool_handle.send(json.dumps({
+            "success": True,
+            "city": city_data["name"],
+            "country": city_data["country"],
+            "hotels": hotel_summaries,
+            "message": f"Hotels for {city_data['name']} are now loaded. Present the options highlighting star ratings and key features. Ask which one interests them!"
+                f"\n\nREMINDER: You do NOT have room details yet. The INSTANT the caller picks a hotel, call get_hotel_details. Do NOT make up rooms or prices.",
+        }))
+
+        logger.info("Search complete for %s: %d hotels", city_key, len(hotel_summaries))
+
+    async def handle_hotel_details(hotel_id: str, tool_handle, input_handle, websocket: WebSocket):
+        """Get hotel details with a realistic delay."""
+        hotel_name_preview = hotel_id
+        for city_data in HOTEL_DATA["cities"].values():
+            for h in city_data["hotels"]:
+                if h["id"] == hotel_id:
+                    hotel_name_preview = h["name"]
+                    break
+
+        await websocket.send_json({
+            "type": "tool_started",
+            "tool": "get_hotel_details",
+            "message": f"Loading rooms for {hotel_name_preview}...",
+        })
+
+        delay = random.uniform(4, 8)
+        logger.info("Loading details for %s (delay: %.1fs)", hotel_id, delay)
+        await asyncio.sleep(delay)
+
+        hotel = None
+        for city_data in HOTEL_DATA["cities"].values():
+            for h in city_data["hotels"]:
+                if h["id"] == hotel_id:
+                    hotel = h
+                    break
+            if hotel:
+                break
+
+        if not hotel:
+            await tool_handle.send(json.dumps({
+                "success": False,
+                "message": f"Hotel '{hotel_id}' not found.",
+            }))
+            return
+
+        state.selected_hotel_id = hotel_id
+
+        room_summaries = []
+        rooms_for_frontend = []
+        for room in hotel["rooms"]:
+            room_summaries.append({
+                "type": room["type"],
+                "price_per_night": room["price_per_night"],
+                "description": room["description"],
+                "max_guests": room["max_guests"],
+            })
+            rooms_for_frontend.append({
+                **room,
+            })
+
+        await websocket.send_json({
+            "type": "hotel_details",
+            "hotel": {
+                "id": hotel["id"],
+                "name": hotel["name"],
+                "stars": hotel["stars"],
+                "phone": hotel.get("phone", ""),
+                "description": hotel["description"],
+                "image_url": hotel["image_url"],
+                "amenities": hotel["amenities"],
+                "rooms": rooms_for_frontend,
+            },
+        })
+
+        # Swap to phase 3 prompt
+        phone = compact_phone(hotel.get("phone", ""))
+        phase3 = get_phase3_prompt(agent_name, hotel["name"], room_summaries, phone)
+        await input_handle.send_config(make_config(phase3))
+        logger.info("Switched to phase 3 prompt for %s", hotel["name"])
+
+        await tool_handle.send(json.dumps({
+            "success": True,
+            "hotel_name": hotel["name"],
+            "stars": hotel["stars"],
+            "phone": phone,
+            "amenities": hotel["amenities"],
+            "rooms": room_summaries,
+            "message": f"Room details for {hotel['name']} are ready. Present each room type with its price per night. Help them choose!",
+        }))
+
+        logger.info("Details loaded for %s", hotel_id)
+
+    async def handle_book_room(args: dict, tool_handle, websocket: WebSocket):
+        """Process a booking."""
+        hotel_id = args["hotel_id"]
+        room_type = args["room_type"]
+
+        hotel = None
+        room = None
+        for city_data in HOTEL_DATA["cities"].values():
+            for h in city_data["hotels"]:
+                if h["id"] == hotel_id:
+                    hotel = h
+                    for r in h["rooms"]:
+                        if r["type"].lower() == room_type.lower():
+                            room = r
+                            break
+                    break
+            if hotel:
+                break
+
+        if not hotel or not room:
+            await tool_handle.send(json.dumps({
+                "success": False,
+                "message": "Could not find the specified hotel or room type.",
+            }))
+            return
+
+        state.booked = True
+        confirmation = f"{random.choice('ABCDEFGHJKLMNPQRSTUVWXYZ')}{random.randint(1000, 9999)}"
+
+        booking_info = {
+            "confirmation_number": confirmation,
+            "hotel": hotel["name"],
+            "room": room["type"],
+            "price_per_night": room["price_per_night"],
+            "check_in": args["check_in"],
+            "check_out": args["check_out"],
+            "guests": args["guests"],
+            "guest_name": args["guest_name"],
+        }
+
+        await websocket.send_json({
+            "type": "booking_confirmed",
+            "booking": booking_info,
+        })
+
+        await tool_handle.send(json.dumps({
+            "success": True,
+            "booking": booking_info,
+            "message": f"Booking confirmed! Confirmation number: {confirmation}. Congratulate the caller and summarize their reservation details.",
+        }))
+
+        logger.info("Booking confirmed: %s", confirmation)
+
+    async def handle_tool_call(tool_call, tool_handle, input_handle, websocket):
+        tool_name = tool_call.tool_name
+        args = json.loads(tool_call.args_json)
+        logger.info("Tool call: %s - %s", tool_name, args)
+
+        if tool_name == "search_hotels":
+            city = args.get("city", "").lower().strip()
+            await handle_search_hotels(city, tool_handle, input_handle, websocket)
+
+        elif tool_name == "get_hotel_details":
+            hotel_id = args.get("hotel_id", "")
+            await handle_hotel_details(hotel_id, tool_handle, input_handle, websocket)
+
+        elif tool_name == "book_room":
+            await handle_book_room(args, tool_handle, websocket)
+
+        else:
+            await tool_handle.send_error(f"Unknown tool: {tool_name}")
+
+    def on_start(msg: dict) -> gradbot.SessionConfig:
+        nonlocal agent_name, padding_bonus, voice
+        agent_name = msg.get("agent", "Sophie")
+        padding_bonus = float(msg.get("padding_bonus", 0.0))
         voice_key = AGENT_VOICES.get(agent_name, "Eva")
-        print(f"Starting hotel reservation chat with {agent_name} (voice: {voice_key}, padding_bonus: {padding_bonus})")
-
         voice = gradbot.flagship_voice(voice_key)
-        tools = build_tools()
+        logger.info("Starting hotel reservation chat with %s (voice: %s, padding_bonus: %s)",
+                     agent_name, voice_key, padding_bonus)
 
-        config = gradbot.SessionConfig(
+        return gradbot.SessionConfig(
             voice_id=voice.voice_id,
             instructions=get_phase1_prompt(agent_name),
             language=gradbot.Lang.En,
@@ -334,371 +572,14 @@ async def websocket_chat(websocket: WebSocket):
             ),
         )
 
-        input_handle, output_handle = await gradbot.run(
-            **_CLIENT_CONFIG,
-            session_config=config,
-            input_format=gradbot.AudioFormat.OggOpus,
-            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
-        )
-
-        stop_event = asyncio.Event()
-
-        def make_config(instructions: str) -> gradbot.SessionConfig:
-            return gradbot.SessionConfig(
-                voice_id=voice.voice_id,
-                instructions=instructions,
-                language=gradbot.Lang.En,
-                tools=tools,
-                **merge_overrides(_OVERRIDES,
-                    flush_duration_s=FLUSH_FOR_S,
-                    padding_bonus=padding_bonus,
-                    rewrite_rules="en",
-                ),
-            )
-
-        async def handle_search_hotels(city_key: str, tool_handle):
-            """Search hotels with a realistic delay."""
-            city_names = {k: v["name"] for k, v in HOTEL_DATA["cities"].items()}
-            city_name = city_names.get(city_key, city_key)
-
-            # Notify frontend of the tool call
-            await websocket.send_json({
-                "type": "tool_started",
-                "tool": "search_hotels",
-                "message": f"Searching hotels in {city_name}...",
-            })
-
-            delay = random.uniform(8, 15)
-            print(f"Searching hotels in {city_key} (delay: {delay:.1f}s)")
-            await asyncio.sleep(delay)
-
-            city_data = HOTEL_DATA["cities"].get(city_key)
-            if not city_data:
-                available = ", ".join(HOTEL_DATA["cities"].keys())
-                await tool_handle.send(json.dumps({
-                    "success": False,
-                    "message": f"City '{city_key}' not found. Available cities: {available}.",
-                }))
-                return
-
-            state.current_city = city_key
-
-            # Build hotel summaries for the LLM (include phone numbers)
-            hotel_summaries = []
-            hotels_for_frontend = []
-            for hotel in city_data["hotels"]:
-                price_range = [r["price_per_night"] for r in hotel["rooms"]]
-                summary = {
-                    "id": hotel["id"],
-                    "name": hotel["name"],
-                    "stars": hotel["stars"],
-                    "description": hotel["description"],
-                    "phone": compact_phone(hotel.get("phone", "")),
-                    "price_range": f"${min(price_range)} - ${max(price_range)} per night",
-                    "amenities": hotel["amenities"],
-                }
-                hotel_summaries.append(summary)
-                hotels_for_frontend.append({
-                    **summary,
-                    "phone": hotel.get("phone", ""),
-                    "image_url": hotel["image_url"],
-                })
-
-            # Send to frontend
-            await websocket.send_json({
-                "type": "hotel_results",
-                "city": city_data["name"],
-                "city_image": city_data["image_url"],
-                "hotels": hotels_for_frontend,
-            })
-
-            # Swap to phase 2 prompt
-            phase2 = get_phase2_prompt(agent_name, city_data["name"], hotel_summaries)
-            await input_handle.send_config(make_config(phase2))
-            print(f"Switched to phase 2 prompt for {city_data['name']}")
-
-            # Send tool result to LLM
-            hotel_names_str = ", ".join(h["name"] for h in hotel_summaries)
-            await tool_handle.send(json.dumps({
-                "success": True,
-                "city": city_data["name"],
-                "country": city_data["country"],
-                "hotels": hotel_summaries,
-                "message": f"Hotels for {city_data['name']} are now loaded. Present the options highlighting star ratings and key features. Ask which one interests them!"
-                    f"\n\nREMINDER: You do NOT have room details yet. The INSTANT the caller picks a hotel, call get_hotel_details. Do NOT make up rooms or prices.",
-            }))
-
-            print(f"Search complete for {city_key}: {len(hotel_summaries)} hotels")
-
-        async def handle_hotel_details(hotel_id: str, tool_handle):
-            """Get hotel details with a realistic delay."""
-            # Find hotel name for the notification
-            hotel_name_preview = hotel_id
-            for city_data in HOTEL_DATA["cities"].values():
-                for h in city_data["hotels"]:
-                    if h["id"] == hotel_id:
-                        hotel_name_preview = h["name"]
-                        break
-
-            # Notify frontend of the tool call
-            await websocket.send_json({
-                "type": "tool_started",
-                "tool": "get_hotel_details",
-                "message": f"Loading rooms for {hotel_name_preview}...",
-            })
-
-            delay = random.uniform(4, 8)
-            print(f"Loading details for {hotel_id} (delay: {delay:.1f}s)")
-            await asyncio.sleep(delay)
-
-            # Find the hotel
-            hotel = None
-            for city_data in HOTEL_DATA["cities"].values():
-                for h in city_data["hotels"]:
-                    if h["id"] == hotel_id:
-                        hotel = h
-                        break
-                if hotel:
-                    break
-
-            if not hotel:
-                await tool_handle.send(json.dumps({
-                    "success": False,
-                    "message": f"Hotel '{hotel_id}' not found.",
-                }))
-                return
-
-            state.selected_hotel_id = hotel_id
-
-            # Build room info for LLM
-            room_summaries = []
-            rooms_for_frontend = []
-            for room in hotel["rooms"]:
-                room_summaries.append({
-                    "type": room["type"],
-                    "price_per_night": room["price_per_night"],
-                    "description": room["description"],
-                    "max_guests": room["max_guests"],
-                })
-                rooms_for_frontend.append({
-                    **room,
-                })
-
-            # Send to frontend
-            await websocket.send_json({
-                "type": "hotel_details",
-                "hotel": {
-                    "id": hotel["id"],
-                    "name": hotel["name"],
-                    "stars": hotel["stars"],
-                    "phone": hotel.get("phone", ""),
-                    "description": hotel["description"],
-                    "image_url": hotel["image_url"],
-                    "amenities": hotel["amenities"],
-                    "rooms": rooms_for_frontend,
-                },
-            })
-
-            # Swap to phase 3 prompt
-            phone = compact_phone(hotel.get("phone", ""))
-            phase3 = get_phase3_prompt(agent_name, hotel["name"], room_summaries, phone)
-            await input_handle.send_config(make_config(phase3))
-            print(f"Switched to phase 3 prompt for {hotel['name']}")
-
-            # Send tool result to LLM
-            await tool_handle.send(json.dumps({
-                "success": True,
-                "hotel_name": hotel["name"],
-                "stars": hotel["stars"],
-                "phone": phone,
-                "amenities": hotel["amenities"],
-                "rooms": room_summaries,
-                "message": f"Room details for {hotel['name']} are ready. Present each room type with its price per night. Help them choose!",
-            }))
-
-            print(f"Details loaded for {hotel_id}")
-
-        async def handle_book_room(args: dict, tool_handle):
-            """Process a booking."""
-            hotel_id = args["hotel_id"]
-            room_type = args["room_type"]
-
-            # Find hotel and room
-            hotel = None
-            room = None
-            for city_data in HOTEL_DATA["cities"].values():
-                for h in city_data["hotels"]:
-                    if h["id"] == hotel_id:
-                        hotel = h
-                        for r in h["rooms"]:
-                            if r["type"].lower() == room_type.lower():
-                                room = r
-                                break
-                        break
-                if hotel:
-                    break
-
-            if not hotel or not room:
-                await tool_handle.send(json.dumps({
-                    "success": False,
-                    "message": "Could not find the specified hotel or room type.",
-                }))
-                return
-
-            state.booked = True
-            confirmation = f"{random.choice('ABCDEFGHJKLMNPQRSTUVWXYZ')}{random.randint(1000, 9999)}"
-
-            booking_info = {
-                "confirmation_number": confirmation,
-                "hotel": hotel["name"],
-                "room": room["type"],
-                "price_per_night": room["price_per_night"],
-                "check_in": args["check_in"],
-                "check_out": args["check_out"],
-                "guests": args["guests"],
-                "guest_name": args["guest_name"],
-            }
-
-            # Send to frontend
-            await websocket.send_json({
-                "type": "booking_confirmed",
-                "booking": booking_info,
-            })
-
-            # Send to LLM
-            await tool_handle.send(json.dumps({
-                "success": True,
-                "booking": booking_info,
-                "message": f"Booking confirmed! Confirmation number: {confirmation}. Congratulate the caller and summarize their reservation details.",
-            }))
-
-            print(f"Booking confirmed: {confirmation}")
-
-        async def handle_tool_call(tool_call, tool_handle):
-            tool_name = tool_call.tool_name
-            args = json.loads(tool_call.args_json)
-            print(f"Tool call: {tool_name} - {args}")
-
-            if tool_name == "search_hotels":
-                city = args.get("city", "").lower().strip()
-                task = asyncio.create_task(handle_search_hotels(city, tool_handle))
-                state.pending_tasks.append(task)
-                task.add_done_callback(lambda t: state.pending_tasks.remove(t) if t in state.pending_tasks else None)
-
-            elif tool_name == "get_hotel_details":
-                hotel_id = args.get("hotel_id", "")
-                task = asyncio.create_task(handle_hotel_details(hotel_id, tool_handle))
-                state.pending_tasks.append(task)
-                task.add_done_callback(lambda t: state.pending_tasks.remove(t) if t in state.pending_tasks else None)
-
-            elif tool_name == "book_room":
-                await handle_book_room(args, tool_handle)
-
-            else:
-                await tool_handle.send_error(f"Unknown tool: {tool_name}")
-
-        async def process_output():
-            while not stop_event.is_set():
-                try:
-                    msg = await output_handle.receive()
-                    if msg is None:
-                        break
-
-                    if msg.msg_type == "audio":
-                        await websocket.send_json({
-                            "type": "audio_timing",
-                            "start_s": msg.start_s,
-                            "stop_s": msg.stop_s,
-                            "turn_idx": msg.turn_idx,
-                            "interrupted": msg.interrupted,
-                        })
-                        await websocket.send_bytes(msg.data)
-
-                    elif msg.msg_type == "tts_text":
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "text": msg.text,
-                            "is_user": False,
-                            "stop_s": msg.stop_s,
-                            "turn_idx": msg.turn_idx,
-                        })
-
-                    elif msg.msg_type == "stt_text":
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "text": msg.text,
-                            "is_user": True,
-                        })
-
-                    elif msg.msg_type == "tool_call":
-                        asyncio.create_task(handle_tool_call(msg.tool_call, msg.tool_call_handle))
-
-                    elif msg.msg_type == "event":
-                        await websocket.send_json({
-                            "type": "event",
-                            "event": msg.event.event_type,
-                        })
-
-                except Exception as e:
-                    print(f"Output processing error: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    try:
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": str(e) if DEBUG else "An error occurred during the session",
-                        })
-                    except:
-                        pass
-                    break
-
-        async def receive_audio():
-            while not stop_event.is_set():
-                try:
-                    msg = await websocket.receive()
-                    if "text" in msg:
-                        data = json.loads(msg["text"])
-                        if data.get("type") == "stop":
-                            stop_event.set()
-                            await input_handle.close()
-                            break
-                    elif "bytes" in msg:
-                        await input_handle.send_audio(msg["bytes"])
-                except WebSocketDisconnect:
-                    stop_event.set()
-                    await input_handle.close()
-                    break
-                except Exception as e:
-                    print(f"Receive error: {e}")
-                    stop_event.set()
-                    break
-
-        await asyncio.gather(
-            process_output(),
-            receive_audio(),
-            return_exceptions=True,
-        )
-
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-        import traceback
-        traceback.print_exc()
-        try:
-            await websocket.send_json({
-                "type": "error",
-                "message": str(e) if DEBUG else "An error occurred while starting the session",
-            })
-        except:
-            pass
-    finally:
-        for task in state.pending_tasks:
-            if not task.done():
-                task.cancel()
-        state.pending_tasks.clear()
-        try:
-            await websocket.close()
-        except:
-            pass
+    await websocket_chat_handler(
+        websocket,
+        on_start=on_start,
+        on_tool_call=handle_tool_call,
+        run_kwargs=_CLIENT_CONFIG,
+        output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
+        debug=DEBUG,
+    )
 
 
 @app.get("/api/audio-config")

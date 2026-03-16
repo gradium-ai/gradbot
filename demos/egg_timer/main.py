@@ -14,18 +14,19 @@ Run with: uvicorn main:app --reload
 """
 
 import asyncio
-import os
 import json
-from contextlib import asynccontextmanager
+import logging
+import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import gradbot
+from gradbot.fastapi import websocket_chat_handler
 
 # Initialize Rust logging (outputs to stderr)
 gradbot.init_logging()
@@ -34,13 +35,14 @@ USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
 FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from demo_config import load_config, session_config_overrides, merge_overrides, client_config
 
 _YAML_CFG = load_config(Path(__file__).parent)
 _OVERRIDES = session_config_overrides(_YAML_CFG)
 _CLIENT_CONFIG = client_config(_YAML_CFG)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -49,10 +51,6 @@ class Timer:
 
     duration_s: int
     reason: str
-    task: Optional[asyncio.Task] = None
-    tool_handle: Optional[object] = (
-        None  # ToolCallHandle - stored to send result when timer expires
-    )
 
 
 @dataclass
@@ -66,17 +64,11 @@ class SessionState:
 
 def lang_to_code(lang: gradbot.Lang) -> str:
     """Convert Lang enum to language code."""
-    if lang == gradbot.Lang.En:
-        return "en"
-    elif lang == gradbot.Lang.Fr:
-        return "fr"
-    elif lang == gradbot.Lang.De:
-        return "de"
-    elif lang == gradbot.Lang.Es:
-        return "es"
-    elif lang == gradbot.Lang.Pt:
-        return "pt"
-    return "en"
+    mapping = {
+        gradbot.Lang.En: "en", gradbot.Lang.Fr: "fr", gradbot.Lang.De: "de",
+        gradbot.Lang.Es: "es", gradbot.Lang.Pt: "pt",
+    }
+    return mapping.get(lang, "en")
 
 
 def build_voice_tools() -> list[gradbot.ToolDef]:
@@ -180,14 +172,7 @@ Start by greeting the user and asking how you can help with timers today!
 """
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("Starting Egg Timer Demo...")
-    yield
-    print("Shutting down...")
-
-
-app = FastAPI(title="Egg Timer Demo", lifespan=lifespan)
+app = FastAPI(title="Egg Timer Demo")
 
 
 @app.get("/api/voices")
@@ -209,57 +194,17 @@ async def list_voices():
 
 
 @app.websocket("/ws/chat")
-async def websocket_chat(websocket: WebSocket):
-    """
-    WebSocket endpoint for voice chat with timers and voice switching.
+async def ws_chat(websocket: WebSocket):
+    state = SessionState()
+    voice_tools = build_voice_tools()
+    timer_tool = build_timer_tool()
+    tools = voice_tools + [timer_tool]
 
-    Protocol:
-    - Client sends JSON: {"type": "start", "voice_name": "Emma"}
-    - Client sends binary: raw audio data (PCM 16-bit, 24kHz, mono)
-    - Server sends JSON: {"type": "transcript", "text": "...", "is_user": true/false}
-    - Server sends JSON: {"type": "voice_change", "voice_name": "..."}
-    - Server sends JSON: {"type": "timer_set", "timer_id": "...", "duration_s": 300, "reason": "..."}
-    - Server sends JSON: {"type": "timer_expired", "timer_id": "...", "reason": "..."}
-    - Server sends JSON: {"type": "event", "event": "..."}
-    - Server sends binary: audio data (PCM)
-    - Client sends JSON: {"type": "stop"} to end
-    """
-    await websocket.accept()
-
-    try:
-        # Wait for start message
-        start_msg = await websocket.receive_json()
-        if start_msg.get("type") != "start":
-            await websocket.close(code=4000, reason="Expected start message")
-            return
-
-        voice_name = start_msg.get("voice_name", "Emma")
-
-        # Validate voice
-        try:
-            voice = gradbot.flagship_voice(voice_name)
-        except RuntimeError:
-            await websocket.close(
-                code=4001, reason=f"Unknown voice: {voice_name}"
-            )
-            return
-
-        # Initialize session state
-        state = SessionState(current_voice=voice_name)
-        print(f"Starting egg timer chat with voice={voice_name}")
-
-        # Build tools for voice switching and timers
-        voice_tools = build_voice_tools()
-        timer_tool = build_timer_tool()
-        tools = voice_tools + [timer_tool]
-        print(
-            f"Built {len(tools)} tools: {len(voice_tools)} voice tools + 1 timer tool"
-        )
-
-        # Create session config
-        config = gradbot.SessionConfig(
+    def make_config(voice_name: str) -> gradbot.SessionConfig:
+        voice = gradbot.flagship_voice(voice_name)
+        return gradbot.SessionConfig(
             voice_id=voice.voice_id,
-            instructions=get_system_prompt(voice_name, []),
+            instructions=get_system_prompt(voice_name, list(state.timers.values())),
             language=voice.language,
             tools=tools,
             **merge_overrides(_OVERRIDES,
@@ -269,279 +214,137 @@ async def websocket_chat(websocket: WebSocket):
             ),
         )
 
-        # Create clients and start session
-        input_handle, output_handle = await gradbot.run(
-            **_CLIENT_CONFIG,
-            session_config=config,
-            input_format=gradbot.AudioFormat.OggOpus,
-            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
-        )
+    async def on_tool_call(tool_call, tool_handle, input_handle, websocket):
+        tool_name = tool_call.tool_name
+        args = json.loads(tool_call.args_json)
 
-        stop_event = asyncio.Event()
+        logger.info("Tool call: %s - %s", tool_name, args)
 
-        async def handle_timer_expiration(timer_id: str, timer: Timer):
-            """Handle when a timer expires - send result via tool_handle."""
-            await asyncio.sleep(timer.duration_s)
+        # Handle voice switching
+        if tool_name.startswith("switch_to_"):
+            raw_name = tool_name[len("switch_to_"):]
+            new_voice_name = raw_name.capitalize()
+            # Handle multi-word names
+            for v in gradbot.flagship_voices():
+                if v.name.lower() == raw_name:
+                    new_voice_name = v.name
+                    break
 
+            try:
+                new_voice = gradbot.flagship_voice(new_voice_name)
+                state.current_voice = new_voice_name
+
+                # Update session config with new voice (includes active timers)
+                new_config = gradbot.SessionConfig(
+                    voice_id=new_voice.voice_id,
+                    instructions=get_system_prompt(
+                        new_voice_name, list(state.timers.values())
+                    ),
+                    language=new_voice.language,
+                    tools=tools,
+                    **merge_overrides(_OVERRIDES,
+                        flush_duration_s=FLUSH_FOR_S,
+                        rewrite_rules=new_voice.language.rewrite_rules,
+                    ),
+                )
+                await input_handle.send_config(new_config)
+
+                # Notify client of voice change
+                await websocket.send_json(
+                    {
+                        "type": "voice_change",
+                        "voice_name": new_voice_name,
+                        "description": new_voice.description,
+                    }
+                )
+
+                # Send success to LLM
+                await tool_handle.send(
+                    json.dumps(
+                        {
+                            "success": True,
+                            "message": f"Voice switched to {new_voice_name}. You are now speaking with this voice and personality.",
+                        }
+                    )
+                )
+            except RuntimeError as e:
+                await tool_handle.send_error(str(e))
+
+        # Handle timer setting
+        elif tool_name == "set_timer":
+            duration_s = args.get("duration_seconds", 60)
+            reason = args.get("reason", "unnamed timer")
+
+            # Create timer ID
+            state.timer_counter += 1
+            timer_id = f"timer_{state.timer_counter}"
+
+            # Create timer object
+            timer = Timer(duration_s=duration_s, reason=reason)
+            state.timers[timer_id] = timer
+
+            logger.info("Timer set: %s - %s (%ds)", timer_id, reason, duration_s)
+
+            # Notify client
+            await websocket.send_json(
+                {
+                    "type": "timer_set",
+                    "timer_id": timer_id,
+                    "duration_s": duration_s,
+                    "reason": reason,
+                    "active_timers": len(state.timers),
+                }
+            )
+
+            # Sleep until timer expires (this task is tracked and cancelled on session end)
+            await asyncio.sleep(duration_s)
+
+            # Timer expired
             if timer_id in state.timers:
-                # Remove from active timers
                 del state.timers[timer_id]
 
-                print(f"Timer expired: {timer.reason} ({timer.duration_s}s)")
+                logger.info("Timer expired: %s (%ds)", reason, duration_s)
 
                 # Notify client
                 await websocket.send_json(
                     {
                         "type": "timer_expired",
                         "timer_id": timer_id,
-                        "reason": timer.reason,
-                        "duration_s": timer.duration_s,
+                        "reason": reason,
+                        "duration_s": duration_s,
                     }
                 )
 
-                # Send timer completion result to LLM via the stored tool_handle
-                if timer.tool_handle:
-                    await timer.tool_handle.send(
-                        json.dumps(
-                            {
-                                "success": True,
-                                "timer_id": timer_id,
-                                "reason": timer.reason,
-                                "duration_s": timer.duration_s,
-                                "message": f"The timer for '{timer.reason}' has expired after {timer.duration_s} seconds. Please inform the user that their timer is done.",
-                            }
-                        )
-                    )
-
-        async def handle_tool_call(tool_call, tool_handle):
-            """Handle voice switching and timer tool calls."""
-            nonlocal state, tools
-
-            tool_name = tool_call.tool_name
-            args = json.loads(tool_call.args_json)
-
-            print(f"Tool call: {tool_name} - {args}")
-
-            # Handle voice switching
-            if tool_name.startswith("switch_to_"):
-                new_voice_name = tool_name[len("switch_to_") :].capitalize()
-                # Handle multi-word names
-                for v in gradbot.flagship_voices():
-                    if v.name.lower() == tool_name[len("switch_to_") :]:
-                        new_voice_name = v.name
-                        break
-
-                try:
-                    new_voice = gradbot.flagship_voice(new_voice_name)
-                    state.current_voice = new_voice_name
-
-                    # Update session config with new voice
-                    active_timers = list(state.timers.values())
-                    new_config = gradbot.SessionConfig(
-                        voice_id=new_voice.voice_id,
-                        instructions=get_system_prompt(
-                            new_voice_name, active_timers
-                        ),
-                        language=new_voice.language,
-                        tools=tools,
-                        **merge_overrides(_OVERRIDES,
-                            flush_duration_s=FLUSH_FOR_S,
-                            rewrite_rules=new_voice.language.rewrite_rules,
-                        ),
-                    )
-                    await input_handle.send_config(new_config)
-
-                    # Notify client of voice change
-                    await websocket.send_json(
+                # Send timer completion result to LLM
+                await tool_handle.send(
+                    json.dumps(
                         {
-                            "type": "voice_change",
-                            "voice_name": new_voice_name,
-                            "description": new_voice.description,
+                            "success": True,
+                            "timer_id": timer_id,
+                            "reason": reason,
+                            "duration_s": duration_s,
+                            "message": f"The timer for '{reason}' has expired after {duration_s} seconds. Please inform the user that their timer is done.",
                         }
                     )
-
-                    # Send success to LLM
-                    await tool_handle.send(
-                        json.dumps(
-                            {
-                                "success": True,
-                                "message": f"Voice switched to {new_voice_name}. You are now speaking with this voice and personality.",
-                            }
-                        )
-                    )
-                except RuntimeError as e:
-                    await tool_handle.send_error(str(e))
-
-            # Handle timer setting
-            elif tool_name == "set_timer":
-                duration_s = args.get("duration_seconds", 60)
-                reason = args.get("reason", "unnamed timer")
-
-                # Create timer ID
-                state.timer_counter += 1
-                timer_id = f"timer_{state.timer_counter}"
-
-                # Create timer object with tool_handle stored
-                timer = Timer(
-                    duration_s=duration_s,
-                    reason=reason,
-                    tool_handle=tool_handle,
-                )
-                state.timers[timer_id] = timer
-
-                # Start expiration task (result will be sent when timer expires)
-                timer.task = asyncio.create_task(
-                    handle_timer_expiration(timer_id, timer)
                 )
 
-                print(f"Timer set: {timer_id} - {reason} ({duration_s}s)")
+        else:
+            await tool_handle.send_error(f"Unknown tool: {tool_name}")
 
-                # Notify client
-                await websocket.send_json(
-                    {
-                        "type": "timer_set",
-                        "timer_id": timer_id,
-                        "duration_s": duration_s,
-                        "reason": reason,
-                        "active_timers": len(state.timers),
-                    }
-                )
-
-                # DON'T send result yet - it will be sent when timer expires via tool_handle
-
-            else:
-                await tool_handle.send_error(f"Unknown tool: {tool_name}")
-
-        async def process_output():
-            """Receive output from gradbot and send to client."""
-            while not stop_event.is_set():
-                try:
-                    msg = await output_handle.receive()
-                    if msg is None:
-                        break
-
-                    if msg.msg_type == "audio":
-                        # Send audio timing before binary data
-                        await websocket.send_json(
-                            {
-                                "type": "audio_timing",
-                                "start_s": msg.start_s,
-                                "stop_s": msg.stop_s,
-                                "turn_idx": msg.turn_idx,
-                                "interrupted": msg.interrupted,
-                            }
-                        )
-                        await websocket.send_bytes(msg.data)
-
-                    elif msg.msg_type == "tts_text":
-                        await websocket.send_json(
-                            {
-                                "type": "transcript",
-                                "text": msg.text,
-                                "is_user": False,
-                                "stop_s": msg.stop_s,
-                                "turn_idx": msg.turn_idx,
-                            }
-                        )
-
-                    elif msg.msg_type == "stt_text":
-                        await websocket.send_json(
-                            {
-                                "type": "transcript",
-                                "text": msg.text,
-                                "is_user": True,
-                            }
-                        )
-
-                    elif msg.msg_type == "tool_call":
-                        asyncio.create_task(
-                            handle_tool_call(
-                                msg.tool_call, msg.tool_call_handle
-                            )
-                        )
-
-                    elif msg.msg_type == "event":
-                        await websocket.send_json(
-                            {
-                                "type": "event",
-                                "event": msg.event.event_type,
-                            }
-                        )
-
-                except Exception as e:
-                    print(f"Output processing error: {e}")
-                    try:
-                        await websocket.send_json(
-                            {
-                                "type": "error",
-                                "message": str(e) if DEBUG else "An error occurred during the session",
-                            }
-                        )
-                    except:
-                        pass
-                    break
-
-        async def receive_audio():
-            """Receive audio from client and send to gradbot."""
-            while not stop_event.is_set():
-                try:
-                    msg = await websocket.receive()
-                    if "text" in msg:
-                        data = json.loads(msg["text"])
-                        msg_type = data.get("type")
-                        if msg_type == "stop":
-                            stop_event.set()
-                            await input_handle.close()
-                            break
-                    elif "bytes" in msg:
-                        await input_handle.send_audio(msg["bytes"])
-                except WebSocketDisconnect:
-                    stop_event.set()
-                    await input_handle.close()
-                    break
-                except Exception as e:
-                    print(f"Receive error: {e}")
-                    stop_event.set()
-                    break
-
-        # Run both tasks
-        await asyncio.gather(
-            process_output(),
-            receive_audio(),
-            return_exceptions=True,
-        )
-
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-        import traceback
-
-        traceback.print_exc()
-        try:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "message": str(e) if DEBUG else "An error occurred while starting the session",
-                }
-            )
-        except:
-            pass
-    finally:
-        # Cancel all active timer tasks
-        try:
-            for timer in state.timers.values():
-                if timer.task and not timer.task.done():
-                    timer.task.cancel()
-        except:
-            pass
-        try:
-            await websocket.close()
-        except:
-            pass
+    await websocket_chat_handler(
+        websocket,
+        on_start=lambda msg: make_config(msg.get("voice_name", "Emma")),
+        on_tool_call=on_tool_call,
+        run_kwargs=_CLIENT_CONFIG,
+        output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
+        debug=DEBUG,
+    )
 
 
 @app.get("/api/audio-config")
 async def audio_config():
     return JSONResponse(content={"pcm": USE_PCM})
+
 
 # Serve static files
 static_dir = Path(__file__).parent / "static"

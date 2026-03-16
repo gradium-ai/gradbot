@@ -8,26 +8,27 @@ Run with: uvicorn main:app --reload
 """
 
 import asyncio
-import os
 import json
-from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+import logging
+import os
+import sys
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from ddgs import DDGS
 
 import gradbot
+from gradbot.fastapi import websocket_chat_handler
 
 gradbot.init_logging()
+logger = logging.getLogger(__name__)
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
 FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from demo_config import load_config, session_config_overrides, merge_overrides, client_config
 
@@ -105,52 +106,71 @@ async def do_search(query: str, retries: int = 3) -> list[dict]:
                 None, lambda: DDGS().text(query, max_results=5)
             )
             if results:
-                print(f"Search '{query}': {len(results)} results (attempt {attempt + 1})")
+                logger.info("Search '%s': %d results (attempt %d)", query, len(results), attempt + 1)
                 return results
-            print(f"Search '{query}': empty results (attempt {attempt + 1}/{retries})")
+            logger.info("Search '%s': empty results (attempt %d/%d)", query, attempt + 1, retries)
         except Exception as e:
-            print(f"Search '{query}': error on attempt {attempt + 1}/{retries}: {e}")
+            logger.warning("Search '%s': error on attempt %d/%d: %s", query, attempt + 1, retries, e)
         if attempt < retries - 1:
             await asyncio.sleep(1.5 * (attempt + 1))
     return []  # Each: {"title": str, "href": str, "body": str}
 
 
-@dataclass
-class SessionState:
-    pending_tasks: list[asyncio.Task] = field(default_factory=list)
+async def handle_web_search(query: str, tool_handle, websocket: WebSocket):
+    """Search the web and send results to frontend + LLM."""
+    await websocket.send_json({
+        "type": "tool_started",
+        "message": f"Searching for \"{query}\"...",
+    })
+
+    try:
+        results = await do_search(query)
+    except Exception as e:
+        logger.error("Search error: %s", e)
+        await websocket.send_json({
+            "type": "search_results",
+            "query": query,
+            "results": [],
+        })
+        await tool_handle.send(json.dumps({
+            "success": False,
+            "message": f"Search failed: {e}",
+        }))
+        return
+
+    await websocket.send_json({
+        "type": "search_results",
+        "query": query,
+        "results": results,
+    })
+
+    await tool_handle.send(json.dumps({
+        "success": True,
+        "query": query,
+        "results": results,
+        "message": f"Found {len(results)} results for \"{query}\". Discuss the most relevant findings with the user. Be concise.",
+    }))
+
+    logger.info("Search complete for '%s': %d results", query, len(results))
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("Starting Web Search Demo...")
-    yield
-    print("Shutting down...")
-
-
-app = FastAPI(title="Web Search Demo", lifespan=lifespan)
+app = FastAPI(title="Web Search Demo")
 
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
-    await websocket.accept()
 
-    state = SessionState()
-
-    try:
-        start_msg = await websocket.receive_json()
-        if start_msg.get("type") != "start":
-            await websocket.close(code=4000, reason="Expected start message")
-            return
-
-        agent_name = start_msg.get("agent", "Alex")
-        padding_bonus = float(start_msg.get("padding_bonus", 0.0))
+    async def on_start(msg: dict) -> gradbot.SessionConfig:
+        agent_name = msg.get("agent", "Alex")
+        padding_bonus = float(msg.get("padding_bonus", 0.0))
         voice_key = AGENT_VOICES.get(agent_name, "Eva")
-        print(f"Starting web search chat with {agent_name} (voice: {voice_key}, padding_bonus: {padding_bonus})")
+        logger.info("Starting web search chat with %s (voice: %s, padding_bonus: %s)",
+                     agent_name, voice_key, padding_bonus)
 
         voice = gradbot.flagship_voice(voice_key)
         tools = build_tools()
 
-        config = gradbot.SessionConfig(
+        return gradbot.SessionConfig(
             voice_id=voice.voice_id,
             instructions=get_prompt(agent_name),
             language=gradbot.Lang.En,
@@ -163,170 +183,25 @@ async def websocket_chat(websocket: WebSocket):
             ),
         )
 
-        input_handle, output_handle = await gradbot.run(
-            **_CLIENT_CONFIG,
-            session_config=config,
-            input_format=gradbot.AudioFormat.OggOpus,
-            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
-        )
+    async def on_tool(tool_call, tool_handle, input_handle, websocket):
+        tool_name = tool_call.tool_name
+        args = json.loads(tool_call.args_json)
+        logger.info("Tool call: %s - %s", tool_name, args)
 
-        stop_event = asyncio.Event()
+        if tool_name == "web_search":
+            query = args.get("query", "")
+            await handle_web_search(query, tool_handle, websocket)
+        else:
+            await tool_handle.send_error(f"Unknown tool: {tool_name}")
 
-        async def handle_web_search(query: str, tool_handle):
-            """Search the web and send results to frontend + LLM."""
-            # Notify frontend immediately
-            await websocket.send_json({
-                "type": "tool_started",
-                "message": f"Searching for \"{query}\"...",
-            })
-
-            try:
-                results = await do_search(query)
-            except Exception as e:
-                print(f"Search error: {e}")
-                await websocket.send_json({
-                    "type": "search_results",
-                    "query": query,
-                    "results": [],
-                })
-                await tool_handle.send(json.dumps({
-                    "success": False,
-                    "message": f"Search failed: {e}",
-                }))
-                return
-
-            # Send results to frontend
-            await websocket.send_json({
-                "type": "search_results",
-                "query": query,
-                "results": results,
-            })
-
-            # Send results to LLM
-            await tool_handle.send(json.dumps({
-                "success": True,
-                "query": query,
-                "results": results,
-                "message": f"Found {len(results)} results for \"{query}\". Discuss the most relevant findings with the user. Be concise.",
-            }))
-
-            print(f"Search complete for '{query}': {len(results)} results")
-
-        async def handle_tool_call(tool_call, tool_handle):
-            tool_name = tool_call.tool_name
-            args = json.loads(tool_call.args_json)
-            print(f"Tool call: {tool_name} - {args}")
-
-            if tool_name == "web_search":
-                query = args.get("query", "")
-                task = asyncio.create_task(handle_web_search(query, tool_handle))
-                state.pending_tasks.append(task)
-                task.add_done_callback(lambda t: state.pending_tasks.remove(t) if t in state.pending_tasks else None)
-            else:
-                await tool_handle.send_error(f"Unknown tool: {tool_name}")
-
-        async def process_output():
-            while not stop_event.is_set():
-                try:
-                    msg = await output_handle.receive()
-                    if msg is None:
-                        break
-
-                    if msg.msg_type == "audio":
-                        await websocket.send_json({
-                            "type": "audio_timing",
-                            "start_s": msg.start_s,
-                            "stop_s": msg.stop_s,
-                            "turn_idx": msg.turn_idx,
-                            "interrupted": msg.interrupted,
-                        })
-                        await websocket.send_bytes(msg.data)
-
-                    elif msg.msg_type == "tts_text":
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "text": msg.text,
-                            "is_user": False,
-                            "stop_s": msg.stop_s,
-                            "turn_idx": msg.turn_idx,
-                        })
-
-                    elif msg.msg_type == "stt_text":
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "text": msg.text,
-                            "is_user": True,
-                        })
-
-                    elif msg.msg_type == "tool_call":
-                        asyncio.create_task(handle_tool_call(msg.tool_call, msg.tool_call_handle))
-
-                    elif msg.msg_type == "event":
-                        await websocket.send_json({
-                            "type": "event",
-                            "event": msg.event.event_type,
-                        })
-
-                except Exception as e:
-                    print(f"Output processing error: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    try:
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": str(e) if DEBUG else "An error occurred during the session",
-                        })
-                    except:
-                        pass
-                    break
-
-        async def receive_audio():
-            while not stop_event.is_set():
-                try:
-                    msg = await websocket.receive()
-                    if "text" in msg:
-                        data = json.loads(msg["text"])
-                        if data.get("type") == "stop":
-                            stop_event.set()
-                            await input_handle.close()
-                            break
-                    elif "bytes" in msg:
-                        await input_handle.send_audio(msg["bytes"])
-                except WebSocketDisconnect:
-                    stop_event.set()
-                    await input_handle.close()
-                    break
-                except Exception as e:
-                    print(f"Receive error: {e}")
-                    stop_event.set()
-                    break
-
-        await asyncio.gather(
-            process_output(),
-            receive_audio(),
-            return_exceptions=True,
-        )
-
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-        import traceback
-        traceback.print_exc()
-        try:
-            await websocket.send_json({
-                "type": "error",
-                "message": str(e) if DEBUG else "An error occurred while starting the session",
-            })
-        except:
-            pass
-    finally:
-        for task in state.pending_tasks:
-            if not task.done():
-                task.cancel()
-        state.pending_tasks.clear()
-        try:
-            await websocket.close()
-        except:
-            pass
+    await websocket_chat_handler(
+        websocket,
+        on_start=on_start,
+        on_tool_call=on_tool,
+        run_kwargs=_CLIENT_CONFIG,
+        output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
+        debug=DEBUG,
+    )
 
 
 @app.get("/api/audio-config")

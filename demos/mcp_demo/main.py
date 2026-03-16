@@ -14,18 +14,19 @@ On each connection, the demo:
 Run with: uvicorn main:app --reload
 """
 
-import asyncio
-import os
 import json
+import logging
+import os
 import sys
 from contextlib import asynccontextmanager, AsyncExitStack
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import gradbot
+from gradbot.fastapi import websocket_chat_handler
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -42,6 +43,8 @@ from demo_config import load_config, session_config_overrides, merge_overrides, 
 _YAML_CFG = load_config(Path(__file__).parent)
 _OVERRIDES = session_config_overrides(_YAML_CFG)
 _CLIENT_CONFIG = client_config(_YAML_CFG)
+
+logger = logging.getLogger(__name__)
 
 # Default MCP server configurations
 DEFAULT_MCP_SERVERS = [
@@ -92,7 +95,7 @@ class MCPServer:
         self.tools = tools_response.tools
         self.tool_names = {t.name for t in self.tools}
 
-        print(f"MCP [{self.name}] connected — {len(self.tools)} tools: {', '.join(self.tool_names)}")
+        logger.info("MCP [%s] connected - %d tools: %s", self.name, len(self.tools), ", ".join(self.tool_names))
 
     async def call_tool(self, tool_name: str, arguments: dict) -> str:
         """Call a tool on this MCP server."""
@@ -115,9 +118,9 @@ class MCPServer:
             if self._stack:
                 await self._stack.aclose()
         except Exception as e:
-            print(f"MCP [{self.name}] close error: {e}")
+            logger.error("MCP [%s] close error: %s", self.name, e)
         self.session = None
-        print(f"MCP [{self.name}] disconnected")
+        logger.info("MCP [%s] disconnected", self.name)
 
 
 class MCPManager:
@@ -142,9 +145,7 @@ class MCPManager:
                 for tool_name in server.tool_names:
                     self._tool_to_server[tool_name] = server
             except Exception as e:
-                print(f"MCP [{cfg['name']}] failed to connect: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error("MCP [%s] failed to connect: %s", cfg["name"], e, exc_info=True)
 
     async def disconnect_all(self):
         """Disconnect all MCP servers."""
@@ -260,8 +261,8 @@ HOW TO USE TOOLS:
 - If a tool call fails, explain the error in plain language
 
 CONVERSATION STYLE:
-- Keep responses conversational and natural — you're a voice assistant
-- Don't read out raw JSON or technical details — interpret results for the user
+- Keep responses conversational and natural - you're a voice assistant
+- Don't read out raw JSON or technical details - interpret results for the user
 - Be proactive: if you created a file, mention what's in it; if you read one, summarize it
 - For the memory/knowledge graph tools, be conversational about what you remember
 
@@ -275,11 +276,11 @@ _app_tool_descriptions: list[dict] = []
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Starting MCP Voice Demo...")
+    logger.info("Starting MCP Voice Demo...")
     # Ensure workspace directory exists
     os.makedirs("/tmp/mcp-workspace", exist_ok=True)
     yield
-    print("Shutting down...")
+    logger.info("Shutting down...")
 
 
 app = FastAPI(title="MCP Voice Demo", lifespan=lifespan)
@@ -311,43 +312,23 @@ async def list_tools():
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
-    """
-    WebSocket endpoint for voice chat with MCP tools.
+    """WebSocket endpoint for voice chat with MCP tools."""
 
-    Protocol:
-    - Client sends JSON: {"type": "start", "voice_name": "Emma"}
-    - Client sends binary: audio data (Ogg Opus)
-    - Server sends JSON: {"type": "transcript", "text": "...", "is_user": true/false}
-    - Server sends JSON: {"type": "voice_change", "voice_name": "..."}
-    - Server sends JSON: {"type": "tool_result", "tool": "...", "result": "..."}
-    - Server sends JSON: {"type": "event", "event": "..."}
-    - Server sends binary: audio data
-    - Client sends JSON: {"type": "stop"} to end
-    """
-    await websocket.accept()
-
+    # Per-session MCP manager
     mcp_mgr = MCPManager(_MCP_SERVERS_CFG)
+    current_voice = "Emma"
+    tool_descs: list[dict] = []
+    tools: list[gradbot.ToolDef] = []
 
-    try:
-        # Wait for start message
-        start_msg = await websocket.receive_json()
-        if start_msg.get("type") != "start":
-            await websocket.close(code=4000, reason="Expected start message")
-            return
+    async def on_start(msg: dict) -> gradbot.SessionConfig:
+        nonlocal current_voice, tool_descs, tools
 
-        voice_name = start_msg.get("voice_name", "Emma")
+        voice_name = msg.get("voice_name", "Emma")
 
         # Validate voice
-        try:
-            voice = gradbot.flagship_voice(voice_name)
-        except RuntimeError:
-            await websocket.close(
-                code=4001, reason=f"Unknown voice: {voice_name}"
-            )
-            return
-
+        voice = gradbot.flagship_voice(voice_name)
         current_voice = voice_name
-        print(f"Starting MCP chat with voice={voice_name}")
+        logger.info("Starting MCP chat with voice=%s", voice_name)
 
         # Connect MCP servers
         await websocket.send_json({"type": "status", "message": "Connecting to MCP servers..."})
@@ -355,8 +336,7 @@ async def websocket_chat(websocket: WebSocket):
 
         if not mcp_mgr.servers:
             await websocket.send_json({"type": "error", "message": "No MCP servers connected"})
-            await websocket.close(code=4002, reason="No MCP servers")
-            return
+            raise RuntimeError("No MCP servers connected")
 
         tool_descs = mcp_mgr.tool_descriptions()
         # Cache for the /api/tools endpoint
@@ -368,10 +348,9 @@ async def websocket_chat(websocket: WebSocket):
         voice_tools = build_voice_tools()
         mcp_tools = mcp_mgr.to_gradbot_tools()
         tools = voice_tools + mcp_tools
-        print(f"Built {len(tools)} tools: {len(voice_tools)} voice + {len(mcp_tools)} MCP")
+        logger.info("Built %d tools: %d voice + %d MCP", len(tools), len(voice_tools), len(mcp_tools))
 
-        # Create session config
-        config = gradbot.SessionConfig(
+        return gradbot.SessionConfig(
             voice_id=voice.voice_id,
             instructions=get_system_prompt(voice_name, tool_descs),
             language=voice.language,
@@ -383,206 +362,87 @@ async def websocket_chat(websocket: WebSocket):
             ),
         )
 
-        # Start session
-        input_handle, output_handle = await gradbot.run(
-            **_CLIENT_CONFIG,
-            session_config=config,
-            input_format=gradbot.AudioFormat.OggOpus,
-            output_format=gradbot.AudioFormat.Pcm
-            if USE_PCM
-            else gradbot.AudioFormat.OggOpus,
+    async def handle_tool_call(tool_call, tool_handle, input_handle, websocket):
+        """Handle MCP and voice switching tool calls."""
+        nonlocal current_voice
+
+        tool_name = tool_call.tool_name
+        args = json.loads(tool_call.args_json)
+
+        logger.info("Tool call: %s - %s", tool_name, args)
+
+        # Handle voice switching
+        if tool_name.startswith("switch_to_"):
+            new_voice_name = tool_name[len("switch_to_"):].capitalize()
+            for v in gradbot.flagship_voices():
+                if v.name.lower() == tool_name[len("switch_to_"):]:
+                    new_voice_name = v.name
+                    break
+
+            try:
+                new_voice = gradbot.flagship_voice(new_voice_name)
+                current_voice = new_voice_name
+
+                new_config = gradbot.SessionConfig(
+                    voice_id=new_voice.voice_id,
+                    instructions=get_system_prompt(new_voice_name, tool_descs),
+                    language=new_voice.language,
+                    tools=tools,
+                    **merge_overrides(
+                        _OVERRIDES,
+                        flush_duration_s=FLUSH_FOR_S,
+                        rewrite_rules=new_voice.language.rewrite_rules,
+                    ),
+                )
+                await input_handle.send_config(new_config)
+
+                await websocket.send_json({
+                    "type": "voice_change",
+                    "voice_name": new_voice_name,
+                    "description": new_voice.description,
+                })
+
+                await tool_handle.send(json.dumps({
+                    "success": True,
+                    "message": f"Voice switched to {new_voice_name}.",
+                }))
+            except RuntimeError as e:
+                await tool_handle.send_error(str(e))
+
+        # Handle MCP tools
+        elif mcp_mgr.has_tool(tool_name):
+            try:
+                result_text = await mcp_mgr.call_tool(tool_name, args)
+
+                # Notify client
+                await websocket.send_json({
+                    "type": "tool_result",
+                    "tool": tool_name,
+                    "result": result_text[:500],  # Truncate for UI
+                })
+
+                await tool_handle.send(json.dumps({
+                    "success": True,
+                    "result": result_text,
+                }))
+            except Exception as e:
+                logger.error("MCP tool error: %s", e)
+                await tool_handle.send_error(str(e))
+
+        else:
+            await tool_handle.send_error(f"Unknown tool: {tool_name}")
+
+    try:
+        await websocket_chat_handler(
+            websocket,
+            on_start=on_start,
+            on_tool_call=handle_tool_call,
+            run_kwargs=_CLIENT_CONFIG,
+            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
+            debug=DEBUG,
         )
-
-        stop_event = asyncio.Event()
-
-        async def handle_tool_call(tool_call, tool_handle):
-            """Handle MCP and voice switching tool calls."""
-            nonlocal current_voice, tools
-
-            tool_name = tool_call.tool_name
-            args = json.loads(tool_call.args_json)
-
-            print(f"Tool call: {tool_name} - {args}")
-
-            # Handle voice switching
-            if tool_name.startswith("switch_to_"):
-                new_voice_name = tool_name[len("switch_to_"):].capitalize()
-                for v in gradbot.flagship_voices():
-                    if v.name.lower() == tool_name[len("switch_to_"):]:
-                        new_voice_name = v.name
-                        break
-
-                try:
-                    new_voice = gradbot.flagship_voice(new_voice_name)
-                    current_voice = new_voice_name
-
-                    new_config = gradbot.SessionConfig(
-                        voice_id=new_voice.voice_id,
-                        instructions=get_system_prompt(new_voice_name, tool_descs),
-                        language=new_voice.language,
-                        tools=tools,
-                        **merge_overrides(
-                            _OVERRIDES,
-                            flush_duration_s=FLUSH_FOR_S,
-                            rewrite_rules=new_voice.language.rewrite_rules,
-                        ),
-                    )
-                    await input_handle.send_config(new_config)
-
-                    await websocket.send_json(
-                        {
-                            "type": "voice_change",
-                            "voice_name": new_voice_name,
-                            "description": new_voice.description,
-                        }
-                    )
-
-                    await tool_handle.send(
-                        json.dumps(
-                            {
-                                "success": True,
-                                "message": f"Voice switched to {new_voice_name}.",
-                            }
-                        )
-                    )
-                except RuntimeError as e:
-                    await tool_handle.send_error(str(e))
-
-            # Handle MCP tools
-            elif mcp_mgr.has_tool(tool_name):
-                try:
-                    result_text = await mcp_mgr.call_tool(tool_name, args)
-
-                    # Notify client
-                    await websocket.send_json(
-                        {
-                            "type": "tool_result",
-                            "tool": tool_name,
-                            "result": result_text[:500],  # Truncate for UI
-                        }
-                    )
-
-                    await tool_handle.send(
-                        json.dumps({"success": True, "result": result_text})
-                    )
-                except Exception as e:
-                    print(f"MCP tool error: {e}")
-                    await tool_handle.send_error(str(e))
-
-            else:
-                await tool_handle.send_error(f"Unknown tool: {tool_name}")
-
-        async def process_output():
-            """Receive output from gradbot and send to client."""
-            while not stop_event.is_set():
-                try:
-                    msg = await output_handle.receive()
-                    if msg is None:
-                        break
-
-                    if msg.msg_type == "audio":
-                        await websocket.send_json(
-                            {
-                                "type": "audio_timing",
-                                "start_s": msg.start_s,
-                                "stop_s": msg.stop_s,
-                                "turn_idx": msg.turn_idx,
-                                "interrupted": msg.interrupted,
-                            }
-                        )
-                        await websocket.send_bytes(msg.data)
-
-                    elif msg.msg_type == "tts_text":
-                        await websocket.send_json(
-                            {
-                                "type": "transcript",
-                                "text": msg.text,
-                                "is_user": False,
-                                "stop_s": msg.stop_s,
-                                "turn_idx": msg.turn_idx,
-                            }
-                        )
-
-                    elif msg.msg_type == "stt_text":
-                        await websocket.send_json(
-                            {
-                                "type": "transcript",
-                                "text": msg.text,
-                                "is_user": True,
-                            }
-                        )
-
-                    elif msg.msg_type == "tool_call":
-                        asyncio.create_task(
-                            handle_tool_call(
-                                msg.tool_call, msg.tool_call_handle
-                            )
-                        )
-
-                    elif msg.msg_type == "event":
-                        await websocket.send_json(
-                            {
-                                "type": "event",
-                                "event": msg.event.event_type,
-                            }
-                        )
-
-                except Exception as e:
-                    print(f"Output processing error: {e}")
-                    try:
-                        await websocket.send_json(
-                            {"type": "error", "message": str(e) if DEBUG else "An error occurred during the session"}
-                        )
-                    except:
-                        pass
-                    break
-
-        async def receive_audio():
-            """Receive audio from client and send to gradbot."""
-            while not stop_event.is_set():
-                try:
-                    msg = await websocket.receive()
-                    if "text" in msg:
-                        data = json.loads(msg["text"])
-                        msg_type = data.get("type")
-                        if msg_type == "stop":
-                            stop_event.set()
-                            await input_handle.close()
-                            break
-                    elif "bytes" in msg:
-                        await input_handle.send_audio(msg["bytes"])
-                except WebSocketDisconnect:
-                    stop_event.set()
-                    await input_handle.close()
-                    break
-                except Exception as e:
-                    print(f"Receive error: {e}")
-                    stop_event.set()
-                    break
-
-        # Run both tasks
-        await asyncio.gather(
-            process_output(),
-            receive_audio(),
-            return_exceptions=True,
-        )
-
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-        import traceback
-        traceback.print_exc()
-        try:
-            await websocket.send_json(
-                {"type": "error", "message": str(e) if DEBUG else "An error occurred while starting the session"}
-            )
-        except:
-            pass
     finally:
         await mcp_mgr.disconnect_all()
-        try:
-            await websocket.close()
-        except:
-            pass
 
 
 @app.get("/api/audio-config")

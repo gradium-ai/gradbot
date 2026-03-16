@@ -14,29 +14,30 @@ Run with: uvicorn main:app --reload
 """
 
 import asyncio
-import os
 import json
-import urllib.request
+import logging
+import os
+import sys
 import urllib.parse
-import xml.etree.ElementTree as ET
-from contextlib import asynccontextmanager
+import urllib.request
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import gradbot
+from gradbot.fastapi import websocket_chat_handler
 import feedparser
 
 # Initialize Rust logging (outputs to stderr)
 gradbot.init_logging()
+logger = logging.getLogger(__name__)
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
 FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from demo_config import load_config, session_config_overrides, merge_overrides, client_config
 
@@ -333,14 +334,7 @@ Start by greeting the user and asking what they'd like to know - weather, news, 
 """
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("Starting News & Weather Demo...")
-    yield
-    print("Shutting down...")
-
-
-app = FastAPI(title="News & Weather Demo", lifespan=lifespan)
+app = FastAPI(title="News & Weather Demo")
 
 
 @app.get("/api/voices")
@@ -389,40 +383,21 @@ async def websocket_chat(websocket: WebSocket):
     - Server sends binary: audio data
     - Client sends JSON: {"type": "stop"} to end
     """
-    await websocket.accept()
+    # Build tools once (shared across the session, voice tools don't change)
+    voice_tools = build_voice_tools()
+    weather_tool = build_weather_tool()
+    news_tool = build_news_tool()
+    tools = voice_tools + [weather_tool, news_tool]
+    logger.info("Built %d tools: %d voice + weather + news", len(tools), len(voice_tools))
 
-    try:
-        # Wait for start message
-        start_msg = await websocket.receive_json()
-        if start_msg.get("type") != "start":
-            await websocket.close(code=4000, reason="Expected start message")
-            return
+    # Mutable per-session state
+    current_voice = None
 
-        voice_name = start_msg.get("voice_name", "Emma")
-
-        # Validate voice
-        try:
-            voice = gradbot.flagship_voice(voice_name)
-        except RuntimeError:
-            await websocket.close(
-                code=4001, reason=f"Unknown voice: {voice_name}"
-            )
-            return
-
+    def _make_config(voice_name: str) -> gradbot.SessionConfig:
+        nonlocal current_voice
+        voice = gradbot.flagship_voice(voice_name)
         current_voice = voice_name
-        print(f"Starting news & weather chat with voice={voice_name}")
-
-        # Build tools
-        voice_tools = build_voice_tools()
-        weather_tool = build_weather_tool()
-        news_tool = build_news_tool()
-        tools = voice_tools + [weather_tool, news_tool]
-        print(
-            f"Built {len(tools)} tools: {len(voice_tools)} voice + weather + news"
-        )
-
-        # Create session config
-        config = gradbot.SessionConfig(
+        return gradbot.SessionConfig(
             voice_id=voice.voice_id,
             instructions=get_system_prompt(voice_name),
             language=voice.language,
@@ -434,212 +409,98 @@ async def websocket_chat(websocket: WebSocket):
             ),
         )
 
-        # Start session
-        input_handle, output_handle = await gradbot.run(
-            **_CLIENT_CONFIG,
-            session_config=config,
-            input_format=gradbot.AudioFormat.OggOpus,
-            output_format=gradbot.AudioFormat.Pcm
-            if USE_PCM
-            else gradbot.AudioFormat.OggOpus,
-        )
+    def on_start(msg: dict) -> gradbot.SessionConfig:
+        voice_name = msg.get("voice_name", "Emma")
+        logger.info("Starting news & weather chat with voice=%s", voice_name)
+        return _make_config(voice_name)
 
-        stop_event = asyncio.Event()
+    async def on_tool(tool_call, tool_handle, input_handle, websocket):
+        nonlocal current_voice
 
-        async def handle_tool_call(tool_call, tool_handle):
-            """Handle weather, news, and voice switching tool calls."""
-            nonlocal current_voice, tools
+        tool_name = tool_call.tool_name
+        args = json.loads(tool_call.args_json)
+        logger.info("Tool call: %s - %s", tool_name, args)
 
-            tool_name = tool_call.tool_name
-            args = json.loads(tool_call.args_json)
+        # Handle voice switching
+        if tool_name.startswith("switch_to_"):
+            new_voice_name = tool_name[len("switch_to_"):].capitalize()
+            for v in gradbot.flagship_voices():
+                if v.name.lower() == tool_name[len("switch_to_"):]:
+                    new_voice_name = v.name
+                    break
 
-            print(f"Tool call: {tool_name} - {args}")
+            try:
+                new_voice = gradbot.flagship_voice(new_voice_name)
+                current_voice = new_voice_name
 
-            # Handle voice switching
-            if tool_name.startswith("switch_to_"):
-                new_voice_name = tool_name[len("switch_to_"):].capitalize()
-                for v in gradbot.flagship_voices():
-                    if v.name.lower() == tool_name[len("switch_to_"):]:
-                        new_voice_name = v.name
-                        break
+                new_config = gradbot.SessionConfig(
+                    voice_id=new_voice.voice_id,
+                    instructions=get_system_prompt(new_voice_name),
+                    language=new_voice.language,
+                    tools=tools,
+                    **merge_overrides(_OVERRIDES,
+                        flush_duration_s=FLUSH_FOR_S,
+                        rewrite_rules=new_voice.language.rewrite_rules,
+                    ),
+                )
+                await input_handle.send_config(new_config)
 
-                try:
-                    new_voice = gradbot.flagship_voice(new_voice_name)
-                    current_voice = new_voice_name
+                await websocket.send_json(
+                    {
+                        "type": "voice_change",
+                        "voice_name": new_voice_name,
+                        "description": new_voice.description,
+                    }
+                )
 
-                    new_config = gradbot.SessionConfig(
-                        voice_id=new_voice.voice_id,
-                        instructions=get_system_prompt(new_voice_name),
-                        language=new_voice.language,
-                        tools=tools,
-                        **merge_overrides(_OVERRIDES,
-                            flush_duration_s=FLUSH_FOR_S,
-                            rewrite_rules=new_voice.language.rewrite_rules,
-                        ),
-                    )
-                    await input_handle.send_config(new_config)
-
-                    await websocket.send_json(
+                await tool_handle.send(
+                    json.dumps(
                         {
-                            "type": "voice_change",
-                            "voice_name": new_voice_name,
-                            "description": new_voice.description,
+                            "success": True,
+                            "message": f"Voice switched to {new_voice_name}.",
                         }
                     )
-
-                    await tool_handle.send(
-                        json.dumps(
-                            {
-                                "success": True,
-                                "message": f"Voice switched to {new_voice_name}.",
-                            }
-                        )
-                    )
-                except RuntimeError as e:
-                    await tool_handle.send_error(str(e))
-
-            # Handle weather
-            elif tool_name == "get_weather":
-                city = args.get("city", "")
-                country_code = args.get("country_code")
-
-                result = await fetch_weather(city, country_code)
-
-                # Notify client
-                await websocket.send_json(
-                    {"type": "weather_result", **result}
                 )
+            except RuntimeError as e:
+                await tool_handle.send_error(str(e))
 
-                await tool_handle.send(json.dumps(result))
+        # Handle weather
+        elif tool_name == "get_weather":
+            city = args.get("city", "")
+            country_code = args.get("country_code")
 
-            # Handle news
-            elif tool_name == "get_news":
-                source = args.get("source", "bbc")
-                count = min(args.get("count", 5), 10)
+            result = await fetch_weather(city, country_code)
 
-                result = await fetch_news(source, count)
-
-                # Notify client
-                await websocket.send_json(
-                    {"type": "news_result", **result}
-                )
-
-                await tool_handle.send(json.dumps(result))
-
-            else:
-                await tool_handle.send_error(f"Unknown tool: {tool_name}")
-
-        async def process_output():
-            """Receive output from gradbot and send to client."""
-            while not stop_event.is_set():
-                try:
-                    msg = await output_handle.receive()
-                    if msg is None:
-                        break
-
-                    if msg.msg_type == "audio":
-                        await websocket.send_json(
-                            {
-                                "type": "audio_timing",
-                                "start_s": msg.start_s,
-                                "stop_s": msg.stop_s,
-                                "turn_idx": msg.turn_idx,
-                                "interrupted": msg.interrupted,
-                            }
-                        )
-                        await websocket.send_bytes(msg.data)
-
-                    elif msg.msg_type == "tts_text":
-                        await websocket.send_json(
-                            {
-                                "type": "transcript",
-                                "text": msg.text,
-                                "is_user": False,
-                                "stop_s": msg.stop_s,
-                                "turn_idx": msg.turn_idx,
-                            }
-                        )
-
-                    elif msg.msg_type == "stt_text":
-                        await websocket.send_json(
-                            {
-                                "type": "transcript",
-                                "text": msg.text,
-                                "is_user": True,
-                            }
-                        )
-
-                    elif msg.msg_type == "tool_call":
-                        asyncio.create_task(
-                            handle_tool_call(
-                                msg.tool_call, msg.tool_call_handle
-                            )
-                        )
-
-                    elif msg.msg_type == "event":
-                        await websocket.send_json(
-                            {
-                                "type": "event",
-                                "event": msg.event.event_type,
-                            }
-                        )
-
-                except Exception as e:
-                    print(f"Output processing error: {e}")
-                    try:
-                        await websocket.send_json(
-                            {"type": "error", "message": str(e) if DEBUG else "An error occurred during the session"}
-                        )
-                    except:
-                        pass
-                    break
-
-        async def receive_audio():
-            """Receive audio from client and send to gradbot."""
-            while not stop_event.is_set():
-                try:
-                    msg = await websocket.receive()
-                    if "text" in msg:
-                        data = json.loads(msg["text"])
-                        msg_type = data.get("type")
-                        if msg_type == "stop":
-                            stop_event.set()
-                            await input_handle.close()
-                            break
-                    elif "bytes" in msg:
-                        await input_handle.send_audio(msg["bytes"])
-                except WebSocketDisconnect:
-                    stop_event.set()
-                    await input_handle.close()
-                    break
-                except Exception as e:
-                    print(f"Receive error: {e}")
-                    stop_event.set()
-                    break
-
-        # Run both tasks
-        await asyncio.gather(
-            process_output(),
-            receive_audio(),
-            return_exceptions=True,
-        )
-
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-        import traceback
-
-        traceback.print_exc()
-        try:
             await websocket.send_json(
-                {"type": "error", "message": str(e) if DEBUG else "An error occurred while starting the session"}
+                {"type": "weather_result", **result}
             )
-        except:
-            pass
-    finally:
-        try:
-            await websocket.close()
-        except:
-            pass
+
+            await tool_handle.send(json.dumps(result))
+
+        # Handle news
+        elif tool_name == "get_news":
+            source = args.get("source", "bbc")
+            count = min(args.get("count", 5), 10)
+
+            result = await fetch_news(source, count)
+
+            await websocket.send_json(
+                {"type": "news_result", **result}
+            )
+
+            await tool_handle.send(json.dumps(result))
+
+        else:
+            await tool_handle.send_error(f"Unknown tool: {tool_name}")
+
+    await websocket_chat_handler(
+        websocket,
+        on_start=on_start,
+        on_tool_call=on_tool,
+        run_kwargs=_CLIENT_CONFIG,
+        output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
+        debug=DEBUG,
+    )
 
 
 @app.get("/api/audio-config")

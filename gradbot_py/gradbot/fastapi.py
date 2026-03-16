@@ -30,7 +30,7 @@ async def websocket_chat_handler(
     *,
     on_start: Callable[[dict], Awaitable[gradbot.SessionConfig] | gradbot.SessionConfig],
     on_config: Callable[[dict], Awaitable[gradbot.SessionConfig] | gradbot.SessionConfig] | None = None,
-    on_tool_call: Callable[[gradbot.ToolCallInfo, Any], Awaitable[None]] | None = None,
+    on_tool_call: Callable[..., Awaitable[None]] | None = None,
     run_kwargs: dict | None = None,
     input_format: gradbot.AudioFormat = gradbot.AudioFormat.OggOpus,
     output_format: gradbot.AudioFormat = gradbot.AudioFormat.OggOpus,
@@ -55,8 +55,11 @@ async def websocket_chat_handler(
         Called with config-change message dicts; must return a ``SessionConfig``.
         If *None*, mid-session config changes are ignored.
     on_tool_call:
-        Called with ``(tool_call_info, tool_call_handle)`` when the LLM invokes
-        a tool.  If *None*, tool-call messages are silently ignored.
+        Called with ``(tool_call_info, tool_call_handle, input_handle, websocket)``
+        when the LLM invokes a tool.  If *None*, tool-call messages are silently
+        ignored.  The extra arguments allow tool handlers to reconfigure the
+        session (via ``input_handle.send_config()``) or send custom messages to
+        the client (via ``websocket.send_json()``).
     run_kwargs:
         Extra keyword arguments forwarded to ``gradbot.run()``.
     input_format:
@@ -139,7 +142,8 @@ async def websocket_chat_handler(
                     elif msg.msg_type == "tool_call":
                         if on_tool_call is not None:
                             task = asyncio.create_task(
-                                on_tool_call(msg.tool_call, msg.tool_call_handle)
+                                on_tool_call(msg.tool_call, msg.tool_call_handle,
+                                             input_handle, websocket)
                             )
                             pending_tool_tasks.add(task)
                             task.add_done_callback(pending_tool_tasks.discard)

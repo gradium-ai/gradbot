@@ -8,26 +8,28 @@ Run with: uvicorn main:app --reload --port 8002
 """
 
 import asyncio
-import os
 import json
+import logging
+import os
 import random
-from contextlib import asynccontextmanager
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import gradbot
+from gradbot.fastapi import websocket_chat_handler
 
 gradbot.init_logging()
+logger = logging.getLogger(__name__)
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
 FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from demo_config import load_config, session_config_overrides, merge_overrides, client_config
 
@@ -157,6 +159,12 @@ FORMULE_KEYS = {
     "Premium": "premium",
 }
 
+CUSTOMER_TITLES = {
+    "Martin": "Madame Martin",
+    "Dubois": "Monsieur Dubois",
+    "Leroy": "Madame Leroy",
+}
+
 
 def find_client_by_digits(digits: str) -> dict | None:
     digits = digits.strip()
@@ -257,7 +265,6 @@ class InsuranceSession:
     phase: int = 1  # 1=auth, 2=services
     carte_commandee: bool = False
     enfants_ajoutes: list[str] = field(default_factory=list)
-    pending_tasks: list[asyncio.Task] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -452,38 +459,20 @@ def build_tools() -> list[gradbot.ToolDef]:
 # FastAPI app
 # ---------------------------------------------------------------------------
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("Starting Insurance (Mutuelle) Demo...")
-    yield
-    print("Shutting down...")
-
-
-app = FastAPI(title="Insurance Demo", lifespan=lifespan)
+app = FastAPI(title="Insurance Demo")
 
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
-    await websocket.accept()
-
     state = InsuranceSession()
 
-    try:
-        start_msg = await websocket.receive_json()
-        if start_msg.get("type") != "start":
-            await websocket.close(code=4000, reason="Expected start message")
-            return
-
+    def on_start(start_msg: dict) -> gradbot.SessionConfig:
         customer_last_name = start_msg.get("customer", "Martin")
-        CUSTOMER_TITLES = {
-            "Martin": "Madame Martin",
-            "Dubois": "Monsieur Dubois",
-            "Leroy": "Madame Leroy",
-        }
         customer_name = CUSTOMER_TITLES.get(customer_last_name, customer_last_name)
         agent_name = start_msg.get("agent", "Leo")
         padding_bonus = float(start_msg.get("padding_bonus", 0.0))
-        print(f"Starting insurance chat (agent: {agent_name}, customer: {customer_name}, padding_bonus: {padding_bonus})")
+        logger.info("Starting insurance chat (agent: %s, customer: %s, padding_bonus: %s)",
+                     agent_name, customer_name, padding_bonus)
 
         AGENT_VOICES = {
             "Leo": gradbot.flagship_voice("Leo").voice_id,
@@ -492,7 +481,14 @@ async def websocket_chat(websocket: WebSocket):
         voice_id = AGENT_VOICES.get(agent_name, AGENT_VOICES["Leo"])
         tools = build_tools()
 
-        config = gradbot.SessionConfig(
+        # Store session-scoped values for the tool handler
+        state._agent_name = agent_name
+        state._customer_name = customer_name
+        state._voice_id = voice_id
+        state._tools = tools
+        state._padding_bonus = padding_bonus
+
+        return gradbot.SessionConfig(
             voice_id=voice_id,
             instructions=get_auth_prompt(agent_name),
             language=gradbot.Lang.Fr,
@@ -505,279 +501,174 @@ async def websocket_chat(websocket: WebSocket):
             ),
         )
 
-        input_handle, output_handle = await gradbot.run(
-            **_CLIENT_CONFIG,
-            session_config=config,
-            input_format=gradbot.AudioFormat.OggOpus,
-            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
+    def make_config(instructions: str) -> gradbot.SessionConfig:
+        return gradbot.SessionConfig(
+            voice_id=state._voice_id,
+            instructions=instructions,
+            language=gradbot.Lang.Fr,
+            tools=state._tools,
+            **merge_overrides(_OVERRIDES,
+                flush_duration_s=FLUSH_FOR_S,
+                padding_bonus=state._padding_bonus,
+                rewrite_rules="fr",
+            ),
         )
 
-        stop_event = asyncio.Event()
+    async def handle_tool_call(tool_call, tool_handle, input_handle, websocket):
+        tool_name = tool_call.tool_name
+        args = json.loads(tool_call.args_json)
+        logger.info("Tool call: %s - %s", tool_name, args)
 
-        def make_config(instructions: str) -> gradbot.SessionConfig:
-            return gradbot.SessionConfig(
-                voice_id=voice_id,
-                instructions=instructions,
-                language=gradbot.Lang.Fr,
-                tools=tools,
-                **merge_overrides(_OVERRIDES,
-                    flush_duration_s=FLUSH_FOR_S,
-                    padding_bonus=padding_bonus,
-                    rewrite_rules="fr",
-                ),
-            )
+        customer_name = state._customer_name
+        agent_name = state._agent_name
 
-        async def handle_tool_call(tool_call, tool_handle):
-            tool_name = tool_call.tool_name
-            args = json.loads(tool_call.args_json)
-            print(f"Tool call: {tool_name} - {args}")
+        if tool_name == "verifier_compte":
+            digits = args.get("digits", "")
+            client = find_client_by_digits(digits)
 
-            if tool_name == "verifier_compte":
-                digits = args.get("digits", "")
-                client = find_client_by_digits(digits)
-
-                if not client:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": f"Aucun adhérent trouvé avec les chiffres '{digits}'. Demande à l'appelant de réessayer.",
-                    }))
-                    return
-
+            if not client:
                 await tool_handle.send(json.dumps({
-                    "success": True,
-                    "client_name": client["name"],
-                    "message": f"Numéro d'adhérent confirmé. C'est le compte de {client['name']}. The caller should be addressed as {customer_name}. Welcome them and ask for their 4-digit PIN.",
+                    "success": False,
+                    "message": f"Aucun adhérent trouvé avec les chiffres '{digits}'. Demande à l'appelant de réessayer.",
                 }))
-                print(f"Account confirmed: {client['name']} (digits: {digits})")
+                return
 
-            elif tool_name == "verifier_pin":
-                client_name = args.get("client_name", "")
-                pin = args.get("pin", "")
-                client = find_client(client_name)
+            await tool_handle.send(json.dumps({
+                "success": True,
+                "client_name": client["name"],
+                "message": f"Numéro d'adhérent confirmé. C'est le compte de {client['name']}. The caller should be addressed as {customer_name}. Welcome them and ask for their 4-digit PIN.",
+            }))
+            logger.info("Account confirmed: %s (digits: %s)", client["name"], digits)
 
-                if not client:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": f"Adhérent '{client_name}' non trouvé.",
-                    }))
-                    return
+        elif tool_name == "verifier_pin":
+            client_name = args.get("client_name", "")
+            pin = args.get("pin", "")
+            client = find_client(client_name)
 
-                if client["pin"] == pin.strip():
-                    state.authenticated_client = client["name"]
-                    state.phase = 2
+            if not client:
+                await tool_handle.send(json.dumps({
+                    "success": False,
+                    "message": f"Adhérent '{client_name}' non trouvé.",
+                }))
+                return
 
-                    await websocket.send_json({
-                        "type": "auth_success",
-                        "client": client["name"],
-                    })
-
-                    phase2 = get_service_prompt(client["name"], client["formule"], agent_name, customer_name)
-                    await input_handle.send_config(make_config(phase2))
-                    print(f"Authenticated: {client['name']}, switched to phase 2")
-
-                    await tool_handle.send(json.dumps({
-                        "success": True,
-                        "message": f"PIN verified. The caller is authenticated as {customer_name}, plan {client['formule']}. Welcome them and ask how you can help.",
-                    }))
-                else:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": "Code PIN incorrect. Demande à l'appelant de réessayer.",
-                    }))
-
-            elif tool_name == "commander_carte":
-                client_name = args.get("client_name", "")
-                client = find_client(client_name)
-
-                if not client:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": f"Adhérent '{client_name}' non trouvé.",
-                    }))
-                    return
-
-                tracking = "CM-" + "".join(random.choice("123456789") for _ in range(4))
-                state.carte_commandee = True
+            if client["pin"] == pin.strip():
+                state.authenticated_client = client["name"]
+                state.phase = 2
 
                 await websocket.send_json({
-                    "type": "carte_commandee",
+                    "type": "auth_success",
                     "client": client["name"],
-                    "tracking": tracking,
                 })
+
+                phase2 = get_service_prompt(client["name"], client["formule"], agent_name, customer_name)
+                await input_handle.send_config(make_config(phase2))
+                logger.info("Authenticated: %s, switched to phase 2", client["name"])
 
                 await tool_handle.send(json.dumps({
                     "success": True,
-                    "tracking": tracking,
-                    "message": f"Nouvelle carte de mutuelle commandée pour {client['name']}. Numéro de suivi : {tracking}. La carte arrivera sous 5 à 7 jours ouvrés. Partage cette information et demande s'il y a autre chose.",
+                    "message": f"PIN verified. The caller is authenticated as {customer_name}, plan {client['formule']}. Welcome them and ask how you can help.",
                 }))
-                print(f"Card ordered for {client['name']}: {tracking}")
-
-            elif tool_name == "ajouter_enfant":
-                client_name = args.get("client_name", "")
-                prenom = args.get("prenom", "")
-                age = args.get("age", 0)
-                client = find_client(client_name)
-
-                if not client:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": f"Adhérent '{client_name}' non trouvé.",
-                    }))
-                    return
-
-                client["enfants"].append({"prenom": prenom, "age": age})
-                state.enfants_ajoutes.append(prenom)
-
-                await websocket.send_json({
-                    "type": "enfant_ajoute",
-                    "client": client["name"],
-                    "prenom": prenom,
-                    "age": age,
-                })
-
-                await tool_handle.send(json.dumps({
-                    "success": True,
-                    "message": f"{prenom} ({age} ans) a été ajouté(e) sur le contrat de {client['name']}. Confirme l'ajout à l'appelant et demande s'il y a autre chose.",
-                }))
-                print(f"Child added for {client['name']}: {prenom}, {age} ans")
-
-            elif tool_name == "consulter_remboursement":
-                type_soin = args.get("type_soin", "")
-                client = find_client(state.authenticated_client) if state.authenticated_client else None
-
-                if not client:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": "Aucun adhérent authentifié.",
-                    }))
-                    return
-
-                async def deferred_remboursement(type_soin, client, tool_handle):
-                    print(f"Looking up reimbursement for {type_soin} / {client['formule']} (2s delay)")
-                    await asyncio.sleep(2)
-
-                    result = compute_remboursement(type_soin, client["formule"])
-                    if not result:
-                        await tool_handle.send(json.dumps({
-                            "success": False,
-                            "message": f"Type de soin '{type_soin}' non trouvé dans notre grille. Les types disponibles sont : médecin généraliste, médecin spécialiste, dentiste, extraction dent de sagesse, ophtalmologue, kinésithérapeute, lunettes, hospitalisation.",
-                        }))
-                        return
-
-                    await tool_handle.send(json.dumps({
-                        "success": True,
-                        **result,
-                    }))
-
-                task = asyncio.create_task(deferred_remboursement(type_soin, client, tool_handle))
-                state.pending_tasks.append(task)
-                task.add_done_callback(lambda t: state.pending_tasks.remove(t) if t in state.pending_tasks else None)
-
             else:
-                await tool_handle.send_error(f"Outil inconnu : {tool_name}")
+                await tool_handle.send(json.dumps({
+                    "success": False,
+                    "message": "Code PIN incorrect. Demande à l'appelant de réessayer.",
+                }))
 
-        async def process_output():
-            while not stop_event.is_set():
-                try:
-                    msg = await output_handle.receive()
-                    if msg is None:
-                        break
+        elif tool_name == "commander_carte":
+            client_name = args.get("client_name", "")
+            client = find_client(client_name)
 
-                    if msg.msg_type == "audio":
-                        await websocket.send_json({
-                            "type": "audio_timing",
-                            "start_s": msg.start_s,
-                            "stop_s": msg.stop_s,
-                            "turn_idx": msg.turn_idx,
-                            "interrupted": msg.interrupted,
-                        })
-                        await websocket.send_bytes(msg.data)
+            if not client:
+                await tool_handle.send(json.dumps({
+                    "success": False,
+                    "message": f"Adhérent '{client_name}' non trouvé.",
+                }))
+                return
 
-                    elif msg.msg_type == "tts_text":
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "text": msg.text,
-                            "is_user": False,
-                            "stop_s": msg.stop_s,
-                            "turn_idx": msg.turn_idx,
-                        })
+            tracking = "CM-" + "".join(random.choice("123456789") for _ in range(4))
+            state.carte_commandee = True
 
-                    elif msg.msg_type == "stt_text":
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "text": msg.text,
-                            "is_user": True,
-                        })
-
-                    elif msg.msg_type == "tool_call":
-                        asyncio.create_task(handle_tool_call(msg.tool_call, msg.tool_call_handle))
-
-                    elif msg.msg_type == "event":
-                        await websocket.send_json({
-                            "type": "event",
-                            "event": msg.event.event_type,
-                        })
-
-                except Exception as e:
-                    print(f"Output processing error: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    try:
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": str(e) if DEBUG else "Une erreur est survenue",
-                        })
-                    except:
-                        pass
-                    break
-
-        async def receive_audio():
-            while not stop_event.is_set():
-                try:
-                    msg = await websocket.receive()
-                    if "text" in msg:
-                        data = json.loads(msg["text"])
-                        if data.get("type") == "stop":
-                            stop_event.set()
-                            await input_handle.close()
-                            break
-                    elif "bytes" in msg:
-                        await input_handle.send_audio(msg["bytes"])
-                except WebSocketDisconnect:
-                    stop_event.set()
-                    await input_handle.close()
-                    break
-                except Exception as e:
-                    print(f"Receive error: {e}")
-                    stop_event.set()
-                    break
-
-        await asyncio.gather(
-            process_output(),
-            receive_audio(),
-            return_exceptions=True,
-        )
-
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-        import traceback
-        traceback.print_exc()
-        try:
             await websocket.send_json({
-                "type": "error",
-                "message": str(e) if DEBUG else "Une erreur est survenue au démarrage",
+                "type": "carte_commandee",
+                "client": client["name"],
+                "tracking": tracking,
             })
-        except:
-            pass
-    finally:
-        for task in state.pending_tasks:
-            if not task.done():
-                task.cancel()
-        state.pending_tasks.clear()
-        try:
-            await websocket.close()
-        except:
-            pass
+
+            await tool_handle.send(json.dumps({
+                "success": True,
+                "tracking": tracking,
+                "message": f"Nouvelle carte de mutuelle commandée pour {client['name']}. Numéro de suivi : {tracking}. La carte arrivera sous 5 à 7 jours ouvrés. Partage cette information et demande s'il y a autre chose.",
+            }))
+            logger.info("Card ordered for %s: %s", client["name"], tracking)
+
+        elif tool_name == "ajouter_enfant":
+            client_name = args.get("client_name", "")
+            prenom = args.get("prenom", "")
+            age = args.get("age", 0)
+            client = find_client(client_name)
+
+            if not client:
+                await tool_handle.send(json.dumps({
+                    "success": False,
+                    "message": f"Adhérent '{client_name}' non trouvé.",
+                }))
+                return
+
+            client["enfants"].append({"prenom": prenom, "age": age})
+            state.enfants_ajoutes.append(prenom)
+
+            await websocket.send_json({
+                "type": "enfant_ajoute",
+                "client": client["name"],
+                "prenom": prenom,
+                "age": age,
+            })
+
+            await tool_handle.send(json.dumps({
+                "success": True,
+                "message": f"{prenom} ({age} ans) a été ajouté(e) sur le contrat de {client['name']}. Confirme l'ajout à l'appelant et demande s'il y a autre chose.",
+            }))
+            logger.info("Child added for %s: %s, %s ans", client["name"], prenom, age)
+
+        elif tool_name == "consulter_remboursement":
+            type_soin = args.get("type_soin", "")
+            client = find_client(state.authenticated_client) if state.authenticated_client else None
+
+            if not client:
+                await tool_handle.send(json.dumps({
+                    "success": False,
+                    "message": "Aucun adhérent authentifié.",
+                }))
+                return
+
+            logger.info("Looking up reimbursement for %s / %s (2s delay)", type_soin, client["formule"])
+            await asyncio.sleep(2)
+
+            result = compute_remboursement(type_soin, client["formule"])
+            if not result:
+                await tool_handle.send(json.dumps({
+                    "success": False,
+                    "message": f"Type de soin '{type_soin}' non trouvé dans notre grille. Les types disponibles sont : médecin généraliste, médecin spécialiste, dentiste, extraction dent de sagesse, ophtalmologue, kinésithérapeute, lunettes, hospitalisation.",
+                }))
+                return
+
+            await tool_handle.send(json.dumps({
+                "success": True,
+                **result,
+            }))
+
+        else:
+            await tool_handle.send_error(f"Outil inconnu : {tool_name}")
+
+    await websocket_chat_handler(
+        websocket,
+        on_start=on_start,
+        on_tool_call=handle_tool_call,
+        run_kwargs=_CLIENT_CONFIG,
+        output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
+        debug=DEBUG,
+    )
 
 
 @app.get("/api/clients")

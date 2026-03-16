@@ -7,17 +7,20 @@ Run with: uvicorn main:app --reload
 """
 
 import asyncio
-import os
 import json
+import logging
+import os
+import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import gradbot
+from gradbot.fastapi import websocket_chat_handler
 
 # Initialize Rust logging
 gradbot.init_logging()
@@ -26,13 +29,14 @@ USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
 FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from demo_config import load_config, session_config_overrides, merge_overrides, client_config
 
 _YAML_CFG = load_config(Path(__file__).parent)
 _OVERRIDES = session_config_overrides(_YAML_CFG)
 _CLIENT_CONFIG = client_config(_YAML_CFG)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -77,7 +81,7 @@ VOICE_MAP = {
     ("pt", "masculine"): ("Davi", "Roberto"),
     # Manager voices (feminine)
     ("en", "feminine"): ("Sydney", "Princess Celestia"),
-    ("fr", "feminine"): ("Elise", "Princesse Célestine"),
+    ("fr", "feminine"): ("Elise", "Princesse Celestine"),
     ("de", "feminine"): ("Mia", "Prinzessin Celestia"),
     ("es", "feminine"): ("Valentina", "Princesa Celestina"),
     ("pt", "feminine"): ("Alice", "Princesa Celestina"),
@@ -361,9 +365,9 @@ def build_manager_tools() -> list[gradbot.ToolDef]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Starting Fantasy Shop Demo...")
+    logger.info("Starting Fantasy Shop Demo...")
     yield
-    print("Shutting down...")
+    logger.info("Shutting down...")
 
 
 app = FastAPI(title="Fantasy Shop Demo", lifespan=lifespan)
@@ -384,22 +388,14 @@ async def game_info():
 @app.websocket("/ws/game")
 async def websocket_game(websocket: WebSocket):
     """WebSocket endpoint for the game."""
-    await websocket.accept()
 
-    # Initialize game state
+    # Per-session state
     state = GameState()
-
-    # Get initial voices based on language and role
     attendant_voice, state.character_name = get_voice_for_role(state.language, "attendant")
+    tools = build_attendant_tools()
 
-    try:
-        # Wait for start message
-        start_msg = await websocket.receive_json()
-        if start_msg.get("type") != "start":
-            await websocket.close(code=4000, reason="Expected start message")
-            return
-
-        print("Starting fantasy shop game")
+    async def on_start(msg: dict) -> gradbot.SessionConfig:
+        logger.info("Starting fantasy shop game")
 
         # Send initial game state
         await websocket.send_json({
@@ -413,9 +409,7 @@ async def websocket_game(websocket: WebSocket):
             }
         })
 
-        # Create initial session with attendant
-        tools = build_attendant_tools()
-        config = gradbot.SessionConfig(
+        return gradbot.SessionConfig(
             voice_id=attendant_voice.voice_id,
             instructions=get_attendant_prompt(state, state.character_name),
             language=LANG_MAP[state.language],
@@ -427,369 +421,260 @@ async def websocket_game(websocket: WebSocket):
             ),
         )
 
-        input_handle, output_handle = await gradbot.run(
-            **_CLIENT_CONFIG,
-            session_config=config,
-            input_format=gradbot.AudioFormat.OggOpus,
-            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
-        )
+    async def handle_tool_call(tool_call, tool_handle, input_handle, websocket):
+        """Handle game tool calls."""
+        nonlocal tools
 
-        stop_event = asyncio.Event()
+        tool_name = tool_call.tool_name
+        args = json.loads(tool_call.args_json)
+        reason = args.get("reason", "No reason given")
 
-        async def handle_tool_call(tool_call, tool_handle):
-            """Handle game tool calls."""
-            nonlocal state, tools
+        logger.info("Tool call: %s - %s", tool_name, reason)
 
-            tool_name = tool_call.tool_name
-            args = json.loads(tool_call.args_json)
-            reason = args.get("reason", "No reason given")
+        if tool_name == "get_sword_price":
+            await tool_handle.send(json.dumps({
+                "current_price": state.sword_price,
+                "customer_gold": state.gold,
+                "can_afford": state.gold >= state.sword_price,
+            }))
 
-            print(f"Tool call: {tool_name} - {reason}")
+        elif tool_name == "kick_out_of_shop":
+            state.game_over = True
+            await websocket.send_json({
+                "type": "game_over",
+                "reason": reason,
+                "won": False,
+            })
+            await tool_handle.send(json.dumps({"result": "Customer has been kicked out"}))
 
-            if tool_name == "get_sword_price":
-                await tool_handle.send(json.dumps({
-                    "current_price": state.sword_price,
-                    "customer_gold": state.gold,
-                    "can_afford": state.gold >= state.sword_price,
-                }))
+        elif tool_name == "call_manager":
+            # DEFERRED: manager takes 10 seconds to arrive
+            await asyncio.sleep(10)
 
-            elif tool_name == "kick_out_of_shop":
-                state.game_over = True
-                await websocket.send_json({
-                    "type": "game_over",
-                    "reason": reason,
-                    "won": False,
-                })
-                await tool_handle.send(json.dumps({"result": "Customer has been kicked out"}))
+            state.current_character = "manager"
+            tools = build_manager_tools()
 
-            elif tool_name == "call_manager":
-                # DEFERRED: manager takes 10 seconds to arrive
-                async def _manager_arrives():
-                    await asyncio.sleep(10)
+            # Get manager voice for current language
+            manager_voice, state.character_name = get_voice_for_role(state.language, "manager")
 
-                    state.current_character = "manager"
-                    nonlocal tools
-                    tools = build_manager_tools()
+            # Update to manager
+            new_config = gradbot.SessionConfig(
+                voice_id=manager_voice.voice_id,
+                instructions=get_manager_prompt(state, state.character_name),
+                language=LANG_MAP[state.language],
+                tools=tools,
+                **merge_overrides(_OVERRIDES,
+                    flush_duration_s=FLUSH_FOR_S,
+                    rewrite_rules=LANG_MAP[state.language].rewrite_rules,
+                ),
+            )
+            await input_handle.send_config(new_config)
 
-                    # Get manager voice for current language
-                    manager_voice, state.character_name = get_voice_for_role(state.language, "manager")
+            display_name = f"The Manager ({state.character_name})"
+            await websocket.send_json({
+                "type": "character_change",
+                "character": "manager",
+                "character_name": display_name,
+            })
+            await websocket.send_json({
+                "type": "game_state",
+                "state": {
+                    "gold": state.gold,
+                    "has_fake_ruby": state.has_fake_ruby,
+                    "sword_price": state.sword_price,
+                    "current_character": state.current_character,
+                    "character_name": display_name,
+                }
+            })
+            await tool_handle.send(json.dumps({
+                "result": f"PERSONA CHANGE: The attendant has left the room. You are now {state.character_name}, the manager. Do NOT continue speaking as the attendant. Greet the customer as {state.character_name}."
+            }))
 
-                    # Update to manager
-                    new_config = gradbot.SessionConfig(
-                        voice_id=manager_voice.voice_id,
-                        instructions=get_manager_prompt(state, state.character_name),
-                        language=LANG_MAP[state.language],
-                        tools=tools,
-                        **merge_overrides(_OVERRIDES,
-                            flush_duration_s=FLUSH_FOR_S,
-                            rewrite_rules=LANG_MAP[state.language].rewrite_rules,
-                        ),
-                    )
-                    await input_handle.send_config(new_config)
+        elif tool_name == "change_language":
+            new_lang = args.get("language", "en")
+            if new_lang in LANG_MAP:
+                old_char_name = state.character_name
+                state.language = new_lang
+                lang_name = LANG_NAMES.get(new_lang, "English")
 
+                # Call a colleague who speaks the new language (same role/gender)
+                new_voice, state.character_name = get_voice_for_role(new_lang, state.current_character)
+
+                # Get the appropriate prompt with new character name
+                if state.current_character == "manager":
+                    prompt = get_manager_prompt(state, state.character_name)
                     display_name = f"The Manager ({state.character_name})"
-                    await websocket.send_json({
-                        "type": "character_change",
-                        "character": "manager",
+                    role_desc = "manager"
+                else:
+                    prompt = get_attendant_prompt(state, state.character_name)
+                    display_name = f"{state.character_name} the Attendant"
+                    role_desc = "attendant"
+
+                # Update session with new voice and language
+                new_config = gradbot.SessionConfig(
+                    voice_id=new_voice.voice_id,
+                    instructions=prompt,
+                    language=LANG_MAP[new_lang],
+                    tools=tools,
+                    **merge_overrides(_OVERRIDES,
+                        flush_duration_s=FLUSH_FOR_S,
+                        rewrite_rules=LANG_MAP[new_lang].rewrite_rules,
+                    ),
+                )
+                await input_handle.send_config(new_config)
+
+                # Notify about the colleague change
+                await websocket.send_json({
+                    "type": "character_change",
+                    "character": state.current_character,
+                    "character_name": display_name,
+                })
+                await websocket.send_json({
+                    "type": "game_state",
+                    "state": {
+                        "gold": state.gold,
+                        "has_fake_ruby": state.has_fake_ruby,
+                        "sword_price": state.sword_price,
+                        "current_character": state.current_character,
                         "character_name": display_name,
-                    })
-                    await websocket.send_json({
-                        "type": "game_state",
-                        "state": {
-                            "gold": state.gold,
-                            "has_fake_ruby": state.has_fake_ruby,
-                            "sword_price": state.sword_price,
-                            "current_character": state.current_character,
-                            "character_name": display_name,
-                        }
-                    })
-                    await tool_handle.send(json.dumps({
-                        "result": f"PERSONA CHANGE: The attendant has left the room. You are now {state.character_name}, the manager. Do NOT continue speaking as the attendant. Greet the customer as {state.character_name}."
-                    }))
+                    }
+                })
+                await websocket.send_json({
+                    "type": "game_event",
+                    "event": "language_change",
+                    "message": f"{old_char_name} called their {lang_name}-speaking colleague {state.character_name}",
+                })
+                await tool_handle.send(json.dumps({
+                    "result": f"You called your {lang_name}-speaking colleague {state.character_name} to take over. You are now {state.character_name}, the {role_desc}. Greet the customer in {lang_name} and continue helping them. You know the previous conversation context.",
+                    "language": new_lang,
+                    "new_character": state.character_name,
+                }))
+            else:
+                await tool_handle.send_error(f"Unknown language: {new_lang}")
 
-                asyncio.create_task(_manager_arrives())
-                # DON'T send result yet - it arrives after 10s delay
+        elif tool_name == "apply_discount":
+            # Only manager can apply discounts!
+            if state.current_character != "manager":
+                await tool_handle.send(json.dumps({
+                    "result": "FAILED: You don't have authority to apply discounts! Only the manager can do that. You tried your best but the system rejected it. Apologize to the customer and suggest calling the manager.",
+                    "success": False,
+                }))
+            elif state.discount_applied:
+                await tool_handle.send(json.dumps({
+                    "result": "Discount was already applied earlier.",
+                    "new_price": state.sword_price,
+                }))
+            else:
+                state.discount_applied = True
+                state.sword_price -= 25
 
-            elif tool_name == "change_language":
-                new_lang = args.get("language", "en")
-                if new_lang in LANG_MAP:
-                    old_char_name = state.character_name
-                    state.language = new_lang
-                    lang_name = LANG_NAMES.get(new_lang, "English")
-
-                    # Call a colleague who speaks the new language (same role/gender)
-                    new_voice, state.character_name = get_voice_for_role(new_lang, state.current_character)
-
-                    # Get the appropriate prompt with new character name
-                    if state.current_character == "manager":
-                        prompt = get_manager_prompt(state, state.character_name)
-                        display_name = f"The Manager ({state.character_name})"
-                        role_desc = "manager"
-                    else:
-                        prompt = get_attendant_prompt(state, state.character_name)
-                        display_name = f"{state.character_name} the Attendant"
-                        role_desc = "attendant"
-
-                    # Update session with new voice and language
-                    new_config = gradbot.SessionConfig(
-                        voice_id=new_voice.voice_id,
-                        instructions=prompt,
-                        language=LANG_MAP[new_lang],
-                        tools=tools,
-                        **merge_overrides(_OVERRIDES,
-                            flush_duration_s=FLUSH_FOR_S,
-                            rewrite_rules=LANG_MAP[new_lang].rewrite_rules,
-                        ),
-                    )
-                    await input_handle.send_config(new_config)
-
-                    # Notify about the colleague change
-                    await websocket.send_json({
-                        "type": "character_change",
-                        "character": state.current_character,
+                display_name = f"The Manager ({state.character_name})"
+                await websocket.send_json({
+                    "type": "game_state",
+                    "state": {
+                        "gold": state.gold,
+                        "has_fake_ruby": state.has_fake_ruby,
+                        "sword_price": state.sword_price,
+                        "current_character": state.current_character,
                         "character_name": display_name,
-                    })
-                    await websocket.send_json({
-                        "type": "game_state",
-                        "state": {
-                            "gold": state.gold,
-                            "has_fake_ruby": state.has_fake_ruby,
-                            "sword_price": state.sword_price,
-                            "current_character": state.current_character,
-                            "character_name": display_name,
-                        }
-                    })
+                        "discount_applied": True,
+                    }
+                })
+
+                # Check if player can now afford it
+                if state.gold >= state.sword_price:
                     await websocket.send_json({
                         "type": "game_event",
-                        "event": "language_change",
-                        "message": f"{old_char_name} called their {lang_name}-speaking colleague {state.character_name}",
-                    })
-                    await tool_handle.send(json.dumps({
-                        "result": f"You called your {lang_name}-speaking colleague {state.character_name} to take over. You are now {state.character_name}, the {role_desc}. Greet the customer in {lang_name} and continue helping them. You know the previous conversation context.",
-                        "language": new_lang,
-                        "new_character": state.character_name,
-                    }))
-                else:
-                    await tool_handle.send_error(f"Unknown language: {new_lang}")
-
-            elif tool_name == "apply_discount":
-                # Only manager can apply discounts!
-                if state.current_character != "manager":
-                    await tool_handle.send(json.dumps({
-                        "result": "FAILED: You don't have authority to apply discounts! Only the manager can do that. You tried your best but the system rejected it. Apologize to the customer and suggest calling the manager.",
-                        "success": False,
-                    }))
-                elif state.discount_applied:
-                    await tool_handle.send(json.dumps({
-                        "result": "Discount was already applied earlier.",
-                        "new_price": state.sword_price,
-                    }))
-                else:
-                    state.discount_applied = True
-                    state.sword_price -= 25
-
-                    display_name = f"The Manager ({state.character_name})"
-                    await websocket.send_json({
-                        "type": "game_state",
-                        "state": {
-                            "gold": state.gold,
-                            "has_fake_ruby": state.has_fake_ruby,
-                            "sword_price": state.sword_price,
-                            "current_character": state.current_character,
-                            "character_name": display_name,
-                            "discount_applied": True,
-                        }
+                        "event": "can_afford",
+                        "message": "You can now afford the sword!",
                     })
 
-                    # Check if player can now afford it
-                    if state.gold >= state.sword_price:
-                        await websocket.send_json({
-                            "type": "game_event",
-                            "event": "can_afford",
-                            "message": "You can now afford the sword!",
-                        })
+                await tool_handle.send(json.dumps({
+                    "result": f"Discount applied! New price is {state.sword_price} gold coins.",
+                    "new_price": state.sword_price,
+                }))
 
-                    await tool_handle.send(json.dumps({
-                        "result": f"Discount applied! New price is {state.sword_price} gold coins.",
-                        "new_price": state.sword_price,
-                    }))
+        elif tool_name == "sell_sword":
+            final_price = args.get("final_price", state.sword_price)
 
-            elif tool_name == "sell_sword":
-                final_price = args.get("final_price", state.sword_price)
+            if state.gold >= final_price:
+                state.gold -= final_price
+                state.game_won = True
+                state.game_over = True
 
-                if state.gold >= final_price:
-                    state.gold -= final_price
-                    state.game_won = True
-                    state.game_over = True
-
-                    await websocket.send_json({
-                        "type": "game_won",
-                        "final_price": final_price,
-                        "message": "You acquired the legendary sword Dragonbane!",
-                    })
-                    await tool_handle.send(json.dumps({
-                        "result": "Sale complete! The customer now owns Dragonbane!",
-                        "success": True,
-                    }))
-                else:
-                    await tool_handle.send(json.dumps({
-                        "result": f"Customer doesn't have enough gold. They have {state.gold} but need {final_price}.",
-                        "success": False,
-                    }))
-
-            elif tool_name == "accept_ruby_gift":
-                if not state.has_fake_ruby:
-                    await tool_handle.send(json.dumps({
-                        "result": "The customer doesn't have a ruby to give.",
-                        "success": False,
-                    }))
-                elif state.ruby_given:
-                    await tool_handle.send(json.dumps({
-                        "result": "You already accepted the ruby earlier.",
-                        "success": False,
-                    }))
-                else:
-                    state.has_fake_ruby = False
-                    state.ruby_given = True
-                    state.sword_price -= 25
-
-                    if state.current_character == "manager":
-                        display_name = f"The Manager ({state.character_name})"
-                    else:
-                        display_name = f"{state.character_name} the Attendant"
-
-                    await websocket.send_json({
-                        "type": "game_state",
-                        "state": {
-                            "gold": state.gold,
-                            "has_fake_ruby": state.has_fake_ruby,
-                            "sword_price": state.sword_price,
-                            "current_character": state.current_character,
-                            "character_name": display_name,
-                            "ruby_given": True,
-                        }
-                    })
-
-                    # Check if player can now afford it
-                    if state.gold >= state.sword_price:
-                        await websocket.send_json({
-                            "type": "game_event",
-                            "event": "can_afford",
-                            "message": "You can now afford the sword!",
-                        })
-
-                    await tool_handle.send(json.dumps({
-                        "result": f"You graciously accepted the ruby as a gift and reduced the price by 25 gold. New price: {state.sword_price} gold.",
-                        "new_price": state.sword_price,
-                        "success": True,
-                    }))
-
+                await websocket.send_json({
+                    "type": "game_won",
+                    "final_price": final_price,
+                    "message": "You acquired the legendary sword Dragonbane!",
+                })
+                await tool_handle.send(json.dumps({
+                    "result": "Sale complete! The customer now owns Dragonbane!",
+                    "success": True,
+                }))
             else:
-                await tool_handle.send_error(f"Unknown tool: {tool_name}")
+                await tool_handle.send(json.dumps({
+                    "result": f"Customer doesn't have enough gold. They have {state.gold} but need {final_price}.",
+                    "success": False,
+                }))
 
-        async def process_output():
-            """Receive output from gradbot and send to client."""
-            while not stop_event.is_set():
-                try:
-                    msg = await output_handle.receive()
-                    if msg is None:
-                        break
+        elif tool_name == "accept_ruby_gift":
+            if not state.has_fake_ruby:
+                await tool_handle.send(json.dumps({
+                    "result": "The customer doesn't have a ruby to give.",
+                    "success": False,
+                }))
+            elif state.ruby_given:
+                await tool_handle.send(json.dumps({
+                    "result": "You already accepted the ruby earlier.",
+                    "success": False,
+                }))
+            else:
+                state.has_fake_ruby = False
+                state.ruby_given = True
+                state.sword_price -= 25
 
-                    if msg.msg_type == "audio":
-                        # Send audio timing before binary data
-                        await websocket.send_json({
-                            "type": "audio_timing",
-                            "start_s": msg.start_s,
-                            "stop_s": msg.stop_s,
-                            "turn_idx": msg.turn_idx,
-                            "interrupted": msg.interrupted,
-                        })
-                        await websocket.send_bytes(msg.data)
+                if state.current_character == "manager":
+                    display_name = f"The Manager ({state.character_name})"
+                else:
+                    display_name = f"{state.character_name} the Attendant"
 
-                    elif msg.msg_type == "tts_text":
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "text": msg.text,
-                            "is_user": False,
-                            "character": state.current_character,
-                            "stop_s": msg.stop_s,
-                            "turn_idx": msg.turn_idx,
-                        })
+                await websocket.send_json({
+                    "type": "game_state",
+                    "state": {
+                        "gold": state.gold,
+                        "has_fake_ruby": state.has_fake_ruby,
+                        "sword_price": state.sword_price,
+                        "current_character": state.current_character,
+                        "character_name": display_name,
+                        "ruby_given": True,
+                    }
+                })
 
-                    elif msg.msg_type == "stt_text":
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "text": msg.text,
-                            "is_user": True,
-                        })
+                # Check if player can now afford it
+                if state.gold >= state.sword_price:
+                    await websocket.send_json({
+                        "type": "game_event",
+                        "event": "can_afford",
+                        "message": "You can now afford the sword!",
+                    })
 
-                    elif msg.msg_type == "tool_call":
-                        asyncio.create_task(handle_tool_call(msg.tool_call, msg.tool_call_handle))
+                await tool_handle.send(json.dumps({
+                    "result": f"You graciously accepted the ruby as a gift and reduced the price by 25 gold. New price: {state.sword_price} gold.",
+                    "new_price": state.sword_price,
+                    "success": True,
+                }))
 
-                    elif msg.msg_type == "event":
-                        await websocket.send_json({
-                            "type": "event",
-                            "event": msg.event.event_type,
-                        })
+        else:
+            await tool_handle.send_error(f"Unknown tool: {tool_name}")
 
-                except Exception as e:
-                    print(f"Output processing error: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    try:
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": str(e) if DEBUG else "An error occurred during the session",
-                        })
-                    except:
-                        pass
-                    break
-
-        async def receive_audio():
-            """Receive audio from client and send to gradbot."""
-            while not stop_event.is_set():
-                try:
-                    msg = await websocket.receive()
-                    if "text" in msg:
-                        data = json.loads(msg["text"])
-                        msg_type = data.get("type")
-                        if msg_type == "stop":
-                            stop_event.set()
-                            await input_handle.close()
-                            break
-                    elif "bytes" in msg:
-                        await input_handle.send_audio(msg["bytes"])
-                except WebSocketDisconnect:
-                    stop_event.set()
-                    await input_handle.close()
-                    break
-                except Exception as e:
-                    print(f"Receive error: {e}")
-                    stop_event.set()
-                    break
-
-        await asyncio.gather(
-            process_output(),
-            receive_audio(),
-            return_exceptions=True,
-        )
-
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-        import traceback
-        traceback.print_exc()
-        try:
-            await websocket.send_json({
-                "type": "error",
-                "message": str(e) if DEBUG else "An error occurred while starting the session",
-            })
-        except:
-            pass
-    finally:
-        try:
-            await websocket.close()
-        except:
-            pass
+    await websocket_chat_handler(
+        websocket,
+        on_start=on_start,
+        on_tool_call=handle_tool_call,
+        run_kwargs=_CLIENT_CONFIG,
+        output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
+        debug=DEBUG,
+    )
 
 
 @app.get("/api/audio-config")
