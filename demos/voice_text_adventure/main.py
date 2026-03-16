@@ -8,19 +8,22 @@ Run with: uvicorn main:app --reload
 """
 
 import asyncio
-import os
-from concurrent.futures import ThreadPoolExecutor
 import json
+import logging
+import os
+import sys
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import jericho
 import gradbot
+from gradbot.fastapi import websocket_chat_handler
 
 # Initialize Rust logging
 gradbot.init_logging()
@@ -29,13 +32,14 @@ USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
 FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from demo_config import load_config, session_config_overrides, merge_overrides, client_config
 
 _YAML_CFG = load_config(Path(__file__).parent)
 _OVERRIDES = session_config_overrides(_YAML_CFG)
 _CLIENT_CONFIG = client_config(_YAML_CFG)
+
+logger = logging.getLogger(__name__)
 
 # Games directory
 GAMES_DIR = Path(__file__).parent / "games"
@@ -263,13 +267,13 @@ def build_game_tools() -> list[gradbot.ToolDef]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Starting Voice Text Adventure Demo...")
+    logger.info("Starting Voice Text Adventure Demo...")
     games = get_available_games()
-    print(f"Found {len(games)} games: {[g['name'] for g in games]}")
+    logger.info("Found %d games: %s", len(games), [g['name'] for g in games])
     voices = get_all_voice_names()
-    print(f"Available voices: {voices}")
+    logger.info("Available voices: %s", voices)
     yield
-    print("Shutting down...")
+    logger.info("Shutting down...")
 
 
 app = FastAPI(title="Voice Text Adventure", lifespan=lifespan)
@@ -292,34 +296,24 @@ async def list_voices():
 @app.websocket("/ws/game")
 async def websocket_game(websocket: WebSocket):
     """WebSocket endpoint for the game session."""
-    await websocket.accept()
 
-    # Initialize game state
+    # Per-session state
     state = GameState()
-    input_handle = None
     tools = build_game_tools()
+    game_executor = ThreadPoolExecutor(max_workers=1)
+    loop = asyncio.get_running_loop()
 
-    try:
-        # Wait for start message with game selection
-        start_msg = await websocket.receive_json()
-        if start_msg.get("type") != "start":
-            await websocket.close(code=4000, reason="Expected start message")
-            return
-
-        game_filename = start_msg.get("game")
+    async def on_start(msg: dict) -> gradbot.SessionConfig:
+        game_filename = msg.get("game")
         if not game_filename:
-            await websocket.close(code=4001, reason="No game specified")
-            return
+            raise RuntimeError("No game specified")
 
         # Find and load the game
         game_path = GAMES_DIR / game_filename
         if not game_path.exists():
-            await websocket.close(code=4002, reason=f"Game not found: {game_filename}")
-            return
+            raise RuntimeError(f"Game not found: {game_filename}")
 
-        print(f"Loading game: {game_path}")
-        game_executor = ThreadPoolExecutor(max_workers=1)
-        loop = asyncio.get_running_loop()
+        logger.info("Loading game: %s", game_path)
 
         def _init_game():
             game = jericho.FrotzEnv(str(game_path))
@@ -335,8 +329,8 @@ async def websocket_game(websocket: WebSocket):
         state.score = info.get("score", 0)
         state.moves = info.get("moves", 0)
 
-        print(f"Game loaded. Initial state: score={state.score}, moves={state.moves}")
-        print(f"Valid actions: {state.valid_actions[:10]}...")
+        logger.info("Game loaded. Initial state: score=%d, moves=%d", state.score, state.moves)
+        logger.info("Valid actions: %s...", state.valid_actions[:10])
 
         # Send initial game state to client
         await websocket.send_json({
@@ -356,8 +350,7 @@ async def websocket_game(websocket: WebSocket):
         # Get initial voice for the narrator
         voice = gradbot.flagship_voice(state.voice_name)
 
-        # Create session with narrator tools
-        config = gradbot.SessionConfig(
+        return gradbot.SessionConfig(
             voice_id=voice.voice_id,
             instructions=get_narrator_prompt(state),
             language=LANG_MAP[state.language],
@@ -369,194 +362,149 @@ async def websocket_game(websocket: WebSocket):
             ),
         )
 
-        input_handle, output_handle = await gradbot.run(
-            **_CLIENT_CONFIG,
-            session_config=config,
-            input_format=gradbot.AudioFormat.OggOpus,
-            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
-        )
+    async def handle_tool_call(tool_call, tool_handle, input_handle, websocket):
+        """Handle game tool calls."""
+        tool_name = tool_call.tool_name
+        args = json.loads(tool_call.args_json)
+        call_id = getattr(tool_call, "call_id", "unknown")
 
-        stop_event = asyncio.Event()
-        tool_task_counter = 0
+        logger.info("Tool call start: %s %s - %s", call_id, tool_name, args)
 
-        async def handle_tool_call(tool_call, tool_handle):
-            """Handle game tool calls."""
-            nonlocal state, tools
-            call_id = getattr(tool_call, "call_id", "unknown")
+        if tool_name == "execute_command":
+            command = args.get("command", "look")
 
-            tool_name = tool_call.tool_name
-            args = json.loads(tool_call.args_json)
-
-            print(f"Tool call start: {call_id} {tool_name} - {args}")
-
-            if tool_name == "execute_command":
-                command = args.get("command", "look")
-
-                if state.game is None:
-                    await tool_handle.send(json.dumps({
-                        "error": "No game loaded"
-                    }))
-                    print(f"Tool call done: {call_id} {tool_name} (no game)")
-                    return
-
-                try:
-                    # Execute the command on a dedicated single thread (Jericho is not thread-safe)
-                    obs, reward, done, info = await loop.run_in_executor(
-                        game_executor, state.game.step, command
-                    )
-
-                    # Update state
-                    state.current_description = obs
-                    state.score = info.get("score", state.score)
-                    state.moves = info.get("moves", state.moves)
-                    state.game_over = done
-
-                    # Return result to the voice agent FIRST (before slow get_valid_actions)
-                    await tool_handle.send(json.dumps({
-                        "command": command,
-                        "result": obs,
-                        "score": state.score,
-                        "moves": state.moves,
-                        "game_over": done,
-                        "reward": reward,
-                    }))
-                    print(f"Tool call done: {call_id} {tool_name} (ok)")
-
-                    # Get new valid actions (slow - uses multiprocessing, run in executor)
-                    state.valid_actions = await loop.run_in_executor(
-                        game_executor, state.game.get_valid_actions
-                    )
-
-                    # Send updated state to client
-                    await websocket.send_json({
-                        "type": "game_state",
-                        "state": {
-                            "game_name": state.game_name,
-                            "description": state.current_description,
-                            "score": state.score,
-                            "moves": state.moves,
-                            "valid_actions": state.valid_actions[:20],
-                            "game_over": state.game_over,
-                            "language": state.language,
-                            "voice_name": state.voice_name,
-                        }
-                    })
-
-                    if state.game_over:
-                        await websocket.send_json({
-                            "type": "game_over",
-                            "message": "The game has ended.",
-                            "final_score": state.score,
-                        })
-
-                except Exception as e:
-                    print(f"Command execution error: {e}")
-                    await tool_handle.send(json.dumps({
-                        "error": str(e),
-                        "command": command,
-                    }))
-                    print(f"Tool call done: {call_id} {tool_name} (error)")
-
-            elif tool_name == "get_valid_commands":
+            if state.game is None:
                 await tool_handle.send(json.dumps({
-                    "valid_commands": state.valid_actions[:30],
-                    "total_count": len(state.valid_actions),
+                    "error": "No game loaded"
                 }))
-                print(f"Tool call done: {call_id} {tool_name} (ok)")
+                logger.info("Tool call done: %s %s (no game)", call_id, tool_name)
+                return
 
-            elif tool_name == "get_game_state":
+            try:
+                # Execute the command on a dedicated single thread (Jericho is not thread-safe)
+                obs, reward, done, info = await loop.run_in_executor(
+                    game_executor, state.game.step, command
+                )
+
+                # Update state
+                state.current_description = obs
+                state.score = info.get("score", state.score)
+                state.moves = info.get("moves", state.moves)
+                state.game_over = done
+
+                # Return result to the voice agent FIRST (before slow get_valid_actions)
                 await tool_handle.send(json.dumps({
-                    "game_name": state.game_name,
-                    "description": state.current_description,
+                    "command": command,
+                    "result": obs,
                     "score": state.score,
                     "moves": state.moves,
-                    "game_over": state.game_over,
+                    "game_over": done,
+                    "reward": reward,
                 }))
-                print(f"Tool call done: {call_id} {tool_name} (ok)")
+                logger.info("Tool call done: %s %s (ok)", call_id, tool_name)
 
-            elif tool_name == "change_language":
-                new_lang = args.get("language", "en")
-                if new_lang in LANG_MAP:
-                    state.language = new_lang
-                    lang_name = LANG_NAMES.get(new_lang, "English")
+                # Get new valid actions (slow - uses multiprocessing, run in executor)
+                state.valid_actions = await loop.run_in_executor(
+                    game_executor, state.game.get_valid_actions
+                )
 
-                    # Get a voice that matches the new language if possible
-                    voices_by_lang = get_voices_by_language()
-                    if new_lang in voices_by_lang and voices_by_lang[new_lang]:
-                        # Pick first voice of that language
-                        state.voice_name = voices_by_lang[new_lang][0]["name"]
-
-                    voice = gradbot.flagship_voice(state.voice_name)
-                    new_config = gradbot.SessionConfig(
-                        voice_id=voice.voice_id,
-                        instructions=get_narrator_prompt(state),
-                        language=LANG_MAP[new_lang],
-                        tools=tools,
-                        **merge_overrides(_OVERRIDES,
-                            flush_duration_s=FLUSH_FOR_S,
-                            rewrite_rules=LANG_MAP[new_lang].rewrite_rules,
-                        ),
-                    )
-                    await input_handle.send_config(new_config)
-
-                    await websocket.send_json({
-                        "type": "narrator_change",
-                        "language": new_lang,
-                        "language_name": lang_name,
+                # Send updated state to client
+                await websocket.send_json({
+                    "type": "game_state",
+                    "state": {
+                        "game_name": state.game_name,
+                        "description": state.current_description,
+                        "score": state.score,
+                        "moves": state.moves,
+                        "valid_actions": state.valid_actions[:20],
+                        "game_over": state.game_over,
+                        "language": state.language,
                         "voice_name": state.voice_name,
+                    }
+                })
+
+                if state.game_over:
+                    await websocket.send_json({
+                        "type": "game_over",
+                        "message": "The game has ended.",
+                        "final_score": state.score,
                     })
 
-                    await tool_handle.send(json.dumps({
-                        "result": f"Switched to {lang_name}. Now narrating as {state.voice_name}.",
-                        "language": new_lang,
-                        "voice_name": state.voice_name,
-                    }))
-                    print(f"Tool call done: {call_id} {tool_name} (ok)")
-                else:
-                    await tool_handle.send_error(f"Unknown language: {new_lang}")
-                    print(f"Tool call done: {call_id} {tool_name} (error)")
+            except Exception as e:
+                logger.error("Command execution error: %s", e)
+                await tool_handle.send(json.dumps({
+                    "error": str(e),
+                    "command": command,
+                }))
+                logger.info("Tool call done: %s %s (error)", call_id, tool_name)
 
-            elif tool_name == "change_voice":
-                voice_name = args.get("voice_name")
-                reason = args.get("reason", "dramatic effect")
+        elif tool_name == "get_valid_commands":
+            await tool_handle.send(json.dumps({
+                "valid_commands": state.valid_actions[:30],
+                "total_count": len(state.valid_actions),
+            }))
+            logger.info("Tool call done: %s %s (ok)", call_id, tool_name)
 
-                try:
-                    voice = gradbot.flagship_voice(voice_name)
-                    state.voice_name = voice_name
+        elif tool_name == "get_game_state":
+            await tool_handle.send(json.dumps({
+                "game_name": state.game_name,
+                "description": state.current_description,
+                "score": state.score,
+                "moves": state.moves,
+                "game_over": state.game_over,
+            }))
+            logger.info("Tool call done: %s %s (ok)", call_id, tool_name)
 
-                    new_config = gradbot.SessionConfig(
-                        voice_id=voice.voice_id,
-                        instructions=get_narrator_prompt(state),
-                        language=LANG_MAP[state.language],
-                        tools=tools,
-                        **merge_overrides(_OVERRIDES,
-                            flush_duration_s=FLUSH_FOR_S,
-                            rewrite_rules=LANG_MAP[state.language].rewrite_rules,
-                        ),
-                    )
-                    await input_handle.send_config(new_config)
+        elif tool_name == "change_language":
+            new_lang = args.get("language", "en")
+            if new_lang in LANG_MAP:
+                state.language = new_lang
+                lang_name = LANG_NAMES.get(new_lang, "English")
 
-                    await websocket.send_json({
-                        "type": "narrator_change",
-                        "voice_name": voice_name,
-                        "reason": reason,
-                    })
+                # Get a voice that matches the new language if possible
+                voices_by_lang = get_voices_by_language()
+                if new_lang in voices_by_lang and voices_by_lang[new_lang]:
+                    # Pick first voice of that language
+                    state.voice_name = voices_by_lang[new_lang][0]["name"]
 
-                    await tool_handle.send(json.dumps({
-                        "result": f"Voice changed to {voice_name}.",
-                        "voice_name": voice_name,
-                    }))
-                    print(f"Tool call done: {call_id} {tool_name} (ok)")
-                except Exception as e:
-                    await tool_handle.send_error(f"Unknown voice: {voice_name}. Error: {e}")
-                    print(f"Tool call done: {call_id} {tool_name} (error)")
-
-            elif tool_name == "set_narrator_style":
-                style = args.get("style", "dramatic")
-                state.narrator_style = style
-
-                # Update prompt with new style
                 voice = gradbot.flagship_voice(state.voice_name)
+                new_config = gradbot.SessionConfig(
+                    voice_id=voice.voice_id,
+                    instructions=get_narrator_prompt(state),
+                    language=LANG_MAP[new_lang],
+                    tools=tools,
+                    **merge_overrides(_OVERRIDES,
+                        flush_duration_s=FLUSH_FOR_S,
+                        rewrite_rules=LANG_MAP[new_lang].rewrite_rules,
+                    ),
+                )
+                await input_handle.send_config(new_config)
+
+                await websocket.send_json({
+                    "type": "narrator_change",
+                    "language": new_lang,
+                    "language_name": lang_name,
+                    "voice_name": state.voice_name,
+                })
+
+                await tool_handle.send(json.dumps({
+                    "result": f"Switched to {lang_name}. Now narrating as {state.voice_name}.",
+                    "language": new_lang,
+                    "voice_name": state.voice_name,
+                }))
+                logger.info("Tool call done: %s %s (ok)", call_id, tool_name)
+            else:
+                await tool_handle.send_error(f"Unknown language: {new_lang}")
+                logger.info("Tool call done: %s %s (error)", call_id, tool_name)
+
+        elif tool_name == "change_voice":
+            voice_name = args.get("voice_name")
+            reason = args.get("reason", "dramatic effect")
+
+            try:
+                voice = gradbot.flagship_voice(voice_name)
+                state.voice_name = voice_name
+
                 new_config = gradbot.SessionConfig(
                     voice_id=voice.voice_id,
                     instructions=get_narrator_prompt(state),
@@ -571,130 +519,61 @@ async def websocket_game(websocket: WebSocket):
 
                 await websocket.send_json({
                     "type": "narrator_change",
-                    "style": style,
+                    "voice_name": voice_name,
+                    "reason": reason,
                 })
 
                 await tool_handle.send(json.dumps({
-                    "result": f"Narration style changed to {style}.",
-                    "style": style,
+                    "result": f"Voice changed to {voice_name}.",
+                    "voice_name": voice_name,
                 }))
-                print(f"Tool call done: {call_id} {tool_name} (ok)")
-
-            else:
-                await tool_handle.send_error(f"Unknown tool: {tool_name}")
-                print(f"Tool call done: {call_id} {tool_name} (error)")
-
-        def _log_tool_task_done(task, call_id, tool_name):
-            try:
-                task.result()
+                logger.info("Tool call done: %s %s (ok)", call_id, tool_name)
             except Exception as e:
-                print(f"Tool call task error: {call_id} {tool_name} - {e}")
-            else:
-                print(f"Tool call task finished: {call_id} {tool_name}")
+                await tool_handle.send_error(f"Unknown voice: {voice_name}. Error: {e}")
+                logger.info("Tool call done: %s %s (error)", call_id, tool_name)
 
-        async def process_output():
-            """Receive output from gradbot and send to client."""
-            nonlocal tool_task_counter
-            while not stop_event.is_set():
-                try:
-                    msg = await output_handle.receive()
-                    if msg is None:
-                        break
+        elif tool_name == "set_narrator_style":
+            style = args.get("style", "dramatic")
+            state.narrator_style = style
 
-                    if msg.msg_type == "audio":
-                        # Send audio timing before binary data
-                        await websocket.send_json({
-                            "type": "audio_timing",
-                            "start_s": msg.start_s,
-                            "stop_s": msg.stop_s,
-                            "turn_idx": msg.turn_idx,
-                            "interrupted": msg.interrupted,
-                        })
-                        await websocket.send_bytes(msg.data)
+            # Update prompt with new style
+            voice = gradbot.flagship_voice(state.voice_name)
+            new_config = gradbot.SessionConfig(
+                voice_id=voice.voice_id,
+                instructions=get_narrator_prompt(state),
+                language=LANG_MAP[state.language],
+                tools=tools,
+                **merge_overrides(_OVERRIDES,
+                    flush_duration_s=FLUSH_FOR_S,
+                    rewrite_rules=LANG_MAP[state.language].rewrite_rules,
+                ),
+            )
+            await input_handle.send_config(new_config)
 
-                    elif msg.msg_type == "tts_text":
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "text": msg.text,
-                            "is_user": False,
-                            "stop_s": msg.stop_s,
-                            "turn_idx": msg.turn_idx,
-                        })
-
-                    elif msg.msg_type == "stt_text":
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "text": msg.text,
-                            "is_user": True,
-                        })
-
-                    elif msg.msg_type == "tool_call":
-                        tool_task_counter += 1
-                        call_id = getattr(msg.tool_call, "call_id", "unknown")
-                        tool_name = msg.tool_call.tool_name
-                        print(f"Tool call queued: {call_id} {tool_name} task={tool_task_counter}")
-                        task = asyncio.create_task(handle_tool_call(msg.tool_call, msg.tool_call_handle))
-                        task.add_done_callback(lambda t, cid=call_id, tn=tool_name: _log_tool_task_done(t, cid, tn))
-
-                    elif msg.msg_type == "event":
-                        await websocket.send_json({
-                            "type": "event",
-                            "event": msg.event.event_type,
-                        })
-
-                except Exception as e:
-                    print(f"Output processing error: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    try:
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": str(e) if DEBUG else "An error occurred during the session",
-                        })
-                    except:
-                        pass
-                    break
-
-        async def receive_audio():
-            """Receive audio from client and send to gradbot."""
-            while not stop_event.is_set():
-                try:
-                    msg = await websocket.receive()
-                    if "text" in msg:
-                        data = json.loads(msg["text"])
-                        msg_type = data.get("type")
-                        if msg_type == "stop":
-                            stop_event.set()
-                            await input_handle.close()
-                            break
-                    elif "bytes" in msg:
-                        await input_handle.send_audio(msg["bytes"])
-                except WebSocketDisconnect:
-                    stop_event.set()
-                    await input_handle.close()
-                    break
-                except Exception as e:
-                    print(f"Receive error: {e}")
-                    stop_event.set()
-                    break
-
-        await asyncio.gather(
-            process_output(),
-            receive_audio(),
-            return_exceptions=True,
-        )
-
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-        import traceback
-        traceback.print_exc()
-        try:
             await websocket.send_json({
-                "type": "error",
-                "message": str(e) if DEBUG else "An error occurred while starting the session",
+                "type": "narrator_change",
+                "style": style,
             })
-        except:
-            pass
+
+            await tool_handle.send(json.dumps({
+                "result": f"Narration style changed to {style}.",
+                "style": style,
+            }))
+            logger.info("Tool call done: %s %s (ok)", call_id, tool_name)
+
+        else:
+            await tool_handle.send_error(f"Unknown tool: {tool_name}")
+            logger.info("Tool call done: %s %s (error)", call_id, tool_name)
+
+    try:
+        await websocket_chat_handler(
+            websocket,
+            on_start=on_start,
+            on_tool_call=handle_tool_call,
+            run_kwargs=_CLIENT_CONFIG,
+            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
+            debug=DEBUG,
+        )
     finally:
         # Clean up game
         if state.game:
@@ -704,10 +583,6 @@ async def websocket_game(websocket: WebSocket):
                 pass
         try:
             game_executor.shutdown(wait=False)
-        except Exception:
-            pass
-        try:
-            await websocket.close()
         except Exception:
             pass
 

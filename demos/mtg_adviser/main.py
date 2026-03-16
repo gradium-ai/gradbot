@@ -14,20 +14,21 @@ The AI can:
 Run with: uvicorn main:app --reload
 """
 
-import asyncio
-import os
 import json
+import logging
+import os
+import sys
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import gradbot
+from gradbot.fastapi import websocket_chat_handler
 
 # Initialize Rust logging (outputs to stderr)
 gradbot.init_logging()
@@ -36,13 +37,14 @@ USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
 FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from demo_config import load_config, session_config_overrides, merge_overrides, client_config
 
 _YAML_CFG = load_config(Path(__file__).parent)
 _OVERRIDES = session_config_overrides(_YAML_CFG)
 _CLIENT_CONFIG = client_config(_YAML_CFG)
+
+logger = logging.getLogger(__name__)
 
 # Module-level httpx client, created in lifespan
 http_client: Optional[httpx.AsyncClient] = None
@@ -88,7 +90,7 @@ async def scryfall_search(query: str) -> list[dict]:
         cards = data.get("data", [])[:10]
         return [extract_card_data(c) for c in cards]
     except Exception as e:
-        print(f"Scryfall search error: {e}")
+        logger.error("Scryfall search error: %s", e)
         return []
 
 
@@ -104,31 +106,17 @@ async def scryfall_named(name: str) -> Optional[dict]:
             return None
         return extract_card_data(resp.json())
     except Exception as e:
-        print(f"Scryfall named lookup error: {e}")
+        logger.error("Scryfall named lookup error: %s", e)
         return None
-
-
-@dataclass
-class SessionState:
-    """Tracks the current session state."""
-
-    current_voice: str = "Emma"
-    pending_tasks: list[asyncio.Task] = field(default_factory=list)
 
 
 def lang_to_code(lang: gradbot.Lang) -> str:
     """Convert Lang enum to language code."""
-    if lang == gradbot.Lang.En:
-        return "en"
-    elif lang == gradbot.Lang.Fr:
-        return "fr"
-    elif lang == gradbot.Lang.De:
-        return "de"
-    elif lang == gradbot.Lang.Es:
-        return "es"
-    elif lang == gradbot.Lang.Pt:
-        return "pt"
-    return "en"
+    mapping = {
+        gradbot.Lang.En: "en", gradbot.Lang.Fr: "fr", gradbot.Lang.De: "de",
+        gradbot.Lang.Es: "es", gradbot.Lang.Pt: "pt",
+    }
+    return mapping.get(lang, "en")
 
 
 def build_voice_tools() -> list[gradbot.ToolDef]:
@@ -256,14 +244,34 @@ Start by greeting the user and asking what kind of deck they'd like to build or 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global http_client
-    print("Starting MTG Strategy Adviser...")
+    logger.info("Starting MTG Strategy Adviser...")
     http_client = httpx.AsyncClient(timeout=15.0)
     yield
     await http_client.aclose()
-    print("Shutting down...")
+    logger.info("Shutting down...")
 
 
 app = FastAPI(title="MTG Strategy Adviser", lifespan=lifespan)
+
+# Build tools once at module level
+_VOICE_TOOLS = build_voice_tools()
+_CARD_TOOLS = build_card_tools()
+_ALL_TOOLS = _VOICE_TOOLS + _CARD_TOOLS
+
+
+def _make_session_config(voice_name: str, tools: list[gradbot.ToolDef], assistant_speaks_first: bool = True) -> gradbot.SessionConfig:
+    voice = gradbot.flagship_voice(voice_name)
+    return gradbot.SessionConfig(
+        voice_id=voice.voice_id,
+        instructions=get_system_prompt(voice_name),
+        language=voice.language,
+        tools=tools,
+        **merge_overrides(_OVERRIDES,
+            flush_duration_s=FLUSH_FOR_S,
+            rewrite_rules=voice.language.rewrite_rules,
+            assistant_speaks_first=assistant_speaks_first,
+        ),
+    )
 
 
 @app.get("/api/voices")
@@ -286,382 +294,177 @@ async def list_voices():
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
-    """
-    WebSocket endpoint for voice chat with card search and voice switching.
+    """WebSocket endpoint for voice chat with card search and voice switching."""
 
-    Protocol:
-    - Client sends JSON: {"type": "start", "voice_name": "Emma"}
-    - Client sends binary: raw audio data (OGG/Opus)
-    - Server sends JSON: {"type": "transcript", "text": "...", "is_user": true/false}
-    - Server sends JSON: {"type": "voice_change", "voice_name": "..."}
-    - Server sends JSON: {"type": "search_started", "query": "..."}
-    - Server sends JSON: {"type": "card_results", "cards": [...], "query": "..."}
-    - Server sends JSON: {"type": "card_highlight", "card": {...}}
-    - Server sends JSON: {"type": "event", "event": "..."}
-    - Server sends binary: audio data (OGG/Opus)
-    - Client sends JSON: {"type": "stop"} to end
-    """
-    await websocket.accept()
+    # Per-session state
+    current_voice = "Emma"
 
-    state = SessionState()
+    async def handle_card_search(query: str, tool_handle, websocket: WebSocket):
+        """Search Scryfall for cards and send results to frontend + LLM."""
+        logger.info("Searching Scryfall: %s", query)
 
-    try:
-        # Wait for start message
-        start_msg = await websocket.receive_json()
-        if start_msg.get("type") != "start":
-            await websocket.close(code=4000, reason="Expected start message")
-            return
+        await websocket.send_json({
+            "type": "search_started",
+            "query": query,
+        })
 
-        voice_name = start_msg.get("voice_name", "Emma")
+        cards = await scryfall_search(query)
 
-        # Validate voice
-        try:
-            voice = gradbot.flagship_voice(voice_name)
-        except RuntimeError:
-            await websocket.close(
-                code=4001, reason=f"Unknown voice: {voice_name}"
-            )
-            return
+        if cards:
+            await websocket.send_json({
+                "type": "card_results",
+                "cards": cards,
+                "query": query,
+            })
 
-        state.current_voice = voice_name
-        print(f"Starting MTG adviser chat with voice={voice_name}")
+            card_summaries = []
+            for c in cards:
+                summary = f"{c['name']} ({c['mana_cost']}) - {c['type_line']}"
+                if c.get("oracle_text"):
+                    summary += f": {c['oracle_text'][:100]}"
+                card_summaries.append(summary)
 
-        # Build tools
-        voice_tools = build_voice_tools()
-        card_tools = build_card_tools()
-        tools = voice_tools + card_tools
-        print(
-            f"Built {len(tools)} tools: {len(voice_tools)} voice + {len(card_tools)} card tools"
-        )
-
-        # Create session config
-        config = gradbot.SessionConfig(
-            voice_id=voice.voice_id,
-            instructions=get_system_prompt(voice_name),
-            language=voice.language,
-            tools=tools,
-            **merge_overrides(_OVERRIDES,
-                flush_duration_s=FLUSH_FOR_S,
-                rewrite_rules=voice.language.rewrite_rules,
-                assistant_speaks_first=True,
-            ),
-        )
-
-        # Create clients and start session
-        input_handle, output_handle = await gradbot.run(
-            **_CLIENT_CONFIG,
-            session_config=config,
-            input_format=gradbot.AudioFormat.OggOpus,
-            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
-        )
-
-        stop_event = asyncio.Event()
-
-        async def handle_card_search(query: str, tool_handle):
-            """Search Scryfall for cards and send results to frontend + LLM."""
-            print(f"Searching Scryfall: {query}")
-
-            # Notify frontend search started
-            await websocket.send_json(
-                {
-                    "type": "search_started",
+            await tool_handle.send(
+                json.dumps({
+                    "success": True,
                     "query": query,
-                }
+                    "count": len(cards),
+                    "cards": card_summaries,
+                    "message": f"Found {len(cards)} cards. The user can see the card images in their browser. Discuss the results and explain why these cards are good choices.",
+                })
+            )
+        else:
+            await tool_handle.send(
+                json.dumps({
+                    "success": False,
+                    "query": query,
+                    "message": "No cards found matching that search. Try different criteria or a broader search.",
+                })
             )
 
-            cards = await scryfall_search(query)
+        logger.info("Search complete: %s -> %d cards", query, len(cards))
 
-            if cards:
-                # Send card results to frontend
-                await websocket.send_json(
-                    {
-                        "type": "card_results",
-                        "cards": cards,
-                        "query": query,
-                    }
-                )
+    async def handle_card_details(card_name: str, tool_handle, websocket: WebSocket):
+        """Look up a specific card and send result to frontend + LLM."""
+        logger.info("Looking up card: %s", card_name)
 
-                # Send results to LLM
-                card_summaries = []
-                for c in cards:
-                    summary = f"{c['name']} ({c['mana_cost']}) - {c['type_line']}"
-                    if c.get("oracle_text"):
-                        summary += f": {c['oracle_text'][:100]}"
-                    card_summaries.append(summary)
+        await websocket.send_json({
+            "type": "search_started",
+            "query": card_name,
+        })
 
-                await tool_handle.send(
-                    json.dumps(
-                        {
-                            "success": True,
-                            "query": query,
-                            "count": len(cards),
-                            "cards": card_summaries,
-                            "message": f"Found {len(cards)} cards. The user can see the card images in their browser. Discuss the results and explain why these cards are good choices.",
-                        }
-                    )
-                )
-            else:
-                await tool_handle.send(
-                    json.dumps(
-                        {
-                            "success": False,
-                            "query": query,
-                            "message": "No cards found matching that search. Try different criteria or a broader search.",
-                        }
-                    )
-                )
+        card = await scryfall_named(card_name)
 
-            print(f"Search complete: {query} -> {len(cards)} cards")
+        if card:
+            await websocket.send_json({
+                "type": "card_highlight",
+                "card": card,
+            })
 
-        async def handle_card_details(card_name: str, tool_handle):
-            """Look up a specific card and send result to frontend + LLM."""
-            print(f"Looking up card: {card_name}")
+            details = f"{card['name']} ({card['mana_cost']}) - {card['type_line']}"
+            if card.get("oracle_text"):
+                details += f"\nAbility: {card['oracle_text']}"
+            if card.get("power") and card.get("toughness"):
+                details += f"\nP/T: {card['power']}/{card['toughness']}"
+            details += f"\nSet: {card['set_name']}, Rarity: {card['rarity']}"
 
-            # Notify frontend search started
-            await websocket.send_json(
-                {
-                    "type": "search_started",
-                    "query": card_name,
-                }
+            await tool_handle.send(
+                json.dumps({
+                    "success": True,
+                    "card": details,
+                    "message": f"Found {card['name']}. The user can see the card image. Explain this card's strengths, what decks it fits in, and any notable synergies.",
+                })
+            )
+        else:
+            await tool_handle.send(
+                json.dumps({
+                    "success": False,
+                    "card_name": card_name,
+                    "message": f"Could not find a card named '{card_name}'. The name might be misspelled. Try searching with search_cards instead.",
+                })
             )
 
-            card = await scryfall_named(card_name)
+        logger.info("Card lookup complete: %s -> %s", card_name, "found" if card else "not found")
 
-            if card:
-                # Send card highlight to frontend
-                await websocket.send_json(
-                    {
-                        "type": "card_highlight",
-                        "card": card,
-                    }
+    async def handle_tool_call(tool_call, tool_handle, input_handle, websocket):
+        """Handle voice switching and card tool calls."""
+        nonlocal current_voice
+
+        tool_name = tool_call.tool_name
+        args = json.loads(tool_call.args_json)
+
+        logger.info("Tool call: %s - %s", tool_name, args)
+
+        # Handle voice switching
+        if tool_name.startswith("switch_to_"):
+            new_voice_name = tool_name[len("switch_to_"):].capitalize()
+            for v in gradbot.flagship_voices():
+                if v.name.lower() == tool_name[len("switch_to_"):]:
+                    new_voice_name = v.name
+                    break
+
+            try:
+                new_voice = gradbot.flagship_voice(new_voice_name)
+                current_voice = new_voice_name
+
+                new_config = gradbot.SessionConfig(
+                    voice_id=new_voice.voice_id,
+                    instructions=get_system_prompt(new_voice_name),
+                    language=new_voice.language,
+                    tools=_ALL_TOOLS,
+                    **merge_overrides(_OVERRIDES,
+                        flush_duration_s=FLUSH_FOR_S,
+                        rewrite_rules=new_voice.language.rewrite_rules,
+                    ),
                 )
+                await input_handle.send_config(new_config)
 
-                # Send result to LLM
-                details = f"{card['name']} ({card['mana_cost']}) - {card['type_line']}"
-                if card.get("oracle_text"):
-                    details += f"\nAbility: {card['oracle_text']}"
-                if card.get("power") and card.get("toughness"):
-                    details += f"\nP/T: {card['power']}/{card['toughness']}"
-                details += f"\nSet: {card['set_name']}, Rarity: {card['rarity']}"
+                await websocket.send_json({
+                    "type": "voice_change",
+                    "voice_name": new_voice_name,
+                    "description": new_voice.description,
+                })
 
                 await tool_handle.send(
-                    json.dumps(
-                        {
-                            "success": True,
-                            "card": details,
-                            "message": f"Found {card['name']}. The user can see the card image. Explain this card's strengths, what decks it fits in, and any notable synergies.",
-                        }
-                    )
+                    json.dumps({
+                        "success": True,
+                        "message": f"Voice switched to {new_voice_name}. You are now speaking with this voice and personality.",
+                    })
                 )
-            else:
-                await tool_handle.send(
-                    json.dumps(
-                        {
-                            "success": False,
-                            "card_name": card_name,
-                            "message": f"Could not find a card named '{card_name}'. The name might be misspelled. Try searching with search_cards instead.",
-                        }
-                    )
-                )
+            except RuntimeError as e:
+                await tool_handle.send_error(str(e))
 
-            print(f"Card lookup complete: {card_name} -> {'found' if card else 'not found'}")
+        # Handle card search (deferred)
+        elif tool_name == "search_cards":
+            query = args.get("query", "")
+            await handle_card_search(query, tool_handle, websocket)
 
-        async def handle_tool_call(tool_call, tool_handle):
-            """Handle voice switching and card tool calls."""
-            nonlocal state, tools
+        # Handle card details lookup (deferred)
+        elif tool_name == "get_card_details":
+            card_name = args.get("card_name", "")
+            await handle_card_details(card_name, tool_handle, websocket)
 
-            tool_name = tool_call.tool_name
-            args = json.loads(tool_call.args_json)
+        else:
+            await tool_handle.send_error(f"Unknown tool: {tool_name}")
 
-            print(f"Tool call: {tool_name} - {args}")
+    voice_name = "Emma"  # default; will be set from start message via on_start
 
-            # Handle voice switching
-            if tool_name.startswith("switch_to_"):
-                new_voice_name = tool_name[len("switch_to_"):].capitalize()
-                # Handle multi-word names
-                for v in gradbot.flagship_voices():
-                    if v.name.lower() == tool_name[len("switch_to_"):]:
-                        new_voice_name = v.name
-                        break
+    def on_start(msg: dict) -> gradbot.SessionConfig:
+        nonlocal current_voice
+        current_voice = msg.get("voice_name", "Emma")
+        logger.info("Starting MTG adviser chat with voice=%s", current_voice)
+        logger.info("Built %d tools: %d voice + %d card tools",
+                     len(_ALL_TOOLS), len(_VOICE_TOOLS), len(_CARD_TOOLS))
+        return _make_session_config(current_voice, _ALL_TOOLS)
 
-                try:
-                    new_voice = gradbot.flagship_voice(new_voice_name)
-                    state.current_voice = new_voice_name
-
-                    # Update session config with new voice
-                    new_config = gradbot.SessionConfig(
-                        voice_id=new_voice.voice_id,
-                        instructions=get_system_prompt(new_voice_name),
-                        language=new_voice.language,
-                        tools=tools,
-                        **merge_overrides(_OVERRIDES,
-                            flush_duration_s=FLUSH_FOR_S,
-                            rewrite_rules=new_voice.language.rewrite_rules,
-                        ),
-                    )
-                    await input_handle.send_config(new_config)
-
-                    # Notify client of voice change
-                    await websocket.send_json(
-                        {
-                            "type": "voice_change",
-                            "voice_name": new_voice_name,
-                            "description": new_voice.description,
-                        }
-                    )
-
-                    # Send success to LLM
-                    await tool_handle.send(
-                        json.dumps(
-                            {
-                                "success": True,
-                                "message": f"Voice switched to {new_voice_name}. You are now speaking with this voice and personality.",
-                            }
-                        )
-                    )
-                except RuntimeError as e:
-                    await tool_handle.send_error(str(e))
-
-            # Handle card search (DEFERRED - launches async task)
-            elif tool_name == "search_cards":
-                query = args.get("query", "")
-                task = asyncio.create_task(handle_card_search(query, tool_handle))
-                state.pending_tasks.append(task)
-                task.add_done_callback(lambda t: state.pending_tasks.remove(t) if t in state.pending_tasks else None)
-
-            # Handle card details lookup (DEFERRED - launches async task)
-            elif tool_name == "get_card_details":
-                card_name = args.get("card_name", "")
-                task = asyncio.create_task(handle_card_details(card_name, tool_handle))
-                state.pending_tasks.append(task)
-                task.add_done_callback(lambda t: state.pending_tasks.remove(t) if t in state.pending_tasks else None)
-
-            else:
-                await tool_handle.send_error(f"Unknown tool: {tool_name}")
-
-        async def process_output():
-            """Receive output from gradbot and send to client."""
-            while not stop_event.is_set():
-                try:
-                    msg = await output_handle.receive()
-                    if msg is None:
-                        break
-
-                    if msg.msg_type == "audio":
-                        # Send audio timing before binary data
-                        await websocket.send_json(
-                            {
-                                "type": "audio_timing",
-                                "start_s": msg.start_s,
-                                "stop_s": msg.stop_s,
-                                "turn_idx": msg.turn_idx,
-                                "interrupted": msg.interrupted,
-                            }
-                        )
-                        await websocket.send_bytes(msg.data)
-
-                    elif msg.msg_type == "tts_text":
-                        await websocket.send_json(
-                            {
-                                "type": "transcript",
-                                "text": msg.text,
-                                "is_user": False,
-                                "stop_s": msg.stop_s,
-                                "turn_idx": msg.turn_idx,
-                            }
-                        )
-
-                    elif msg.msg_type == "stt_text":
-                        await websocket.send_json(
-                            {
-                                "type": "transcript",
-                                "text": msg.text,
-                                "is_user": True,
-                            }
-                        )
-
-                    elif msg.msg_type == "tool_call":
-                        asyncio.create_task(
-                            handle_tool_call(
-                                msg.tool_call, msg.tool_call_handle
-                            )
-                        )
-
-                    elif msg.msg_type == "event":
-                        await websocket.send_json(
-                            {
-                                "type": "event",
-                                "event": msg.event.event_type,
-                            }
-                        )
-
-                except Exception as e:
-                    print(f"Output processing error: {e}")
-                    try:
-                        await websocket.send_json(
-                            {
-                                "type": "error",
-                                "message": str(e) if DEBUG else "An error occurred during the session",
-                            }
-                        )
-                    except:
-                        pass
-                    break
-
-        async def receive_audio():
-            """Receive audio from client and send to gradbot."""
-            while not stop_event.is_set():
-                try:
-                    msg = await websocket.receive()
-                    if "text" in msg:
-                        data = json.loads(msg["text"])
-                        msg_type = data.get("type")
-                        if msg_type == "stop":
-                            stop_event.set()
-                            await input_handle.close()
-                            break
-                    elif "bytes" in msg:
-                        await input_handle.send_audio(msg["bytes"])
-                except WebSocketDisconnect:
-                    stop_event.set()
-                    await input_handle.close()
-                    break
-                except Exception as e:
-                    print(f"Receive error: {e}")
-                    stop_event.set()
-                    break
-
-        # Run both tasks
-        await asyncio.gather(
-            process_output(),
-            receive_audio(),
-            return_exceptions=True,
-        )
-
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-        import traceback
-
-        traceback.print_exc()
-        try:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "message": str(e) if DEBUG else "An error occurred while starting the session",
-                }
-            )
-        except:
-            pass
-    finally:
-        # Cancel all pending search tasks
-        for task in state.pending_tasks:
-            if not task.done():
-                task.cancel()
-        state.pending_tasks.clear()
-        try:
-            await websocket.close()
-        except:
-            pass
+    await websocket_chat_handler(
+        websocket,
+        on_start=on_start,
+        on_tool_call=handle_tool_call,
+        run_kwargs=_CLIENT_CONFIG,
+        output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
+        debug=DEBUG,
+    )
 
 
 @app.get("/api/audio-config")

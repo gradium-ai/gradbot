@@ -8,26 +8,28 @@ Run with: uvicorn main:app --reload --port 8001
 """
 
 import asyncio
-import os
 import json
+import logging
+import os
 import random
-from contextlib import asynccontextmanager
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import gradbot
+from gradbot.fastapi import websocket_chat_handler
 
 gradbot.init_logging()
+logger = logging.getLogger(__name__)
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
 FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from demo_config import load_config, session_config_overrides, merge_overrides, client_config
 
@@ -115,7 +117,6 @@ class BankSession:
     card_ordered: bool = False
     loan_confirmed: bool = False
     loan_amount: float = 0
-    pending_tasks: list[asyncio.Task] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -482,39 +483,35 @@ def build_tools() -> list[gradbot.ToolDef]:
 # FastAPI app
 # ---------------------------------------------------------------------------
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("Starting Business Bank Demo...")
-    yield
-    print("Shutting down...")
-
-
-app = FastAPI(title="Business Bank Demo", lifespan=lifespan)
+app = FastAPI(title="Business Bank Demo")
 
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
-    await websocket.accept()
-
     state = BankSession()
 
-    try:
-        start_msg = await websocket.receive_json()
-        if start_msg.get("type") != "start":
-            await websocket.close(code=4000, reason="Expected start message")
-            return
-
+    def on_start(start_msg: dict) -> gradbot.SessionConfig:
         agent_name = start_msg.get("agent", "Alex")
         customer_name = start_msg.get("customer", "Jamie")
         padding_bonus = float(start_msg.get("padding_bonus", 0.0))
         voice_key, lang = AGENT_VOICES.get(agent_name, ("Eva", "en"))
         lang_enum = {"en": gradbot.Lang.En, "fr": gradbot.Lang.Fr}.get(lang, gradbot.Lang.En)
-        print(f"Starting business bank chat with {agent_name} (voice: {voice_key}, lang: {lang}, customer: {customer_name}, padding_bonus: {padding_bonus})")
+        logger.info("Starting business bank chat with %s (voice: %s, lang: %s, customer: %s, padding_bonus: %s)",
+                     agent_name, voice_key, lang, customer_name, padding_bonus)
 
         voice = gradbot.flagship_voice(voice_key)
         tools = build_tools()
 
-        config = gradbot.SessionConfig(
+        # Store session-scoped values for the tool handler
+        state._agent_name = agent_name
+        state._customer_name = customer_name
+        state._voice = voice
+        state._lang = lang
+        state._lang_enum = lang_enum
+        state._tools = tools
+        state._padding_bonus = padding_bonus
+
+        return gradbot.SessionConfig(
             voice_id=voice.voice_id,
             instructions=get_auth_prompt(agent_name, customer_name, lang),
             language=lang_enum,
@@ -527,305 +524,201 @@ async def websocket_chat(websocket: WebSocket):
             ),
         )
 
-        input_handle, output_handle = await gradbot.run(
-            **_CLIENT_CONFIG,
-            session_config=config,
-            input_format=gradbot.AudioFormat.OggOpus,
-            output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
+    def make_config(instructions: str) -> gradbot.SessionConfig:
+        return gradbot.SessionConfig(
+            voice_id=state._voice.voice_id,
+            instructions=instructions,
+            language=state._lang_enum,
+            tools=state._tools,
+            **merge_overrides(_OVERRIDES,
+                flush_duration_s=FLUSH_FOR_S,
+                padding_bonus=state._padding_bonus,
+                rewrite_rules=state._lang,
+            ),
         )
 
-        stop_event = asyncio.Event()
+    async def handle_tool_call(tool_call, tool_handle, input_handle, websocket):
+        tool_name = tool_call.tool_name
+        args = json.loads(tool_call.args_json)
+        logger.info("Tool call: %s - %s", tool_name, args)
 
-        def make_config(instructions: str) -> gradbot.SessionConfig:
-            return gradbot.SessionConfig(
-                voice_id=voice.voice_id,
-                instructions=instructions,
-                language=lang_enum,
-                tools=tools,
-                **merge_overrides(_OVERRIDES,
-                    flush_duration_s=FLUSH_FOR_S,
-                    padding_bonus=padding_bonus,
-                    rewrite_rules=lang,
-                ),
-            )
+        customer_name = state._customer_name
+        agent_name = state._agent_name
+        lang = state._lang
 
-        async def handle_tool_call(tool_call, tool_handle):
-            tool_name = tool_call.tool_name
-            args = json.loads(tool_call.args_json)
-            print(f"Tool call: {tool_name} - {args}")
+        if tool_name == "check_account":
+            digits = args.get("digits", "")
+            biz = find_business_by_account_digits(digits)
 
-            if tool_name == "check_account":
-                digits = args.get("digits", "")
-                biz = find_business_by_account_digits(digits)
-
-                if not biz:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": f"No account found ending in '{digits}'. Ask the caller to try again.",
-                    }))
-                    return
-
+            if not biz:
                 await tool_handle.send(json.dumps({
-                    "success": True,
-                    "business_name": biz["name"],
-                    "message": f"Account confirmed. This is the account for {biz['name']}. Say 'Welcome back, {customer_name}!' and then ask for their 4-digit PIN.",
+                    "success": False,
+                    "message": f"No account found ending in '{digits}'. Ask the caller to try again.",
                 }))
-                print(f"Account confirmed: {biz['name']} (digits: {digits})")
+                return
 
-            elif tool_name == "check_pin":
-                biz_name = args.get("business_name", "")
-                pin = args.get("pin", "")
-                biz = find_business(biz_name)
+            await tool_handle.send(json.dumps({
+                "success": True,
+                "business_name": biz["name"],
+                "message": f"Account confirmed. This is the account for {biz['name']}. Say 'Welcome back, {customer_name}!' and then ask for their 4-digit PIN.",
+            }))
+            logger.info("Account confirmed: %s (digits: %s)", biz["name"], digits)
 
-                if not biz:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": f"Business '{biz_name}' not found in our records.",
-                    }))
-                    return
+        elif tool_name == "check_pin":
+            biz_name = args.get("business_name", "")
+            pin = args.get("pin", "")
+            biz = find_business(biz_name)
 
-                if biz["pin"] == pin.strip():
-                    state.authenticated_business = biz["name"]
-                    state.phase = 2
+            if not biz:
+                await tool_handle.send(json.dumps({
+                    "success": False,
+                    "message": f"Business '{biz_name}' not found in our records.",
+                }))
+                return
 
-                    # Notify frontend
-                    await websocket.send_json({
-                        "type": "auth_success",
-                        "business": biz["name"],
-                    })
-
-                    # Swap to phase 2 prompt
-                    phase2 = get_service_prompt(agent_name, biz["name"], biz["balance"], lang)
-                    await input_handle.send_config(make_config(phase2))
-                    print(f"Authenticated: {biz['name']}, switched to phase 2")
-
-                    await tool_handle.send(json.dumps({
-                        "success": True,
-                        "message": f"PIN verified. The caller is authenticated as {biz['name']}. Welcome them and ask how you can help today — either lost card replacement or a business loan.",
-                    }))
-                else:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": "Incorrect PIN. Ask the caller to try again.",
-                    }))
-
-            elif tool_name == "order_replacement_card":
-                biz_name = args.get("business_name", "")
-                biz = find_business(biz_name)
-
-                if not biz:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": f"Business '{biz_name}' not found.",
-                    }))
-                    return
-
-                tracking = "T" + "".join(random.choice("123456789") for _ in range(4))
-                state.card_ordered = True
+            if biz["pin"] == pin.strip():
+                state.authenticated_business = biz["name"]
+                state.phase = 2
 
                 # Notify frontend
                 await websocket.send_json({
-                    "type": "card_ordered",
+                    "type": "auth_success",
                     "business": biz["name"],
-                    "tracking_number": tracking,
                 })
+
+                # Swap to phase 2 prompt
+                phase2 = get_service_prompt(agent_name, biz["name"], biz["balance"], lang)
+                await input_handle.send_config(make_config(phase2))
+                logger.info("Authenticated: %s, switched to phase 2", biz["name"])
 
                 await tool_handle.send(json.dumps({
                     "success": True,
-                    "tracking_number": tracking,
-                    "message": f"Replacement card ordered for {biz['name']}. Tracking number: {tracking}. The card will arrive in 3-5 business days. Share this information with the caller and ask if there's anything else you can help with.",
+                    "message": f"PIN verified. The caller is authenticated as {biz['name']}. Welcome them and ask how you can help today — either lost card replacement or a business loan.",
                 }))
-                print(f"Card ordered for {biz['name']}: {tracking}")
-
-            elif tool_name == "get_rate":
-                biz_name = args.get("business_name", "")
-                biz = find_business(biz_name)
-
-                if not biz:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": f"Business '{biz_name}' not found.",
-                    }))
-                    return
-
-                async def deferred_get_rate(biz, tool_handle):
-                    print(f"Looking up loan terms for {biz['name']} (8s delay)")
-                    await asyncio.sleep(8)
-
-                    state.phase = 3
-
-                    # Swap to phase 3 prompt
-                    phase3 = get_loan_prompt(agent_name, biz["name"], biz["balance"], biz["max_loan"], biz["rate"], lang)
-                    await input_handle.send_config(make_config(phase3))
-                    print(f"Switched to phase 3 (loan) for {biz['name']}")
-
-                    await tool_handle.send(json.dumps({
-                        "success": True,
-                        "max_loan": biz["max_loan"],
-                        "rate": biz["rate"],
-                        "message": f"Pre-approved loan terms for {biz['name']}: up to ${biz['max_loan']:,} at {biz['rate']}% APR. Present these terms and ask how much they'd like to borrow.",
-                    }))
-
-                task = asyncio.create_task(deferred_get_rate(biz, tool_handle))
-                state.pending_tasks.append(task)
-                task.add_done_callback(lambda t: state.pending_tasks.remove(t) if t in state.pending_tasks else None)
-
-            elif tool_name == "confirm_loan":
-                biz_name = args.get("business_name", "")
-                amount = args.get("amount", 0)
-                biz = find_business(biz_name)
-
-                if not biz:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": f"Business '{biz_name}' not found.",
-                    }))
-                    return
-
-                if amount <= 0:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": "Loan amount must be greater than zero.",
-                    }))
-                    return
-
-                if amount > biz["max_loan"]:
-                    await tool_handle.send(json.dumps({
-                        "success": False,
-                        "message": f"Amount ${amount:,.0f} exceeds the maximum pre-approved loan of ${biz['max_loan']:,}. Ask for a lower amount.",
-                    }))
-                    return
-
-                # Update balance
-                biz["balance"] += int(amount)
-                new_balance = biz["balance"]
-                state.loan_confirmed = True
-                state.loan_amount = amount
-                confirmation = "L" + "".join(random.choice("123456789") for _ in range(4))
-
-                # Notify frontend
-                await websocket.send_json({
-                    "type": "loan_confirmed",
-                    "business": biz["name"],
-                    "amount": amount,
-                    "new_balance": new_balance,
-                    "confirmation": confirmation,
-                })
-
-                await tool_handle.send(json.dumps({
-                    "success": True,
-                    "confirmation": confirmation,
-                    "amount": amount,
-                    "new_balance": new_balance,
-                    "message": f"Loan of ${amount:,.0f} confirmed for {biz['name']}. Confirmation number: {confirmation}. New account balance: ${new_balance:,}. Share this with the caller.",
-                }))
-                print(f"Loan confirmed for {biz['name']}: ${amount:,.0f}, new balance: ${new_balance:,}")
-
             else:
-                await tool_handle.send_error(f"Unknown tool: {tool_name}")
+                await tool_handle.send(json.dumps({
+                    "success": False,
+                    "message": "Incorrect PIN. Ask the caller to try again.",
+                }))
 
-        async def process_output():
-            while not stop_event.is_set():
-                try:
-                    msg = await output_handle.receive()
-                    if msg is None:
-                        break
+        elif tool_name == "order_replacement_card":
+            biz_name = args.get("business_name", "")
+            biz = find_business(biz_name)
 
-                    if msg.msg_type == "audio":
-                        await websocket.send_json({
-                            "type": "audio_timing",
-                            "start_s": msg.start_s,
-                            "stop_s": msg.stop_s,
-                            "turn_idx": msg.turn_idx,
-                            "interrupted": msg.interrupted,
-                        })
-                        await websocket.send_bytes(msg.data)
+            if not biz:
+                await tool_handle.send(json.dumps({
+                    "success": False,
+                    "message": f"Business '{biz_name}' not found.",
+                }))
+                return
 
-                    elif msg.msg_type == "tts_text":
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "text": msg.text,
-                            "is_user": False,
-                            "stop_s": msg.stop_s,
-                            "turn_idx": msg.turn_idx,
-                        })
+            tracking = "T" + "".join(random.choice("123456789") for _ in range(4))
+            state.card_ordered = True
 
-                    elif msg.msg_type == "stt_text":
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "text": msg.text,
-                            "is_user": True,
-                        })
-
-                    elif msg.msg_type == "tool_call":
-                        asyncio.create_task(handle_tool_call(msg.tool_call, msg.tool_call_handle))
-
-                    elif msg.msg_type == "event":
-                        await websocket.send_json({
-                            "type": "event",
-                            "event": msg.event.event_type,
-                        })
-
-                except Exception as e:
-                    print(f"Output processing error: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    try:
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": str(e) if DEBUG else "An error occurred during the session",
-                        })
-                    except:
-                        pass
-                    break
-
-        async def receive_audio():
-            while not stop_event.is_set():
-                try:
-                    msg = await websocket.receive()
-                    if "text" in msg:
-                        data = json.loads(msg["text"])
-                        if data.get("type") == "stop":
-                            stop_event.set()
-                            await input_handle.close()
-                            break
-                    elif "bytes" in msg:
-                        await input_handle.send_audio(msg["bytes"])
-                except WebSocketDisconnect:
-                    stop_event.set()
-                    await input_handle.close()
-                    break
-                except Exception as e:
-                    print(f"Receive error: {e}")
-                    stop_event.set()
-                    break
-
-        await asyncio.gather(
-            process_output(),
-            receive_audio(),
-            return_exceptions=True,
-        )
-
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-        import traceback
-        traceback.print_exc()
-        try:
+            # Notify frontend
             await websocket.send_json({
-                "type": "error",
-                "message": str(e) if DEBUG else "An error occurred while starting the session",
+                "type": "card_ordered",
+                "business": biz["name"],
+                "tracking_number": tracking,
             })
-        except:
-            pass
-    finally:
-        for task in state.pending_tasks:
-            if not task.done():
-                task.cancel()
-        state.pending_tasks.clear()
-        try:
-            await websocket.close()
-        except:
-            pass
+
+            await tool_handle.send(json.dumps({
+                "success": True,
+                "tracking_number": tracking,
+                "message": f"Replacement card ordered for {biz['name']}. Tracking number: {tracking}. The card will arrive in 3-5 business days. Share this information with the caller and ask if there's anything else you can help with.",
+            }))
+            logger.info("Card ordered for %s: %s", biz["name"], tracking)
+
+        elif tool_name == "get_rate":
+            biz_name = args.get("business_name", "")
+            biz = find_business(biz_name)
+
+            if not biz:
+                await tool_handle.send(json.dumps({
+                    "success": False,
+                    "message": f"Business '{biz_name}' not found.",
+                }))
+                return
+
+            logger.info("Looking up loan terms for %s (8s delay)", biz["name"])
+            await asyncio.sleep(8)
+
+            state.phase = 3
+
+            # Swap to phase 3 prompt
+            phase3 = get_loan_prompt(agent_name, biz["name"], biz["balance"], biz["max_loan"], biz["rate"], lang)
+            await input_handle.send_config(make_config(phase3))
+            logger.info("Switched to phase 3 (loan) for %s", biz["name"])
+
+            await tool_handle.send(json.dumps({
+                "success": True,
+                "max_loan": biz["max_loan"],
+                "rate": biz["rate"],
+                "message": f"Pre-approved loan terms for {biz['name']}: up to ${biz['max_loan']:,} at {biz['rate']}% APR. Present these terms and ask how much they'd like to borrow.",
+            }))
+
+        elif tool_name == "confirm_loan":
+            biz_name = args.get("business_name", "")
+            amount = args.get("amount", 0)
+            biz = find_business(biz_name)
+
+            if not biz:
+                await tool_handle.send(json.dumps({
+                    "success": False,
+                    "message": f"Business '{biz_name}' not found.",
+                }))
+                return
+
+            if amount <= 0:
+                await tool_handle.send(json.dumps({
+                    "success": False,
+                    "message": "Loan amount must be greater than zero.",
+                }))
+                return
+
+            if amount > biz["max_loan"]:
+                await tool_handle.send(json.dumps({
+                    "success": False,
+                    "message": f"Amount ${amount:,.0f} exceeds the maximum pre-approved loan of ${biz['max_loan']:,}. Ask for a lower amount.",
+                }))
+                return
+
+            # Update balance
+            biz["balance"] += int(amount)
+            new_balance = biz["balance"]
+            state.loan_confirmed = True
+            state.loan_amount = amount
+            confirmation = "L" + "".join(random.choice("123456789") for _ in range(4))
+
+            # Notify frontend
+            await websocket.send_json({
+                "type": "loan_confirmed",
+                "business": biz["name"],
+                "amount": amount,
+                "new_balance": new_balance,
+                "confirmation": confirmation,
+            })
+
+            await tool_handle.send(json.dumps({
+                "success": True,
+                "confirmation": confirmation,
+                "amount": amount,
+                "new_balance": new_balance,
+                "message": f"Loan of ${amount:,.0f} confirmed for {biz['name']}. Confirmation number: {confirmation}. New account balance: ${new_balance:,}. Share this with the caller.",
+            }))
+            logger.info("Loan confirmed for %s: $%s, new balance: $%s", biz["name"], f"{amount:,.0f}", f"{new_balance:,}")
+
+        else:
+            await tool_handle.send_error(f"Unknown tool: {tool_name}")
+
+    await websocket_chat_handler(
+        websocket,
+        on_start=on_start,
+        on_tool_call=handle_tool_call,
+        run_kwargs=_CLIENT_CONFIG,
+        output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,
+        debug=DEBUG,
+    )
 
 
 @app.get("/api/businesses")

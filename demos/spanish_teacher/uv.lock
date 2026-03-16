@@ -70,6 +70,11 @@ wheels = [
 ]
 
 [[package]]
+name = "gradbot"
+version = "0.1.1"
+source = { editable = "../../gradbot_py" }
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -203,11 +208,6 @@ wheels = [
 ]
 
 [[package]]
-name = "gradbot"
-version = "0.1.0"
-source = { editable = "../../gradbot_py" }
-
-[[package]]
 name = "python-dotenv"
 version = "1.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -270,6 +270,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "gradbot" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -278,6 +279,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "gradbot", editable = "../../gradbot_py" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.20.0" },
 ]
 
