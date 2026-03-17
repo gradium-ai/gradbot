@@ -232,6 +232,10 @@ def build_voice_tools() -> list[gradbot.ToolDef]:
     return tools
 
 
+_PROMPTS_DIR = Path(__file__).parent / "prompts"
+_SYSTEM_PROMPT_TEMPLATE = (_PROMPTS_DIR / "system.txt").read_text()
+
+
 def get_system_prompt(current_voice_name: str, tool_descriptions: list[dict]) -> str:
     """Build the system prompt with discovered MCP tools."""
     voice = gradbot.flagship_voice(current_voice_name)
@@ -246,28 +250,11 @@ def get_system_prompt(current_voice_name: str, tool_descriptions: list[dict]) ->
         for t in tools:
             tools_section += f"- {t['name']}: {t['description']}\n"
 
-    return f"""You are {voice.name}, a friendly AI assistant with powerful capabilities provided by connected tools.
-
-{voice.description}
-
-YOUR CAPABILITIES:
-{tools_section}
-You can also switch between different voice personas using switch_to_* tools.
-
-HOW TO USE TOOLS:
-- When the user asks you to do something that matches a tool's capability, use it
-- For file operations, always tell the user what you're about to do and what happened
-- For memory operations, confirm what you stored or retrieved
-- If a tool call fails, explain the error in plain language
-
-CONVERSATION STYLE:
-- Keep responses conversational and natural - you're a voice assistant
-- Don't read out raw JSON or technical details - interpret results for the user
-- Be proactive: if you created a file, mention what's in it; if you read one, summarize it
-- For the memory/knowledge graph tools, be conversational about what you remember
-
-Start by greeting the user and briefly mentioning what you can help with!
-"""
+    return _SYSTEM_PROMPT_TEMPLATE.format(
+        voice_name=voice.name,
+        voice_description=voice.description,
+        tools_section=tools_section,
+    )
 
 
 # Tool descriptions populated by the first WebSocket connection
