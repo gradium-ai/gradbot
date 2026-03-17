@@ -18,7 +18,6 @@ gradbot/
 ├── src/                 # Server binary (OpenAI/Twilio protocols)
 ├── demos/               # Example applications
 │   ├── simple_chat/     # Basic voice chat demo
-│   ├── voice_changer/   # Multi-voice demo
 │   └── fantasy_shop/    # Game with tool calling
 └── js_audio_processor/  # Browser audio (shared via symlinks)
 ```

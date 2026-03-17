@@ -1,14 +1,14 @@
 [project]
 name = "web-search-demo"
 version = "0.1.0"
-description = "Voice-powered web search assistant using DuckDuckGo"
+description = "Voice-powered web search and weather assistant using Linkup and Open-Meteo"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "gradbot",
     "pyyaml>=6.0",
-    "ddgs",
+    "linkup-sdk",
 ]
 
 [tool.uv.sources]

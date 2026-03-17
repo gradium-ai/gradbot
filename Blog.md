@@ -26,7 +26,7 @@ cd gradbot/demos/simple_chat
 uv sync
 ```
 
-The repo includes 12 working demos you can study, modify, or use as starting points.
+The repo includes 10 working demos you can study, modify, or use as starting points.
 
 ### Get your API keys
 
@@ -231,7 +231,7 @@ For more complex agents, start from one of the existing demos:
 
 ## Prompt engineering for voice — what we've learned
 
-This is the section that matters most. Writing prompts for voice agents is different from writing prompts for chatbots. Here's everything we've learned from building 12 demos.
+This is the section that matters most. Writing prompts for voice agents is different from writing prompts for chatbots. Here's everything we've learned from building 11 demos.
 
 ### 1. Structure your prompt in layers
 
@@ -449,16 +449,14 @@ Add a server, restart, and the voice agent automatically discovers and can use a
 
 ## The demos
 
-The repo includes 12 working demos, from simple to complex:
+The repo includes 8 working demos, from simple to complex:
 
 | Demo | Complexity | What it shows |
 |------|-----------|---------------|
 | `simple_chat` | Minimal | Basic voice conversation, no tools |
-| `voice_changer` | Simple | Switching voices mid-conversation |
 | `egg_timer` | Moderate | Deferred tool results (timer runs in background) |
-| `news_weather` | Moderate | External APIs (Open-Meteo, RSS feeds) |
 | `spanish_teacher` | Moderate | Language teaching, handling imperfect STT |
-| `web_search` | Moderate | Web search integration |
+| `web_search` | Moderate | Web search, weather, and news integration |
 | `mtg_adviser` | Moderate | Domain knowledge (Magic: The Gathering cards) |
 | `hotel` | Complex | Multi-phase booking flow with prompt swapping |
 | `business_bank` | Complex | Multi-phase banking with digit interpretation |

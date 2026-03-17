@@ -430,6 +430,40 @@
             background: linear-gradient(90deg, #ef5350, #f48fb1);
         }
 
+        /* Weather card */
+        .weather-card {
+            background: linear-gradient(135deg, rgba(129,199,132,0.15), rgba(100,181,246,0.10));
+            border: 1px solid rgba(129,199,132,0.25);
+            border-radius: 12px;
+            padding: 1rem 1.15rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .weather-card .weather-city {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #a5d6a7;
+            margin-bottom: 0.35rem;
+        }
+
+        .weather-card .weather-temp {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #e8edf5;
+            margin-bottom: 0.15rem;
+        }
+
+        .weather-card .weather-conditions {
+            font-size: 0.85rem;
+            color: #9ca3af;
+            margin-bottom: 0.25rem;
+        }
+
+        .weather-card .weather-wind {
+            font-size: 0.78rem;
+            color: #7b8fa8;
+        }
+
         .powered-by {
             position: fixed;
             top: 1rem;
@@ -456,7 +490,7 @@
     </div>
     <div class="container">
         <h1>Web Search Assistant</h1>
-        <p class="subtitle">Voice-powered web search</p>
+        <p class="subtitle">Voice-powered search and weather</p>
 
         <div class="agent-card">
             <div class="agent-avatar" id="agentAvatar">A</div>
@@ -474,12 +508,17 @@
             </div>
         </div>
 
+        <div class="info-chips" style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.25rem; justify-content: center;">
+            <span class="chip" style="padding: 0.35rem 0.7rem; background: rgba(100,181,246,0.12); border: 1px solid rgba(100,181,246,0.25); border-radius: 20px; font-size: 0.75rem; color: #90caf9;">Web Search</span>
+            <span class="chip" style="padding: 0.35rem 0.7rem; background: rgba(129,199,132,0.12); border: 1px solid rgba(129,199,132,0.25); border-radius: 20px; font-size: 0.75rem; color: #a5d6a7;">Weather</span>
+        </div>
+
         <div class="main-panels">
             <div class="search-panel">
-                <div class="panel-header">Search Results</div>
+                <div class="panel-header">Results</div>
                 <div class="search-content" id="searchContent">
                     <div class="search-empty">
-                        Ask your question and results will appear here
+                        Ask about anything — search or weather
                     </div>
                 </div>
             </div>
@@ -600,6 +639,22 @@
             searchContent.innerHTML = html;
         }
 
+        function showWeatherResult(data) {
+            if (data.error) {
+                searchContent.innerHTML = `<div class="search-empty">${esc(data.error)}</div>`;
+                return;
+            }
+            const tempF = data.temperature_c != null ? (data.temperature_c * 9/5 + 32).toFixed(0) : '';
+            searchContent.innerHTML = `
+                <div class="weather-card">
+                    <div class="weather-city">${esc(data.city)}${data.country ? ', ' + esc(data.country) : ''}</div>
+                    <div class="weather-temp">${data.temperature_c != null ? data.temperature_c + '°C' : 'N/A'}${tempF ? ' / ' + tempF + '°F' : ''}</div>
+                    <div class="weather-conditions">${esc(data.conditions || 'Unknown')}</div>
+                    <div class="weather-wind">Wind: ${data.wind_speed_kmh != null ? data.wind_speed_kmh + ' km/h' : 'N/A'}</div>
+                </div>
+            `;
+        }
+
         // --- Transcript ---
 
         function getBubbleForTurn(turnIdx, isUser) {
@@ -683,6 +738,10 @@
                     clearLoadingMessages();
                     showSearchResults(msg);
                     break;
+                case 'weather_result':
+                    clearLoadingMessages();
+                    showWeatherResult(msg);
+                    break;
                 case 'error':
                     console.error('Server error:', msg.message);
                     break;
@@ -704,7 +763,7 @@
                 hadAssistantBubble = false;
                 currentSpeaker = null;
                 const agentName = getAgentName();
-                searchContent.innerHTML = `<div class="search-empty">Ask your question and results will appear here</div>`;
+                searchContent.innerHTML = `<div class="search-empty">Ask about anything — search or weather</div>`;
 
                 setStatus('Connecting...', 'connecting');
 
