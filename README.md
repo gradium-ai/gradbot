@@ -50,12 +50,10 @@ Every demo is a standalone FastAPI + WebSocket app. Pick one, `uv sync`, and run
 |------|-------------|-------------|
 | **[simple_chat](demos/simple_chat/)** | Basic voice conversation with 14 voices across 5 languages | Minimal starting point, dynamic voice/prompt switching |
 | **[fantasy_shop](demos/fantasy_shop/)** | Haggling game — buy a sword from NPCs with distinct personalities | Tool calling, multi-character, game state management |
-| **[voice_changer](demos/voice_changer/)** | AI switches between voice personas autonomously | AI-driven tool calls for voice switching |
 | **[egg_timer](demos/egg_timer/)** | Voice assistant that can set timers | Background async tasks, tool calling |
 | **[spanish_teacher](demos/spanish_teacher/)** | Language lesson with pronunciation practice | Educational UX, hiding imperfect STT from the learner |
-| **[web_search](demos/web_search/)** | Voice-powered search — ask a question, get results | Async/deferred tool calls (AI talks while search runs) |
+| **[web_search](demos/web_search/)** | Voice-powered search and weather | Async/deferred tool calls, Linkup web search, Open-Meteo weather |
 | **[hotel](demos/hotel/)** | Hotel booking agent for Paris, Bali, Dubai | Deferred tool results with natural chit-chat during wait |
-| **[news_weather](demos/news_weather/)** | Live weather and news headlines | Free API integration (Open-Meteo, RSS feeds) |
 | **[business_bank](demos/business_bank/)** | Banking agent with PIN auth, lost cards, loans | Security flows, multi-step business logic |
 | **[mtg_adviser](demos/mtg_adviser/)** | Magic: The Gathering deck building assistant | External API integration (Scryfall) |
 | **[mcp_demo](demos/mcp_demo/)** | Voice AI connected to MCP servers | Plug in any MCP server for instant tool access |
