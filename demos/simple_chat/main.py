@@ -5,11 +5,9 @@ import sys
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 import gradbot
-from gradbot.fastapi import websocket_chat_handler
+from gradbot.fastapi import websocket_chat_handler, setup_demo_routes
 
 gradbot.init_logging()
 
@@ -25,14 +23,6 @@ _OVERRIDES = session_config_overrides(_YAML_CFG)
 _CLIENT_CONFIG = client_config(_YAML_CFG)
 
 app = FastAPI(title="Gradbot Demo")
-
-
-def lang_to_code(lang: gradbot.Lang) -> str:
-    mapping = {
-        gradbot.Lang.En: "en", gradbot.Lang.Fr: "fr", gradbot.Lang.De: "de",
-        gradbot.Lang.Es: "es", gradbot.Lang.Pt: "pt",
-    }
-    return mapping.get(lang, "en")
 
 
 def make_session_config(voice_name: str, prompt: str) -> gradbot.SessionConfig:
@@ -68,41 +58,7 @@ async def ws_chat(websocket: WebSocket):
     )
 
 
-_VOICES_RESPONSE = {"voices": [
-    {
-        "name": v.name,
-        "voice_id": v.voice_id,
-        "language": lang_to_code(v.language),
-        "country": v.country.code(),
-        "country_name": str(v.country),
-        "gender": str(v.gender),
-        "description": v.description,
-    }
-    for v in gradbot.flagship_voices()
-]}
-
-
-@app.get("/api/voices")
-async def list_voices():
-    return JSONResponse(content=_VOICES_RESPONSE)
-
-
-@app.get("/api/audio-config")
-async def audio_config():
-    return JSONResponse(content={"pcm": USE_PCM})
-
-
-static_dir = Path(__file__).parent / "static"
-if static_dir.exists():
-    app.mount("/static", StaticFiles(directory=static_dir, follow_symlink=True), name="static")
-
-
-@app.get("/")
-async def index():
-    index_path = static_dir / "index.html"
-    if index_path.exists():
-        return FileResponse(index_path)
-    return JSONResponse(content={"error": "Frontend not found"}, status_code=404)
+setup_demo_routes(app, static_dir=Path(__file__).parent / "static", use_pcm=USE_PCM, voices=True)
 
 
 if __name__ == "__main__":
