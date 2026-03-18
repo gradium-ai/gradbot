@@ -22,11 +22,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 import gradbot
-from gradbot.fastapi import websocket_chat_handler
+from gradbot.fastapi import websocket_chat_handler, setup_demo_routes
 
 # Initialize Rust logging (outputs to stderr)
 gradbot.init_logging()
@@ -60,34 +58,6 @@ class SessionState:
     current_voice: str = "Emma"
     timers: dict[str, Timer] = field(default_factory=dict)
     timer_counter: int = 0
-
-
-def lang_to_code(lang: gradbot.Lang) -> str:
-    """Convert Lang enum to language code."""
-    mapping = {
-        gradbot.Lang.En: "en", gradbot.Lang.Fr: "fr", gradbot.Lang.De: "de",
-        gradbot.Lang.Es: "es", gradbot.Lang.Pt: "pt",
-    }
-    return mapping.get(lang, "en")
-
-
-def build_voice_tools() -> list[gradbot.ToolDef]:
-    """Build tool definitions for each voice."""
-    tools = []
-    for voice in gradbot.flagship_voices():
-        tool = gradbot.ToolDef(
-            name=f"switch_to_{voice.name.lower()}",
-            description=f"Switch to {voice.name}'s voice. {voice.description}",
-            parameters_json=json.dumps(
-                {
-                    "type": "object",
-                    "properties": {},
-                    "required": [],
-                }
-            ),
-        )
-        tools.append(tool)
-    return tools
 
 
 def build_timer_tool() -> gradbot.ToolDef:
@@ -147,28 +117,10 @@ def get_system_prompt(
 app = FastAPI(title="Egg Timer Demo")
 
 
-@app.get("/api/voices")
-async def list_voices():
-    """Return list of available flagship voices with full details."""
-    voices = [
-        {
-            "name": v.name,
-            "voice_id": v.voice_id,
-            "language": lang_to_code(v.language),
-            "country": v.country.code(),
-            "country_name": str(v.country),
-            "gender": str(v.gender),
-            "description": v.description,
-        }
-        for v in gradbot.flagship_voices()
-    ]
-    return JSONResponse(content={"voices": voices})
-
-
 @app.websocket("/ws/chat")
 async def ws_chat(websocket: WebSocket):
     state = SessionState()
-    voice_tools = build_voice_tools()
+    voice_tools = gradbot.voice_switching_tools()
     timer_tool = build_timer_tool()
     tools = voice_tools + [timer_tool]
 
@@ -194,29 +146,26 @@ async def ws_chat(websocket: WebSocket):
 
         # Handle voice switching
         if tool_name.startswith("switch_to_"):
-            raw_name = tool_name[len("switch_to_"):]
-            new_voice_name = raw_name.capitalize()
-            # Handle multi-word names
-            for v in gradbot.flagship_voices():
-                if v.name.lower() == raw_name:
-                    new_voice_name = v.name
-                    break
+            voice = gradbot.resolve_voice_from_tool(tool_name)
+            if voice is None:
+                await tool_handle.send_error(f"Unknown voice: {tool_name}")
+                return
+            new_voice_name = voice.name
 
             try:
-                new_voice = gradbot.flagship_voice(new_voice_name)
                 state.current_voice = new_voice_name
 
                 # Update session config with new voice (includes active timers)
                 new_config = gradbot.SessionConfig(
-                    voice_id=new_voice.voice_id,
+                    voice_id=voice.voice_id,
                     instructions=get_system_prompt(
                         new_voice_name, list(state.timers.values())
                     ),
-                    language=new_voice.language,
+                    language=voice.language,
                     tools=tools,
                     **merge_overrides(_OVERRIDES,
                         flush_duration_s=FLUSH_FOR_S,
-                        rewrite_rules=new_voice.language.rewrite_rules,
+                        rewrite_rules=voice.language.rewrite_rules,
                     ),
                 )
                 await input_handle.send_config(new_config)
@@ -226,7 +175,7 @@ async def ws_chat(websocket: WebSocket):
                     {
                         "type": "voice_change",
                         "voice_name": new_voice_name,
-                        "description": new_voice.description,
+                        "description": voice.description,
                     }
                 )
 
@@ -313,31 +262,7 @@ async def ws_chat(websocket: WebSocket):
     )
 
 
-@app.get("/api/audio-config")
-async def audio_config():
-    return JSONResponse(content={"pcm": USE_PCM})
-
-
-# Serve static files
-static_dir = Path(__file__).parent / "static"
-if static_dir.exists():
-    app.mount(
-        "/static",
-        StaticFiles(directory=static_dir, follow_symlink=True),
-        name="static",
-    )
-
-
-@app.get("/")
-async def index():
-    """Serve the main page."""
-    index_path = Path(__file__).parent / "static" / "index.html"
-    if index_path.exists():
-        return FileResponse(index_path)
-    return JSONResponse(
-        content={"error": "Frontend not found. Place index.html in static/"},
-        status_code=404,
-    )
+setup_demo_routes(app, static_dir=Path(__file__).parent / "static", use_pcm=USE_PCM, voices=True)
 
 
 if __name__ == "__main__":

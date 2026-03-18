@@ -24,11 +24,9 @@ from typing import Optional
 
 import httpx
 from fastapi import FastAPI, WebSocket
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 import gradbot
-from gradbot.fastapi import websocket_chat_handler
+from gradbot.fastapi import websocket_chat_handler, setup_demo_routes
 
 # Initialize Rust logging (outputs to stderr)
 gradbot.init_logging()
@@ -110,33 +108,6 @@ async def scryfall_named(name: str) -> Optional[dict]:
         return None
 
 
-def lang_to_code(lang: gradbot.Lang) -> str:
-    """Convert Lang enum to language code."""
-    mapping = {
-        gradbot.Lang.En: "en", gradbot.Lang.Fr: "fr", gradbot.Lang.De: "de",
-        gradbot.Lang.Es: "es", gradbot.Lang.Pt: "pt",
-    }
-    return mapping.get(lang, "en")
-
-
-def build_voice_tools() -> list[gradbot.ToolDef]:
-    """Build tool definitions for each voice."""
-    tools = []
-    for voice in gradbot.flagship_voices():
-        tool = gradbot.ToolDef(
-            name=f"switch_to_{voice.name.lower()}",
-            description=f"Switch to {voice.name}'s voice. {voice.description}",
-            parameters_json=json.dumps(
-                {
-                    "type": "object",
-                    "properties": {},
-                    "required": [],
-                }
-            ),
-        )
-        tools.append(tool)
-    return tools
-
 
 def build_card_tools() -> list[gradbot.ToolDef]:
     """Build tool definitions for card search and lookup."""
@@ -217,7 +188,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="MTG Strategy Adviser", lifespan=lifespan)
 
 # Build tools once at module level
-_VOICE_TOOLS = build_voice_tools()
+_VOICE_TOOLS = gradbot.voice_switching_tools()
 _CARD_TOOLS = build_card_tools()
 _ALL_TOOLS = _VOICE_TOOLS + _CARD_TOOLS
 
@@ -236,23 +207,6 @@ def _make_session_config(voice_name: str, tools: list[gradbot.ToolDef], assistan
         ),
     )
 
-
-@app.get("/api/voices")
-async def list_voices():
-    """Return list of available flagship voices with full details."""
-    voices = [
-        {
-            "name": v.name,
-            "voice_id": v.voice_id,
-            "language": lang_to_code(v.language),
-            "country": v.country.code(),
-            "country_name": str(v.country),
-            "gender": str(v.gender),
-            "description": v.description,
-        }
-        for v in gradbot.flagship_voices()
-    ]
-    return JSONResponse(content={"voices": voices})
 
 
 @app.websocket("/ws/chat")
@@ -360,24 +314,22 @@ async def websocket_chat(websocket: WebSocket):
 
         # Handle voice switching
         if tool_name.startswith("switch_to_"):
-            new_voice_name = tool_name[len("switch_to_"):].capitalize()
-            for v in gradbot.flagship_voices():
-                if v.name.lower() == tool_name[len("switch_to_"):]:
-                    new_voice_name = v.name
-                    break
-
+            voice = gradbot.resolve_voice_from_tool(tool_name)
+            if voice is None:
+                await tool_handle.send_error(f"Unknown voice: {tool_name}")
+                return
+            new_voice_name = voice.name
             try:
-                new_voice = gradbot.flagship_voice(new_voice_name)
                 current_voice = new_voice_name
 
                 new_config = gradbot.SessionConfig(
-                    voice_id=new_voice.voice_id,
+                    voice_id=voice.voice_id,
                     instructions=get_system_prompt(new_voice_name),
-                    language=new_voice.language,
+                    language=voice.language,
                     tools=_ALL_TOOLS,
                     **merge_overrides(_OVERRIDES,
                         flush_duration_s=FLUSH_FOR_S,
-                        rewrite_rules=new_voice.language.rewrite_rules,
+                        rewrite_rules=voice.language.rewrite_rules,
                     ),
                 )
                 await input_handle.send_config(new_config)
@@ -385,7 +337,7 @@ async def websocket_chat(websocket: WebSocket):
                 await websocket.send_json({
                     "type": "voice_change",
                     "voice_name": new_voice_name,
-                    "description": new_voice.description,
+                    "description": voice.description,
                 })
 
                 await tool_handle.send(
@@ -430,30 +382,7 @@ async def websocket_chat(websocket: WebSocket):
     )
 
 
-@app.get("/api/audio-config")
-async def audio_config():
-    return JSONResponse(content={"pcm": USE_PCM})
-
-# Serve static files
-static_dir = Path(__file__).parent / "static"
-if static_dir.exists():
-    app.mount(
-        "/static",
-        StaticFiles(directory=static_dir, follow_symlink=True),
-        name="static",
-    )
-
-
-@app.get("/")
-async def index():
-    """Serve the main page."""
-    index_path = Path(__file__).parent / "static" / "index.html"
-    if index_path.exists():
-        return FileResponse(index_path)
-    return JSONResponse(
-        content={"error": "Frontend not found. Place index.html in static/"},
-        status_code=404,
-    )
+setup_demo_routes(app, static_dir=Path(__file__).parent / "static", use_pcm=USE_PCM, voices=True)
 
 
 if __name__ == "__main__":
