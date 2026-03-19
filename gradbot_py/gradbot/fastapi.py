@@ -259,9 +259,12 @@ def setup_demo_routes(
         async def list_voices():
             return JSONResponse(content=_voices_response)
 
+    _bundled_js = Path(__file__).parent / "js_audio_processor"
+    assert _bundled_js.is_dir(), f"Missing bundled JS: {_bundled_js}"
+
     if static_dir is not None:
-        if static_dir.exists():
-            app.mount("/static", StaticFiles(directory=static_dir, follow_symlink=True), name="static")
+        app.mount("/static/js", StaticFiles(directory=_bundled_js), name="bundled_js")
+        app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
         @app.get("/")
         async def index():
