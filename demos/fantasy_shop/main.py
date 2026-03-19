@@ -10,17 +10,16 @@ import asyncio
 import json
 import logging
 import os
-import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 
 import gradbot
-from gradbot.fastapi import websocket_chat_handler
+from gradbot.demo_config import load_config, session_config_overrides, merge_overrides, client_config
+from gradbot.fastapi import websocket_chat_handler, setup_demo_routes
 
 # Initialize Rust logging
 gradbot.init_logging()
@@ -28,9 +27,6 @@ gradbot.init_logging()
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
 FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from demo_config import load_config, session_config_overrides, merge_overrides, client_config
 
 _YAML_CFG = load_config(Path(__file__).parent)
 _OVERRIDES = session_config_overrides(_YAML_CFG)
@@ -625,26 +621,7 @@ async def websocket_game(websocket: WebSocket):
     )
 
 
-@app.get("/api/audio-config")
-async def audio_config():
-    return JSONResponse(content={"pcm": USE_PCM})
-
-# Serve static files
-static_dir = Path(__file__).parent / "static"
-if static_dir.exists():
-    app.mount("/static", StaticFiles(directory=static_dir, follow_symlink=True), name="static")
-
-
-@app.get("/")
-async def index():
-    """Serve the main page."""
-    index_path = Path(__file__).parent / "static" / "index.html"
-    if index_path.exists():
-        return FileResponse(index_path)
-    return JSONResponse(
-        content={"error": "Frontend not found. Place index.html in static/"},
-        status_code=404
-    )
+setup_demo_routes(app, static_dir=Path(__file__).parent / "static", use_pcm=USE_PCM)
 
 
 if __name__ == "__main__":
