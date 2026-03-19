@@ -26,7 +26,7 @@ gradbot.init_logging()
 
 USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
-FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
+FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.6"))
 
 _YAML_CFG = load_config(Path(__file__).parent)
 _OVERRIDES = session_config_overrides(_YAML_CFG)

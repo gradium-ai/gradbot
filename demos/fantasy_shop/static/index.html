@@ -13,7 +13,8 @@
 
         body {
             font-family: 'Georgia', serif;
-            background: linear-gradient(180deg, #1a0a2e 0%, #2d1b4e 50%, #1a0a2e 100%);
+            background: url('/static/background.png') no-repeat center center fixed;
+            background-size: cover;
             min-height: 100vh;
             color: #e8d5b7;
         }
@@ -136,6 +137,13 @@
             justify-content: center;
             font-size: 2.5rem;
             background: linear-gradient(135deg, #2d1b4e 0%, #1a0a2e 100%);
+            overflow: hidden;
+        }
+
+        .character-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
         }
 
         .character-avatar.attendant {
@@ -468,7 +476,7 @@
 
             <main class="main-panel">
                 <div class="character-panel">
-                    <div class="character-avatar attendant" id="characterAvatar">🧔</div>
+                    <div class="character-avatar attendant" id="characterAvatar"><img src="/static/grumbold.png" alt="Grumbold"></div>
                     <div class="character-info">
                         <h2 id="characterName">Grumbold</h2>
                         <p class="role" id="characterRole">Shop Attendant</p>
@@ -592,12 +600,12 @@
         function updateCharacter(character, name) {
             gameState.currentCharacter = character;
             if (character === 'manager') {
-                characterAvatar.textContent = '👸';
+                characterAvatar.innerHTML = '<img src="/static/princess.png" alt="Princess Celestia">';
                 characterAvatar.className = 'character-avatar manager';
                 characterName.textContent = name || 'Princess Celestia';
                 characterRole.textContent = 'Shop Manager';
             } else {
-                characterAvatar.textContent = '🧔';
+                characterAvatar.innerHTML = '<img src="/static/grumbold.png" alt="Grumbold">';
                 characterAvatar.className = 'character-avatar attendant';
                 characterName.textContent = name || 'Grumbold';
                 characterRole.textContent = 'Shop Attendant';
