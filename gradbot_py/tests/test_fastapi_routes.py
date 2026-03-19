@@ -61,3 +61,10 @@ class TestStaticRoutes:
             resp = TestClient(app).get("/static/style.css")
             assert resp.status_code == 200
             assert "color: red" in resp.text
+
+    def test_bundled_js_served(self, app: FastAPI):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            setup_demo_routes(app, static_dir=tmpdir)
+            resp = TestClient(app).get("/static/js/audio-processor.js")
+            assert resp.status_code == 200
+            assert "audio" in resp.text.lower()
