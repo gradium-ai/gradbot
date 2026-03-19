@@ -90,8 +90,21 @@ wheels = [
 
 [[package]]
 name = "gradbot"
-version = "0.1.1"
+version = "0.1.2"
 source = { directory = "../../gradbot_py" }
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", marker = "extra == 'demos'" },
+    { name = "fastapi", marker = "extra == 'test'" },
+    { name = "httpx", marker = "extra == 'test'" },
+    { name = "pytest", marker = "extra == 'test'" },
+    { name = "pytest-asyncio", marker = "extra == 'test'" },
+    { name = "pyyaml", marker = "extra == 'demos'" },
+    { name = "pyyaml", marker = "extra == 'test'" },
+    { name = "uvicorn", marker = "extra == 'demos'" },
+]
+provides-extras = ["demos", "test"]
 
 [[package]]
 name = "h11"
