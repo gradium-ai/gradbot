@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <link rel="icon" href="static/favicon.ico">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Sharp Edge - Fantasy Shop</title>
@@ -13,7 +14,7 @@
 
         body {
             font-family: 'Georgia', serif;
-            background: url('/static/background.png') no-repeat center center fixed;
+            background: url('static/background.png') no-repeat center center fixed;
             background-size: cover;
             min-height: 100vh;
             color: #e8d5b7;
@@ -476,7 +477,7 @@
 
             <main class="main-panel">
                 <div class="character-panel">
-                    <div class="character-avatar attendant" id="characterAvatar"><img src="/static/grumbold.png" alt="Grumbold"></div>
+                    <div class="character-avatar attendant" id="characterAvatar"><img src="static/grumbold.png" alt="Grumbold"></div>
                     <div class="character-info">
                         <h2 id="characterName">Grumbold</h2>
                         <p class="role" id="characterRole">Shop Attendant</p>
@@ -524,10 +525,10 @@
     </div>
 
     <!-- Audio processor scripts -->
-    <script src="/static/js/opus-encoder.js"></script>
-    <script src="/static/js/audio-processor.js"></script>
-    <script src="/static/js/synced-audio-player.js"></script>
-    <script>fetch("/api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
+    <script src="static/js/opus-encoder.js"></script>
+    <script src="static/js/audio-processor.js"></script>
+    <script src="static/js/synced-audio-player.js"></script>
+    <script>fetch("api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
 
     <script>
         // Game state
@@ -600,12 +601,12 @@
         function updateCharacter(character, name) {
             gameState.currentCharacter = character;
             if (character === 'manager') {
-                characterAvatar.innerHTML = '<img src="/static/princess.png" alt="Princess Celestia">';
+                characterAvatar.innerHTML = '<img src="static/princess.png" alt="Princess Celestia">';
                 characterAvatar.className = 'character-avatar manager';
                 characterName.textContent = name || 'Princess Celestia';
                 characterRole.textContent = 'Shop Manager';
             } else {
-                characterAvatar.innerHTML = '<img src="/static/grumbold.png" alt="Grumbold">';
+                characterAvatar.innerHTML = '<img src="static/grumbold.png" alt="Grumbold">';
                 characterAvatar.className = 'character-avatar attendant';
                 characterName.textContent = name || 'Grumbold';
                 characterRole.textContent = 'Shop Attendant';
@@ -765,7 +766,7 @@
                     // Capture current turn so we wait for the farewell turn to complete
                     pendingEndState = { type: 'win', message: msg.message };
                     endGameTurnIdx = player.getTurnIdx();
-                    console.log('Game won at turn:', endGameTurnIdx);
+                    // Game won at turn
                     recordingIndicator.classList.remove('active');
                     status.textContent = 'Victory! Finishing narration...';
                     break;
@@ -775,13 +776,13 @@
                     // Capture current turn so we wait for the farewell turn to complete
                     pendingEndState = { type: 'lose', message: msg.reason };
                     endGameTurnIdx = player.getTurnIdx();
-                    console.log('Game over at turn:', endGameTurnIdx);
+                    // Game over at turn
                     recordingIndicator.classList.remove('active');
                     status.textContent = 'Game over! Finishing narration...';
                     break;
 
                 case 'event':
-                    console.log('Event:', msg.event);
+                    // Event received
                     // When TTS finishes and game ended, stop audio and schedule the end callback
                     if (msg.event === 'end_tts_audio' && pendingEndState) {
                         isRecording = false;
@@ -802,7 +803,7 @@
 
                 // Create SyncedAudioPlayer
                 player = new SyncedAudioPlayer({
-                    basePath: '/static/js',
+                    basePath: 'static/js',
                     sampleRate: 24000,
                     pcmOutput: window.__pcmOutput || false,
                     echoCancellation: echoCancellationToggle.checked,
@@ -813,7 +814,7 @@
                     },
                     onText: handleText,
                     onEvent: (eventType, msg) => {
-                        console.log('Event:', eventType, msg);
+                        // Event callback
                         handleMessage(msg);
                     },
                     onError: (error) => {
@@ -822,7 +823,7 @@
                         stopGame();
                     },
                     onEndOfTurn: (turnIdx) => {
-                        console.log('End of turn:', turnIdx, 'pendingEndState:', pendingEndState, 'endGameTurnIdx:', endGameTurnIdx);
+                        // End of turn
                         // If game ended, show the overlay only after the farewell turn completes
                         if (pendingEndState && turnIdx > endGameTurnIdx) {
                             if (pendingEndState.type === 'win') {
@@ -847,7 +848,7 @@
                 }
 
                 // Set up WebSocket
-                const wsUrl = `ws://${window.location.host}/ws/game`;
+                const _bp = window.location.pathname.replace(/\/$/, ""); const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${_bp}/ws/game`;
                 ws = new WebSocket(wsUrl);
 
                 ws.onopen = () => {
@@ -914,7 +915,7 @@
 
         updateGameDisplay();
         // Preload decoder WASM so it's ready when user clicks start
-        AudioProcessor.preloadDecoder('/static/js');
+        AudioProcessor.preloadDecoder('static/js');
     </script>
 </body>
 </html>

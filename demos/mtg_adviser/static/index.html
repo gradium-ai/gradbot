@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <link rel="icon" href="static/favicon.ico">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MTG Strategy Adviser</title>
@@ -568,10 +569,10 @@
     </div>
 
     <!-- Audio processor scripts -->
-    <script src="/static/js/opus-encoder.js"></script>
-    <script src="/static/js/audio-processor.js"></script>
-    <script src="/static/js/synced-audio-player.js"></script>
-    <script>fetch("/api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
+    <script src="static/js/opus-encoder.js"></script>
+    <script src="static/js/audio-processor.js"></script>
+    <script src="static/js/synced-audio-player.js"></script>
+    <script>fetch("api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
 
     <script>
         // State
@@ -604,7 +605,7 @@
         // Fetch voices on load
         async function loadVoices() {
             try {
-                const response = await fetch('/api/voices');
+                const response = await fetch('api/voices');
                 const data = await response.json();
                 voices = data.voices;
                 renderVoiceSelector();
@@ -881,7 +882,7 @@
                 setStatus('Connecting...', 'connecting');
 
                 player = new SyncedAudioPlayer({
-                    basePath: '/static/js',
+                    basePath: 'static/js',
                     sampleRate: 24000,
                     pcmOutput: window.__pcmOutput || false,
                     echoCancellation: echoCancellationToggle.checked,
@@ -909,7 +910,7 @@
                     return;
                 }
 
-                const wsUrl = `ws://${window.location.host}/ws/chat`;
+                const _bp = window.location.pathname.replace(/\/$/, ""); const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${_bp}/ws/chat`;
                 ws = new WebSocket(wsUrl);
 
                 ws.onopen = () => {

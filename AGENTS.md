@@ -19,7 +19,7 @@ gradbot/
 ├── demos/               # Example applications
 │   ├── simple_chat/     # Basic voice chat demo
 │   └── fantasy_shop/    # Game with tool calling
-└── js_audio_processor/  # Browser audio (shared via symlinks)
+└── js_audio_processor/  # Browser audio (copied into each demo's static/js)
 ```
 
 ### Architecture

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <link rel="icon" href="static/favicon.ico">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gradbot Voice Chat</title>
@@ -442,10 +443,10 @@
     </div>
 
     <!-- Audio processor scripts -->
-    <script src="/static/js/opus-encoder.js"></script>
-    <script src="/static/js/audio-processor.js"></script>
-    <script src="/static/js/synced-audio-player.js"></script>
-    <script>fetch("/api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
+    <script src="static/js/opus-encoder.js"></script>
+    <script src="static/js/audio-processor.js"></script>
+    <script src="static/js/synced-audio-player.js"></script>
+    <script>fetch("api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
 
     <script>
         // Language to flag emoji mapping
@@ -479,7 +480,7 @@
         // Fetch and display voices
         async function loadVoices() {
             try {
-                const response = await fetch('/api/voices');
+                const response = await fetch('api/voices');
                 const data = await response.json();
                 voices = data.voices;
                 renderVoices();
@@ -600,7 +601,7 @@
 
             // Create SyncedAudioPlayer
             player = new SyncedAudioPlayer({
-                basePath: '/static/js',
+                basePath: 'static/js',
                 sampleRate: 24000,
                 pcmOutput: window.__pcmOutput || false,
                 echoCancellation: echoCancellationToggle.checked,
@@ -635,7 +636,8 @@
 
             // Connect WebSocket
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${window.location.host}/ws/chat`);
+            const basePath = window.location.pathname.replace(/\/$/, '');
+            ws = new WebSocket(`${protocol}//${window.location.host}${basePath}/ws/chat`);
 
             ws.onopen = () => {
                 ws.send(JSON.stringify({

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <link rel="icon" href="static/favicon.ico">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Web Search Assistant</title>
@@ -553,10 +554,10 @@
         <div class="status idle" id="status">Click "Call Alex" to start searching</div>
     </div>
 
-    <script src="/static/js/opus-encoder.js"></script>
-    <script src="/static/js/audio-processor.js"></script>
-    <script src="/static/js/synced-audio-player.js"></script>
-    <script>fetch("/api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
+    <script src="static/js/opus-encoder.js"></script>
+    <script src="static/js/audio-processor.js"></script>
+    <script src="static/js/synced-audio-player.js"></script>
+    <script>fetch("api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
 
     <script>
         let ws = null;
@@ -768,7 +769,7 @@
                 setStatus('Connecting...', 'connecting');
 
                 player = new SyncedAudioPlayer({
-                    basePath: '/static/js',
+                    basePath: 'static/js',
                     sampleRate: 24000,
                     pcmOutput: window.__pcmOutput || false,
                     echoCancellation: echoCancellationToggle.checked,
@@ -795,7 +796,7 @@
                     return;
                 }
 
-                const wsUrl = `ws://${window.location.host}/ws/chat`;
+                const _bp = window.location.pathname.replace(/\/$/, ""); const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${_bp}/ws/chat`;
                 ws = new WebSocket(wsUrl);
 
                 ws.onopen = () => {
@@ -856,7 +857,7 @@
         stopBtn.addEventListener('click', endCall);
 
         // Preload decoder
-        AudioProcessor.preloadDecoder('/static/js');
+        AudioProcessor.preloadDecoder('static/js');
     </script>
 </body>
 </html>

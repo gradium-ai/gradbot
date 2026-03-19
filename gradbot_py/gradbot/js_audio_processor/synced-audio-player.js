@@ -74,7 +74,7 @@ class SyncedAudioPlayer {
         }
       },
       onTurnChange: ({ oldTurnIdx, newTurnIdx }) => {
-        console.log('[SyncedAudio] Turn change at playhead:', oldTurnIdx, '->', newTurnIdx);
+        // Turn change at playhead
         // Flush any remaining texts from the old turn
         this._flushAllTexts();
       },
@@ -91,7 +91,7 @@ class SyncedAudioPlayer {
 
     // Replay any messages that arrived before start()
     if (this._messageBuffer.length > 0) {
-      console.log('[SyncedAudio] Replaying', this._messageBuffer.length, 'buffered messages');
+      // Replaying buffered messages
       for (const data of this._messageBuffer) {
         await this._processMessage(data);
       }
@@ -176,7 +176,7 @@ class SyncedAudioPlayer {
     const playheadS = this._getPlayheadS();
     if (playheadS === null || this.lastStopS === null) {
       // No timing info, fire immediately
-      console.log('[SyncedAudio] End of turn (immediate, no timing):', turnIdx);
+      // End of turn (immediate, no timing)
       this._flushAllTexts();
       this.onEndOfTurn(turnIdx);
       return;
@@ -186,17 +186,11 @@ class SyncedAudioPlayer {
     const remainingS = Math.max(0, this.lastStopS - playheadS);
     const delayMs = remainingS * 1000;
 
-    console.log('[SyncedAudio] Scheduling end of turn:', {
-      turnIdx,
-      playheadS,
-      lastStopS: this.lastStopS,
-      remainingS,
-      delayMs,
-    });
+    // Scheduling end of turn
 
     this._endOfTurnTimeout = setTimeout(() => {
       this._endOfTurnTimeout = null;
-      console.log('[SyncedAudio] End of turn fired:', turnIdx);
+      // End of turn fired
       this._flushAllTexts();
       this.onEndOfTurn(turnIdx);
     }, delayMs);
@@ -293,15 +287,7 @@ class SyncedAudioPlayer {
   _handleAudioTiming(msg) {
     const turnIdx = msg.turn_idx;
 
-    console.log('[SyncedAudio] audio_timing:', {
-      turnIdx,
-      startS: msg.start_s,
-      stopS: msg.stop_s,
-      currentTurnIdx: this.currentTurnIdx,
-      lastStopS: this.lastStopS,
-      bufferMs: this.bufferMs,
-      pendingTexts: this.pendingTexts.length,
-    });
+    // audio_timing received
 
     this.currentTurnIdx = turnIdx;
     this.pendingAudioStopS = msg.stop_s;
@@ -311,7 +297,7 @@ class SyncedAudioPlayer {
 
   _handleTranscript(msg) {
     if (msg.is_user) {
-      console.log('[SyncedAudio] User transcript (immediate):', msg.text);
+      // User transcript (immediate)
       // User transcript - emit immediately
       this._emitText({
         text: msg.text,
@@ -334,15 +320,7 @@ class SyncedAudioPlayer {
       character: msg.character,
     };
 
-    console.log('[SyncedAudio] Queuing text:', {
-      text: msg.text,
-      stopS: msg.stop_s,
-      turnIdx: msg.turn_idx,
-      lastStopS: this.lastStopS,
-      playheadS: this._getPlayheadS(),
-      bufferMs: this.bufferMs,
-      queueLengthBefore: this.pendingTexts.length,
-    });
+    // Queuing text for timed display
 
     // Add to queue (flush happens after _handleJsonMessage returns)
     this.pendingTexts.push(textItem);
@@ -385,18 +363,14 @@ class SyncedAudioPlayer {
     }
 
     if (toEmit.length > 0) {
-      console.log('[SyncedAudio] Flushing ready texts:', {
-        count: toEmit.length,
-        playheadS,
-        remaining: toKeep.length,
-      });
+      // Flushing ready texts
     }
 
     this.pendingTexts = toKeep;
 
     // Emit in order
     for (const item of toEmit) {
-      console.log('[SyncedAudio] Emit:', item.text, 'stopS:', item.stopS, 'playheadS:', playheadS);
+      // Emit text
       this._emitText(item);
     }
   }
@@ -407,10 +381,10 @@ class SyncedAudioPlayer {
   _flushAllTexts() {
     if (this.pendingTexts.length === 0) return;
 
-    console.log('[SyncedAudio] Flushing all', this.pendingTexts.length, 'pending texts');
+    // Flushing all pending texts
     while (this.pendingTexts.length > 0) {
       const item = this.pendingTexts.shift();
-      console.log('[SyncedAudio] Flush all - emit:', item.text);
+      // Flush all - emit
       this._emitText(item);
     }
   }

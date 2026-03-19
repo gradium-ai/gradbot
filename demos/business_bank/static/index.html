@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <link rel="icon" href="static/favicon.ico">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Digital Bank</title>
@@ -568,10 +569,10 @@
         <div class="status idle" id="status">Click "Call Alex" to connect with business banking</div>
     </div>
 
-    <script src="/static/js/opus-encoder.js"></script>
-    <script src="/static/js/audio-processor.js"></script>
-    <script src="/static/js/synced-audio-player.js"></script>
-    <script>fetch("/api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
+    <script src="static/js/opus-encoder.js"></script>
+    <script src="static/js/audio-processor.js"></script>
+    <script src="static/js/synced-audio-player.js"></script>
+    <script>fetch("api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
 
     <script>
         let ws = null;
@@ -681,7 +682,7 @@
         }
 
         // Fetch business data on load
-        fetch('/api/businesses')
+        fetch('api/businesses')
             .then(r => r.json())
             .then(data => {
                 businessData = data;
@@ -799,14 +800,14 @@
                 document.querySelectorAll('.biz-status').forEach(s => s.innerHTML = '');
 
                 // Re-fetch business data to reset balances
-                const freshData = await fetch('/api/businesses').then(r => r.json());
+                const freshData = await fetch('api/businesses').then(r => r.json());
                 businessData = freshData;
                 renderBusinessCards();
 
                 setStatus('Connecting...', 'connecting');
 
                 player = new SyncedAudioPlayer({
-                    basePath: '/static/js',
+                    basePath: 'static/js',
                     sampleRate: 24000,
                     pcmOutput: window.__pcmOutput || false,
                     echoCancellation: echoCancellationToggle.checked,
@@ -833,7 +834,7 @@
                     return;
                 }
 
-                const wsUrl = `ws://${window.location.host}/ws/chat`;
+                const _bp = window.location.pathname.replace(/\/$/, ""); const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${_bp}/ws/chat`;
                 ws = new WebSocket(wsUrl);
 
                 ws.onopen = () => {
@@ -896,7 +897,7 @@
         stopBtn.addEventListener('click', endCall);
 
         // Preload decoder
-        AudioProcessor.preloadDecoder('/static/js');
+        AudioProcessor.preloadDecoder('static/js');
     </script>
 </body>
 </html>

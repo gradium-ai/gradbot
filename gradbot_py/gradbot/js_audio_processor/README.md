@@ -135,11 +135,11 @@ Tested in modern Chrome, Firefox, Safari, and Edge.
 
 ## Integration with Gradbot demos
 
-Copy or symlink files to your demo's static directory:
+Copy files to your demo's static directory:
 
 ```bash
 # From your demo directory
-ln -s ../../js_audio_processor static/js
+cp -r ../../js_audio_processor static/js
 ```
 
 Then update your HTML to use the correct path:
