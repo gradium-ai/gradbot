@@ -27,6 +27,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+demos = ["fastapi", "uvicorn", "pyyaml"]
 test = ["pytest", "pytest-asyncio", "httpx", "fastapi", "pyyaml"]
 
 [tool.pytest.ini_options]

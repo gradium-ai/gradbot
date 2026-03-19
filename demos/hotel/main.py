@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import random
-import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,8 +27,7 @@ USE_PCM = os.environ.get("USE_PCM") == "1"
 DEBUG = os.environ.get("DEBUG") == "1"
 FLUSH_FOR_S = float(os.environ.get("FLUSH_FOR_S", "0.5"))
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from demo_config import load_config, session_config_overrides, merge_overrides, client_config
+from gradbot.demo_config import load_config, session_config_overrides, merge_overrides, client_config
 
 _YAML_CFG = load_config(Path(__file__).parent)
 _OVERRIDES = session_config_overrides(_YAML_CFG)
