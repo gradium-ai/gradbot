@@ -1,22 +1,22 @@
 # gradbot
 
-Python bindings for the gradbot voice AI library.
+Python bindings for the gradbot voice AI library — real-time speech-to-speech with tool calling.
 
 ## Installation
 
-Build and install in development mode:
-
 ```bash
-cd gradbot_py
-maturin develop
+pip install gradbot
 ```
 
-Or build a wheel:
+## Environment Variables
 
-```bash
-maturin build --release
-pip install target/wheels/gradbot-*.whl
-```
+| Variable | Required | Description |
+|---|---|---|
+| `GRADIUM_API_KEY` | Yes | API key for Gradium STT/TTS services |
+| `LLM_API_KEY` | Yes | API key for OpenAI-compatible LLM |
+| `LLM_BASE_URL` | No | LLM API base URL (defaults to OpenAI) |
+| `LLM_MODEL` | No | LLM model name (auto-detected if only one available) |
+| `GRADIUM_BASE_URL` | No | Base URL for Gradium services |
 
 ## Quick Start
 
@@ -24,14 +24,10 @@ pip install target/wheels/gradbot-*.whl
 import asyncio
 import gradbot
 
-# Initialize logging (optional)
-gradbot.init_logging()
-
 async def main():
-    # Create session with default settings
     input_handle, output_handle = await gradbot.run(
         session_config=gradbot.SessionConfig(
-            voice_id="YTpq7expH9539ERJ",  # Emma voice
+            voice_id="YTpq7expH9539ERJ",
             instructions="You are a helpful assistant.",
             language=gradbot.Lang.En,
         ),
@@ -39,65 +35,22 @@ async def main():
         output_format=gradbot.AudioFormat.OggOpus,
     )
 
-    # Send audio and receive responses
-    # ... your audio handling code ...
+    while True:
+        msg = await output_handle.receive()
+        if msg is None:
+            break
+        if msg.msg_type == "audio":
+            play(msg.data)  # bytes
+        elif msg.msg_type == "tool_call":
+            result = handle(msg.tool_call.tool_name, msg.tool_call.args_json)
+            await msg.tool_call_handle.send(result)
 
 asyncio.run(main())
 ```
 
-## Environment Variables
+### Remote Mode
 
-- `GRADIUM_API_KEY` - API key for Gradium STT/TTS services (required)
-- `GRADIUM_BASE_URL` - Base URL for Gradium services (optional)
-- `LLM_API_KEY` - API key for OpenAI-compatible LLM API (required)
-- `LLM_BASE_URL` - Base URL for LLM API (optional, defaults to OpenAI)
-- `LLM_MODEL` - LLM model name (optional, auto-detected if single model available)
-
-## API Reference
-
-### Functions
-
-#### `init_logging()`
-Initialize tracing subscriber for debug logging. Call once at startup.
-
-#### `flagship_voices() -> list[FlagshipVoice]`
-Returns all available flagship voices.
-
-```python
-for voice in gradbot.flagship_voices():
-    print(f"{voice.name}: {voice.voice_id} ({voice.language})")
-```
-
-#### `flagship_voice(name: str) -> FlagshipVoice`
-Look up a flagship voice by name (case-insensitive).
-
-```python
-voice = gradbot.flagship_voice("emma")
-print(voice.voice_id)  # "YTpq7expH9539ERJ"
-```
-
-#### `create_clients(...) -> GradbotClients`
-Create reusable clients for multiple sessions.
-
-```python
-clients = await gradbot.create_clients(
-    gradium_api_key="...",  # or use GRADIUM_API_KEY env var
-    llm_base_url="https://api.openai.com/v1",
-)
-```
-
-#### `run(...) -> tuple[SessionInputHandle, SessionOutputHandle]`
-Create clients and start a session in one call.
-
-```python
-input_handle, output_handle = await gradbot.run(
-    session_config=config,
-    input_format=gradbot.AudioFormat.OggOpus,
-    output_format=gradbot.AudioFormat.OggOpus,
-)
-```
-
-**Remote mode** — connect to a `gradbot_server` instead of running STT/LLM/TTS locally:
+Connect to a `gradbot_server` instead of running STT/LLM/TTS locally:
 
 ```python
 input_handle, output_handle = await gradbot.run(
@@ -109,145 +62,75 @@ input_handle, output_handle = await gradbot.run(
 )
 ```
 
-When `gradbot_url` is set, all other client params (`gradium_api_key`, `llm_*`, etc.) are ignored — the server handles STT/LLM/TTS. The returned handles behave identically to local mode.
+When `gradbot_url` is set, all other client params are ignored — the server handles everything.
+
+## FastAPI Integration
+
+The `gradbot.fastapi` module provides a WebSocket handler and route setup for building voice demos.
+
+```python
+from fastapi import FastAPI, WebSocket
+from gradbot.fastapi import websocket_chat_handler, setup_demo_routes
+
+app = FastAPI()
+
+setup_demo_routes(app, static_dir="static", voices=True)
+
+@app.websocket("/ws")
+async def ws(websocket: WebSocket):
+    await websocket_chat_handler(
+        websocket,
+        on_start=lambda msg: gradbot.SessionConfig(
+            instructions="You are a helpful assistant.",
+        ),
+    )
+```
+
+`setup_demo_routes` registers `/api/audio-config`, serves your static files, and automatically serves the bundled JS audio processor at `/static/js/`.
+
+### WebSocket Protocol
+
+| Direction | Format | Description |
+|---|---|---|
+| Client → Server | JSON `{"type": "start", ...}` | Begin session |
+| Client → Server | Binary | Audio data |
+| Client → Server | JSON `{"type": "config", ...}` | Reconfigure mid-session |
+| Client → Server | JSON `{"type": "stop"}` | End session |
+| Server → Client | JSON | Transcripts, events, audio timing |
+| Server → Client | Binary | Audio data |
+
+## API Reference
+
+### Functions
+
+- **`run(...)`** — Create clients and start a session. Returns `(SessionInputHandle, SessionOutputHandle)`.
+- **`create_clients(...)`** — Create reusable `GradbotClients` for multiple sessions.
+- **`flagship_voices()`** — List all available voices.
+- **`flagship_voice(name)`** — Look up a voice by name (case-insensitive).
+- **`voices_json()`** — All voices as JSON-serializable dicts.
+- **`voice_switching_tools()`** — `ToolDef` list for `switch_to_{name}` tools.
+- **`resolve_voice_from_tool(tool_name)`** — Resolve a `switch_to_*` tool name to a `FlagshipVoice`.
+- **`init_logging()`** — Initialize debug logging.
+
+### Enums
+
+| Enum | Values |
+|---|---|
+| `Lang` | `En`, `Fr`, `Es`, `De`, `Pt` |
+| `Gender` | `Masculine`, `Feminine` |
+| `Country` | `Us`, `Gb`, `Fr`, `De`, `Mx`, `Es`, `Br` |
+| `AudioFormat` | `OggOpus`, `Pcm` (24kHz in / 48kHz out), `Ulaw` (G.711 mu-law) |
 
 ### Classes
 
-#### `Lang`
-Language enum: `En`, `Fr`, `Es`, `De`, `Pt`
+- **`SessionConfig`** — `voice_id`, `instructions`, `language`, `assistant_speaks_first`, `silence_timeout_s`, `tools`
+- **`ToolDef`** — `name`, `description`, `parameters_json`
+- **`SessionInputHandle`** — `send_audio(bytes)`, `send_config(SessionConfig)`, `close()`
+- **`SessionOutputHandle`** — `receive() -> MsgOut | None`
+- **`MsgOut`** — `msg_type` is one of `"audio"`, `"tts_text"`, `"stt_text"`, `"event"`, `"tool_call"`
+- **`ToolCallInfo`** — `call_id`, `tool_name`, `args_json`
+- **`ToolCallHandlePy`** — `send(result_json)`, `send_error(error_message)`
 
-#### `Gender`
-Voice gender: `Masculine`, `Feminine`
+## Examples
 
-#### `Country`
-Voice country/accent: `Us`, `Gb`, `Fr`, `De`, `Mx`, `Es`, `Br`
-
-#### `AudioFormat`
-Audio encoding format:
-- `OggOpus` - Ogg container with Opus codec
-- `Pcm` - Raw PCM (24kHz input, 48kHz output)
-- `Ulaw` - G.711 mu-law (for telephony)
-
-#### `SessionConfig`
-Session configuration:
-
-```python
-config = gradbot.SessionConfig(
-    voice_id="YTpq7expH9539ERJ",      # Voice ID or None for default
-    instructions="Be helpful.",        # System prompt
-    language=gradbot.Lang.En,       # Language
-    assistant_speaks_first=True,       # Start with greeting
-    silence_timeout_s=5.0,             # Silence before prompting
-    tools=[...],                       # Tool definitions for LLM
-)
-```
-
-#### `ToolDef`
-Tool definition for LLM function calling:
-
-```python
-tool = gradbot.ToolDef(
-    name="get_weather",
-    description="Get current weather for a location",
-    parameters_json='{"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}'
-)
-```
-
-#### `SessionInputHandle`
-Handle for sending input to a session:
-
-- `await send_audio(data: bytes)` - Send encoded audio
-- `await send_config(config: SessionConfig)` - Update configuration
-- `await close()` - Close the input handle
-
-#### `SessionOutputHandle`
-Handle for receiving output from a session:
-
-- `await receive() -> MsgOut | None` - Get next message (None when session ends)
-
-#### `MsgOut`
-Output message with type-specific fields:
-
-```python
-msg = await output_handle.receive()
-if msg is None:
-    print("Session ended")
-elif msg.msg_type == "audio":
-    # msg.data: bytes, msg.start_s: float, msg.stop_s: float
-    send_to_speaker(msg.data)
-elif msg.msg_type == "tts_text":
-    # msg.text: str, msg.start_s: float, msg.stop_s: float
-    display_caption(msg.text)
-elif msg.msg_type == "stt_text":
-    # msg.text: str, msg.start_s: float
-    display_transcription(msg.text)
-elif msg.msg_type == "event":
-    # msg.event: Event, msg.time_s: float
-    handle_event(msg.event)
-elif msg.msg_type == "tool_call":
-    # msg.tool_call: ToolCallInfo, msg.tool_call_handle: ToolCallHandle
-    result = await process_tool(msg.tool_call)
-    await msg.tool_call_handle.send(json.dumps(result))
-```
-
-#### `ToolCallInfo`
-Tool call information:
-- `call_id: str` - Unique call ID
-- `tool_name: str` - Name of the tool
-- `args_json: str` - JSON string of arguments
-
-#### `ToolCallHandlePy`
-Handle for responding to tool calls:
-- `await send(result_json: str)` - Send success result
-- `await send_error(error_message: str)` - Send error result
-
-## Example: Voice Chat with Tools
-
-See `demos/fantasy_shop/main.py` for a complete example using FastAPI, WebSockets, and tool calling.
-
-```python
-import asyncio
-import json
-import gradbot
-
-async def handle_session(websocket):
-    # Define tools
-    tools = [
-        gradbot.ToolDef(
-            name="get_time",
-            description="Get the current time",
-            parameters_json='{"type": "object", "properties": {}, "required": []}'
-        )
-    ]
-
-    # Start session
-    config = gradbot.SessionConfig(
-        instructions="You are a helpful assistant with access to tools.",
-        tools=tools,
-    )
-    input_handle, output_handle = await gradbot.run(
-        session_config=config,
-        input_format=gradbot.AudioFormat.OggOpus,
-        output_format=gradbot.AudioFormat.OggOpus,
-    )
-
-    # Process messages
-    async def process_output():
-        while True:
-            msg = await output_handle.receive()
-            if msg is None:
-                break
-            if msg.msg_type == "audio":
-                await websocket.send_bytes(msg.data)
-            elif msg.msg_type == "tool_call":
-                if msg.tool_call.tool_name == "get_time":
-                    import datetime
-                    result = {"time": datetime.datetime.now().isoformat()}
-                    await msg.tool_call_handle.send(json.dumps(result))
-
-    async def receive_audio():
-        async for data in websocket.iter_bytes():
-            await input_handle.send_audio(data)
-
-    await asyncio.gather(process_output(), receive_audio())
-```
+See [`demos/`](../demos/) for complete examples including tool calling, voice switching, and WebSocket frontends.
