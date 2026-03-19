@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 DEMOS_DIR = Path(__file__).parent
 
@@ -31,6 +31,16 @@ for name in demo_names:
         print(f"Warning: could not load demo '{name}': {e}")
     finally:
         sys.path.pop(0)
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    # Serve favicon from the first demo that has one
+    for name in demo_names:
+        path = DEMOS_DIR / name / "static" / "favicon.ico"
+        if path.exists():
+            return FileResponse(path)
+    return HTMLResponse(status_code=204)
 
 
 @app.get("/", response_class=HTMLResponse)

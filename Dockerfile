@@ -54,4 +54,5 @@ RUN cd demos && \
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "cd /app/demos && uv run --no-sync uvicorn app:app --host 0.0.0.0 --port 8000"]
+ENV ROOT_PATH=""
+CMD ["sh", "-c", "cd /app/demos && uv run --no-sync uvicorn app:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*' --root-path=${ROOT_PATH}"]
