@@ -36,7 +36,7 @@ for name in demo_names:
 @app.get("/", response_class=HTMLResponse)
 async def index():
     items = "\n".join(
-        f'<li><a href="/{name}/">{name.replace("_", " ").title()}</a></li>'
+        f'<li><a href="{name}/">{name.replace("_", " ").title()}</a></li>'
         for name in demo_names
     )
     return f"""<!DOCTYPE html>
