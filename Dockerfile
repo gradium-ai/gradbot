@@ -24,6 +24,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock* ./
 COPY gradbot_lib gradbot_lib
 COPY gradbot_py gradbot_py
+COPY gradbot_server gradbot_server
 COPY src src
 
 # Build only the wheel using maturin directly (uses system Python, no extra download)
