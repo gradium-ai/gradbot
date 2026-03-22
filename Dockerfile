@@ -33,6 +33,12 @@ RUN cd gradbot_py && uv run --with maturin maturin build --release --out /app/di
 # Stage 2: Runtime image (no Rust toolchain)
 FROM python:3.14-bookworm
 
+# Node.js is required by the MCP demo (npx spawns MCP server subprocesses)
+COPY --from=node:22-bookworm /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:22-bookworm /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
