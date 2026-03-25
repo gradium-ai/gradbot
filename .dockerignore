@@ -4,3 +4,7 @@ target/
 **/.venv/
 **/uv.lock
 .git/
+*.md
+!requirements*.md
+.github/
+tests/

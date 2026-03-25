@@ -242,6 +242,15 @@ async fn twiml(
         .get("host")
         .and_then(|h| h.to_str().ok())
         .unwrap_or("example.com");
+
+    // Validate host to prevent header injection into XML
+    let is_valid_host = host
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'));
+    if !is_valid_host {
+        return Err(axum::http::StatusCode::BAD_REQUEST);
+    }
+
     tracing::info!(?host, "generating twiml");
 
     let twiml = format!(

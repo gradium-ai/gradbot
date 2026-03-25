@@ -679,7 +679,10 @@
 
             const entry = document.createElement('div');
             entry.className = 'transcript-entry system';
-            entry.innerHTML = `<span class="transcript-text">${text}</span>`;
+            const span = document.createElement('span');
+            span.className = 'transcript-text';
+            span.textContent = text;
+            entry.appendChild(span);
             transcript.appendChild(entry);
             transcript.scrollTop = transcript.scrollHeight;
         }

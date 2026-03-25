@@ -492,13 +492,29 @@
         }
 
         function renderVoices() {
-            voiceGrid.innerHTML = voices.map((voice, index) => `
-                <label class="voice-option ${index === 0 ? 'selected' : ''}" data-voice="${voice.name}">
-                    <input type="radio" name="voice" value="${voice.name}" ${index === 0 ? 'checked' : ''}>
-                    <span class="flag">${FLAGS[voice.language] || '🌐'}</span>
-                    <span class="voice-name">${voice.name}</span>
-                </label>
-            `).join('');
+            voiceGrid.innerHTML = '';
+            voices.forEach((voice, index) => {
+                const label = document.createElement('label');
+                label.className = 'voice-option' + (index === 0 ? ' selected' : '');
+                label.dataset.voice = voice.name;
+
+                const radio = document.createElement('input');
+                radio.type = 'radio';
+                radio.name = 'voice';
+                radio.value = voice.name;
+                if (index === 0) radio.checked = true;
+
+                const flag = document.createElement('span');
+                flag.className = 'flag';
+                flag.textContent = FLAGS[voice.language] || '🌐';
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'voice-name';
+                nameSpan.textContent = voice.name;
+
+                label.append(radio, flag, nameSpan);
+                voiceGrid.appendChild(label);
+            });
 
             // Set default selection
             if (voices.length > 0) {
