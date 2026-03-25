@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="demos/logo-large.svg" alt="Gradbot" width="300" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo-light.svg">
+    <img src="assets/logo-light.svg" alt="Gradbot" width="300" />
+  </picture>
 </p>
 
 <p align="center">
@@ -9,7 +13,6 @@
 <p align="center">
   <a href="https://pypi.org/project/gradbot/"><img src="https://img.shields.io/pypi/v/gradbot.svg" alt="PyPI"></a>
   <a href="https://pypi.org/project/gradbot/"><img src="https://img.shields.io/pypi/pyversions/gradbot.svg" alt="Python"></a>
-  <a href="https://github.com/gradium-ai/gradbot/actions"><img src="https://img.shields.io/github/actions/workflow/status/gradium-ai/gradbot/CI.yml?branch=main" alt="CI"></a>
   <a href="https://github.com/gradium-ai/gradbot/blob/main/LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License"></a>
 </p>
 
