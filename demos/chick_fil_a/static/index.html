@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chick-fil-A Voice Ordering</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #ee3124 0%, #dd2419 50%, #ee3124 100%);
+            min-height: 100vh;
+            color: #ffffff;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1.5rem;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 0.25rem;
+            font-size: 2.5rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #ffe8e6;
+            margin-bottom: 1.5rem;
+            font-size: 1rem;
+        }
+
+        /* Agent card */
+        .agent-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1.25rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            color: #333;
+        }
+
+        .agent-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #ee3124, #dd2419);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            flex-shrink: 0;
+            box-shadow: 0 2px 8px rgba(238, 49, 36, 0.4);
+        }
+
+        .agent-info h2 {
+            font-size: 1.25rem;
+            margin-bottom: 0.15rem;
+            color: #333;
+        }
+
+        .agent-info .role {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .recording-indicator {
+            margin-left: auto;
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+            color: #4ade80;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .recording-indicator.active {
+            display: flex;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .recording-dot {
+            width: 12px;
+            height: 12px;
+            background: #4ade80;
+            border-radius: 50%;
+            animation: pulse 1.2s infinite;
+        }
+
+        /* Two-column layout */
+        .main-panels {
+            display: grid;
+            grid-template-columns: 1.5fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 1.25rem;
+        }
+
+        @media (max-width: 968px) {
+            .main-panels {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Menu Display Panel */
+        .menu-panel {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            min-height: 500px;
+            max-height: 700px;
+            display: flex;
+            flex-direction: column;
+            color: #333;
+        }
+
+        .order-panel {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            min-height: 500px;
+            max-height: 700px;
+            display: flex;
+            flex-direction: column;
+            color: #333;
+        }
+
+        .panel-header {
+            font-size: 0.9rem;
+            color: #ee3124;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 1rem;
+            font-weight: 700;
+        }
+
+        .menu-content {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        .order-content {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+            margin-bottom: 1rem;
+        }
+
+        .menu-empty {
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-style: italic;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .order-empty {
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-style: italic;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        /* Menu category */
+        .menu-category {
+            margin-bottom: 2rem;
+        }
+
+        .category-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #ee3124;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #ee3124;
+        }
+
+        .menu-item {
+            background: #f8f8f8;
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            border: 1px solid #e0e0e0;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .menu-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        .item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 0.5rem;
+        }
+
+        .item-name {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .item-price {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #ee3124;
+        }
+
+        .item-description {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .item-options {
+            font-size: 0.85rem;
+            color: #888;
+            font-style: italic;
+        }
+
+        /* Order items */
+        .order-item {
+            background: #f8f8f8;
+            border-radius: 8px;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            border-left: 3px solid #ee3124;
+        }
+
+        .order-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.25rem;
+        }
+
+        .order-item-name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .order-item-price {
+            font-weight: 700;
+            color: #ee3124;
+        }
+
+        .order-item-custom {
+            font-size: 0.85rem;
+            color: #666;
+            margin-top: 0.25rem;
+        }
+
+        .order-total {
+            background: linear-gradient(135deg, #ee3124, #dd2419);
+            color: white;
+            padding: 1rem;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-top: auto;
+        }
+
+        .order-placed {
+            background: linear-gradient(135deg, #4ade80, #22c55e);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            text-align: center;
+            margin-top: 1rem;
+        }
+
+        .order-placed h3 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .order-placed p {
+            font-size: 1rem;
+            opacity: 0.95;
+        }
+
+        /* Transcript Panel */
+        .transcript-panel {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            max-height: 350px;
+            display: flex;
+            flex-direction: column;
+            color: #333;
+        }
+
+        .transcript-content {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        .transcript-message {
+            margin-bottom: 0.75rem;
+            padding: 0.75rem;
+            border-radius: 8px;
+            font-size: 0.95rem;
+        }
+
+        .transcript-message.user {
+            background: #e8f4fd;
+            color: #0066cc;
+            margin-left: 2rem;
+        }
+
+        .transcript-message.agent {
+            background: #fee;
+            color: #333;
+            margin-right: 2rem;
+        }
+
+        .transcript-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.25rem;
+            opacity: 0.7;
+        }
+
+        /* Start button */
+        .start-button {
+            background: linear-gradient(135deg, #ee3124, #dd2419);
+            color: white;
+            border: none;
+            padding: 0.9rem 2rem;
+            font-size: 1.1rem;
+            font-weight: 700;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 12px rgba(238, 49, 36, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .start-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(238, 49, 36, 0.5);
+        }
+
+        .start-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .controls {
+            text-align: center;
+            margin-top: 1rem;
+        }
+
+        /* Custom scrollbar */
+        .menu-content::-webkit-scrollbar,
+        .order-content::-webkit-scrollbar,
+        .transcript-content::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .menu-content::-webkit-scrollbar-track,
+        .order-content::-webkit-scrollbar-track,
+        .transcript-content::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        .menu-content::-webkit-scrollbar-thumb,
+        .order-content::-webkit-scrollbar-thumb,
+        .transcript-content::-webkit-scrollbar-thumb {
+            background: #ee3124;
+            border-radius: 4px;
+        }
+
+        .menu-content::-webkit-scrollbar-thumb:hover,
+        .order-content::-webkit-scrollbar-thumb:hover,
+        .transcript-content::-webkit-scrollbar-thumb:hover {
+            background: #dd2419;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🍗 Chick-fil-A Voice Ordering</h1>
+        <p class="subtitle">Order your favorite Chick-fil-A items with your voice!</p>
+
+        <!-- Agent Card -->
+        <div class="agent-card">
+            <div class="agent-avatar">🎙️</div>
+            <div class="agent-info">
+                <h2>Chick-fil-A Team Member</h2>
+                <p class="role">Voice Ordering Assistant</p>
+            </div>
+            <div class="recording-indicator" id="recordingIndicator">
+                <div class="recording-dot"></div>
+                <span>Listening...</span>
+            </div>
+        </div>
+
+        <!-- Main Panels -->
+        <div class="main-panels">
+            <!-- Menu Display -->
+            <div class="menu-panel">
+                <div class="panel-header">📋 Menu</div>
+                <div class="menu-content" id="menuContent">
+                    <div class="menu-empty">
+                        Ask to see the menu to get started!
+                    </div>
+                </div>
+            </div>
+
+            <!-- Order Display -->
+            <div class="order-panel">
+                <div class="panel-header">🛒 Your Order</div>
+                <div class="order-content" id="orderContent">
+                    <div class="order-empty">
+                        Your order is empty
+                    </div>
+                </div>
+                <div class="order-total" id="orderTotal" style="display: none;">
+                    Total: $0.00
+                </div>
+                <div id="orderPlaced"></div>
+            </div>
+        </div>
+
+        <!-- Transcript -->
+        <div class="transcript-panel">
+            <div class="panel-header">💬 Conversation</div>
+            <div class="transcript-content" id="transcriptContent">
+                <div class="menu-empty">
+                    Start a conversation to see the transcript...
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls">
+            <button class="start-button" id="startButton">Start Ordering</button>
+        </div>
+    </div>
+
+    <script src="/static/js/opus-encoder.js"></script>
+    <script src="/static/js/audio-processor.js"></script>
+    <script src="/static/js/synced-audio-player.js"></script>
+    <script>fetch("/api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
+    <script>
+        const startButton = document.getElementById('startButton');
+        const recordingIndicator = document.getElementById('recordingIndicator');
+        const menuContent = document.getElementById('menuContent');
+        const orderContent = document.getElementById('orderContent');
+        const orderTotal = document.getElementById('orderTotal');
+        const orderPlaced = document.getElementById('orderPlaced');
+        const transcriptContent = document.getElementById('transcriptContent');
+
+        let ws = null;
+        let player = null;
+        let isRunning = false;
+
+        // Turn tracking for transcript grouping
+        let turnBubbles = {};
+        let userBubble = null;
+        let hadAssistantBubble = false;
+
+        async function startSession() {
+            if (isRunning) {
+                stopSession();
+                return;
+            }
+
+            startButton.disabled = true;
+            startButton.textContent = 'Connecting...';
+
+            try {
+                // Create audio player
+                player = new SyncedAudioPlayer({
+                    basePath: '/static/js',
+                    sampleRate: 24000,
+                    pcmOutput: window.__pcmOutput || false,
+                    echoCancellation: true,
+                    onEncodedAudio: (opusData) => {
+                        if (isRunning && ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(opusData);
+                        }
+                    },
+                    onText: handleText,
+                    onEvent: (eventType, msg) => {
+                        handleMessage(msg);
+                    },
+                    onError: (error) => {
+                        console.error('Player error:', error);
+                    }
+                });
+
+                await player.start();
+
+                // Connect WebSocket
+                const wsUrl = `ws://${window.location.host}/ws/order`;
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    console.log('Connected to ordering agent');
+                    transcriptContent.innerHTML = '';  // Clear stale transcript
+                    isRunning = true;  // Set BEFORE messages arrive
+                    ws.send(JSON.stringify({ type: 'start' }));
+                    startButton.disabled = false;
+                    startButton.textContent = 'Stop Ordering';
+                    recordingIndicator.classList.add('active');
+                };
+
+                ws.onmessage = (event) => {
+                    player.handleMessage(event.data);
+                };
+
+                ws.onclose = () => {
+                    console.log('Disconnected from ordering agent');
+                    stopSession();
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    stopSession();
+                };
+
+            } catch (error) {
+                console.error('Failed to start session:', error);
+                startButton.disabled = false;
+                startButton.textContent = 'Start Ordering';
+                alert('Failed to start session: ' + error.message);
+            }
+        }
+
+        function stopSession() {
+            isRunning = false;
+            startButton.textContent = 'Start Ordering';
+            startButton.disabled = false;
+            recordingIndicator.classList.remove('active');
+
+            if (ws) {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'stop' }));
+                }
+                ws.close();
+                ws = null;
+            }
+
+            if (player) {
+                player.stop();
+                player = null;
+            }
+
+            // Reset turn tracking
+            turnBubbles = {};
+            userBubble = null;
+            hadAssistantBubble = false;
+        }
+
+        function handleMessage(data) {
+            if (data.type === 'menu_display') {
+                displayMenu(data);
+            } else if (data.type === 'order_updated') {
+                displayOrder(data);
+            } else if (data.type === 'order_placed') {
+                displayOrderPlaced(data);
+            } else if (data.type === 'event') {
+                // Handle events but don't add to transcript
+                console.log('Event:', data.event);
+            } else if (data.type === 'error') {
+                console.error('Server error:', data.message);
+            }
+            // All other message types are silently ignored
+        }
+
+        function displayMenu(data) {
+            menuContent.innerHTML = '';
+
+            for (const menuSection of data.menu) {
+                const categoryDiv = document.createElement('div');
+                categoryDiv.className = 'menu-category';
+
+                const titleDiv = document.createElement('div');
+                titleDiv.className = 'category-title';
+                titleDiv.textContent = menuSection.category;
+                categoryDiv.appendChild(titleDiv);
+
+                for (const item of menuSection.items) {
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'menu-item';
+
+                    const headerDiv = document.createElement('div');
+                    headerDiv.className = 'item-header';
+
+                    const nameDiv = document.createElement('div');
+                    nameDiv.className = 'item-name';
+                    nameDiv.textContent = item.name;
+
+                    const priceDiv = document.createElement('div');
+                    priceDiv.className = 'item-price';
+                    priceDiv.textContent = `$${item.price.toFixed(2)}`;
+
+                    headerDiv.appendChild(nameDiv);
+                    headerDiv.appendChild(priceDiv);
+
+                    const descDiv = document.createElement('div');
+                    descDiv.className = 'item-description';
+                    descDiv.textContent = item.description;
+
+                    itemDiv.appendChild(headerDiv);
+                    itemDiv.appendChild(descDiv);
+
+                    if (item.options && Object.keys(item.options).length > 0) {
+                        const optionsDiv = document.createElement('div');
+                        optionsDiv.className = 'item-options';
+                        const optionsList = Object.entries(item.options)
+                            .map(([key, values]) => `${key}: ${values.join(', ')}`)
+                            .join(' | ');
+                        optionsDiv.textContent = `Options: ${optionsList}`;
+                        itemDiv.appendChild(optionsDiv);
+                    }
+
+                    categoryDiv.appendChild(itemDiv);
+                }
+
+                menuContent.appendChild(categoryDiv);
+            }
+        }
+
+        function displayOrder(data) {
+            if (!data.items || data.items.length === 0) {
+                orderContent.innerHTML = '<div class="order-empty">Your order is empty</div>';
+                orderTotal.style.display = 'none';
+                return;
+            }
+
+            orderContent.innerHTML = '';
+            orderTotal.style.display = 'block';
+
+            for (const item of data.items) {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'order-item';
+
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'order-item-header';
+
+                const nameDiv = document.createElement('div');
+                nameDiv.className = 'order-item-name';
+                nameDiv.textContent = item.name;
+
+                const priceDiv = document.createElement('div');
+                priceDiv.className = 'order-item-price';
+                priceDiv.textContent = `$${item.price.toFixed(2)}`;
+
+                headerDiv.appendChild(nameDiv);
+                headerDiv.appendChild(priceDiv);
+                itemDiv.appendChild(headerDiv);
+
+                if (item.customizations && Object.keys(item.customizations).length > 0) {
+                    const customDiv = document.createElement('div');
+                    customDiv.className = 'order-item-custom';
+                    const customList = Object.entries(item.customizations)
+                        .map(([key, value]) => {
+                            if (Array.isArray(value)) {
+                                return `${key}: ${value.join(', ')}`;
+                            }
+                            return `${key}: ${value}`;
+                        })
+                        .join(' | ');
+                    customDiv.textContent = customList;
+                    itemDiv.appendChild(customDiv);
+                }
+
+                orderContent.appendChild(itemDiv);
+            }
+
+            orderTotal.textContent = `Total: $${data.total.toFixed(2)}`;
+        }
+
+        function displayOrderPlaced(data) {
+            orderPlaced.innerHTML = `
+                <div class="order-placed">
+                    <h3>✅ Order Placed!</h3>
+                    <p>Thank you, ${data.customer_name}!</p>
+                    <p>Total: $${data.total.toFixed(2)}</p>
+                    <p>Your order will be ready soon!</p>
+                </div>
+            `;
+        }
+
+        function getBubbleForTurn(turnIdx, isUser) {
+            if (isUser) {
+                // Reuse current user bubble if no assistant spoke since
+                if (userBubble && !hadAssistantBubble) {
+                    return userBubble;
+                }
+                // New user turn - create bubble
+                hadAssistantBubble = false;
+                userBubble = document.createElement('div');
+                userBubble.className = 'transcript-message user';
+
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'transcript-label';
+                labelDiv.textContent = 'You';
+
+                const textDiv = document.createElement('div');
+                textDiv.className = 'transcript-text';
+
+                userBubble.appendChild(labelDiv);
+                userBubble.appendChild(textDiv);
+
+                transcriptContent.appendChild(userBubble);
+                return userBubble;
+            }
+
+            // Assistant message - use turnIdx
+            let bubble = turnBubbles[turnIdx];
+            if (!bubble) {
+                hadAssistantBubble = true;
+                bubble = document.createElement('div');
+                bubble.className = 'transcript-message agent';
+
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'transcript-label';
+                labelDiv.textContent = 'Agent';
+
+                const textDiv = document.createElement('div');
+                textDiv.className = 'transcript-text';
+
+                bubble.appendChild(labelDiv);
+                bubble.appendChild(textDiv);
+
+                transcriptContent.appendChild(bubble);
+                turnBubbles[turnIdx] = bubble;
+
+                // Aggressive cleanup to prevent memory leak (matches hotel demo)
+                while (transcriptContent.children.length > 80) {
+                    const removed = transcriptContent.removeChild(transcriptContent.firstChild);
+                    // Sync object references
+                    for (const k in turnBubbles) {
+                        if (turnBubbles[k] === removed) delete turnBubbles[k];
+                    }
+                    if (userBubble === removed) userBubble = null;
+                }
+            }
+            return bubble;
+        }
+
+        function handleText({ text, turnIdx, isUser }) {
+            // Clear empty state message if present
+            if (transcriptContent.querySelector('.menu-empty')) {
+                transcriptContent.innerHTML = '';
+            }
+
+            const bubble = getBubbleForTurn(turnIdx, isUser);
+            const textEl = bubble.querySelector('.transcript-text') || bubble.querySelector('div:last-child');
+            if (textEl) {
+                textEl.textContent += text + ' ';
+            }
+            transcriptContent.scrollTop = transcriptContent.scrollHeight;
+        }
+
+        startButton.addEventListener('click', startSession);
+    </script>
+</body>
+</html>
