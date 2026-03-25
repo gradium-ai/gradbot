@@ -1,27 +1,52 @@
-# Gradbot
+<p align="center">
+  <img src="demos/logo-large.svg" alt="Gradbot" width="300" />
+</p>
 
-A Rust-based voice AI framework for building real-time conversational agents with speech-to-text, LLM processing, and text-to-speech.
+<p align="center">
+  <strong>Open-source voice agent framework.<br>~60 lines of code. Any OpenAI-compatible LLM.</strong>
+</p>
 
-## Structure
+<p align="center">
+  <a href="https://pypi.org/project/gradbot/"><img src="https://img.shields.io/pypi/v/gradbot.svg" alt="PyPI"></a>
+  <a href="https://pypi.org/project/gradbot/"><img src="https://img.shields.io/pypi/pyversions/gradbot.svg" alt="Python"></a>
+  <a href="https://github.com/gradium-ai/gradbot/actions"><img src="https://img.shields.io/github/actions/workflow/status/gradium-ai/gradbot/CI.yml?branch=main" alt="CI"></a>
+  <a href="https://github.com/gradium-ai/gradbot/blob/main/LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License"></a>
+</p>
 
-```
-gradbot/
-├── gradbot_lib/         # Core library (STT/LLM/TTS multiplexing)
-├── gradbot_py/         # Python bindings (PyO3 + maturin)
-├── gradbot_server/      # Standalone WebSocket server (remote mode)
-├── src/                 # Server binary (OpenAI & Twilio WebSocket protocols)
-├── js_audio_processor/  # Browser audio worklet (Opus encode/decode, jitter buffer)
-├── demos/               # Example applications (see below)
-└── configs/             # Server configuration files
-```
+---
+
+Gradbot gives you the event loop for voice agents. You write the logic, it handles the rest.
+
+At its core is a multiplexing engine written in Rust that coordinates three streams in real time — **speech-to-text**, **LLM inference**, and **text-to-speech** — while managing conversational state, turn-taking, and interruptions. It works with any **OpenAI-compatible LLM** (GPT-4o, Claude, Groq, Ollama, LM Studio, etc.) and uses **[Gradium](https://gradium.ai)** for streaming STT/TTS across 14 voices and 5 languages.
+
+Whether you're building a [dungeon crawler game](demos/voice_text_adventure/) or a [travel booking assistant](demos/hotel/), Gradbot lets you go from idea to working voice experience in around 60 lines of code.
+
+## Features
+
+- **STT, LLM, and TTS coordinated in one loop** — Rust multiplexer streams all three concurrently
+- **Turn-taking, fillers, and barge-in handled automatically** — graceful audio fade-out on interruption
+- **Bi-directional audio streaming** — with VAD and silence detection out of the box
+- **Async tool calling** — the AI keeps talking naturally while slow tools execute in the background; lost calls are tracked and recovered
+- **Live transcription and tool calls in the same cycle** — define tools as JSON Schema, handle results sync or async
+- **14 voices, 5 languages** — English, French, German, Spanish, Portuguese; unlimited voices via cloning
+- **Mid-session reconfiguration** — change voice, language, prompt, or tools without restarting
+- **MCP integration** — connect any MCP server for instant tool access
+- **Remote mode** — deploy `gradbot_server` centrally; clients connect over WebSocket with the same API
+- **Config pinning** — lock down LLM credentials server-side while clients control voice and prompt
 
 ## Quick Start
 
-The easiest way to get started is with one of the demos using the Python bindings:
+Install from PyPI:
+
+```bash
+pip install gradbot
+```
+
+Or run a demo directly (builds from source):
 
 ```bash
 cd demos/simple_chat
-uv sync                  # builds gradbot from source via maturin
+uv sync
 ```
 
 Set your API keys:
@@ -29,18 +54,34 @@ Set your API keys:
 ```bash
 export GRADIUM_API_KEY=your_gradium_key
 
-# Point to a fast LLM that supports tool calls (e.g., GPT-4o-mini, Claude, Groq)
+# Any OpenAI-compatible endpoint (OpenAI, Groq, Ollama, LM Studio, etc.)
 export LLM_API_KEY=your_llm_key
-export LLM_BASE_URL=...  # any OpenAI-compatible endpoint (LM Studio, Ollama, etc.)
+export LLM_BASE_URL=...  # optional, defaults to OpenAI
 ```
 
 Run:
 
 ```bash
 uv run uvicorn main:app --reload
+# Open http://localhost:8000
 ```
 
-Then open http://localhost:8000.
+## Architecture
+
+The multiplexer runs a state machine (**Listening** → **Flushing** → **Processing**) that handles concurrent audio streams, interruption detection, and turn management. Gradbot flushes trailing audio by pushing silence into the STT buffer so the LLM gets your complete utterance before replying — no extra latency from voice activity detection delays. If the user goes quiet, the LLM is prompted to re-engage naturally instead of creating dead air.
+
+## Who Should Use Gradbot
+
+Gradbot is built for **prototyping and experimentation**. Use it to hack on ideas and build voice experiences without spending hours on infrastructure.
+
+- Support agents and real-time assistants
+- Coaching and educational apps
+- Tool-using voice workflows
+- Games and experimental interfaces
+
+Build weird, fun stuff. Voice agents don't have to be boring.
+
+> **For production**, use Gradium's models through orchestrators like [LiveKit](https://docs.livekit.io/agents/models/tts/gradium/) and [Pipecat](https://reference-server.pipecat.ai/en/latest/api/pipecat.services.gradium.html) for enterprise-grade reliability and scaling.
 
 ## Demos
 
@@ -48,22 +89,20 @@ Every demo is a standalone FastAPI + WebSocket app. Pick one, `uv sync`, and run
 
 | Demo | What it does | Key concepts |
 |------|-------------|-------------|
-| **[simple_chat](demos/simple_chat/)** | Basic voice conversation with 14 voices across 5 languages | Minimal starting point, dynamic voice/prompt switching |
-| **[fantasy_shop](demos/fantasy_shop/)** | Haggling game — buy a sword from NPCs with distinct personalities | Tool calling, multi-character, game state management |
-| **[egg_timer](demos/egg_timer/)** | Voice assistant that can set timers | Background async tasks, tool calling |
+| **[simple_chat](demos/simple_chat/)** | Basic voice conversation with 14 voices | Minimal starting point, dynamic voice/prompt switching |
+| **[fantasy_shop](demos/fantasy_shop/)** | Haggling game — buy a sword from NPCs | Tool calling, multi-character, game state, deferred tools |
+| **[egg_timer](demos/egg_timer/)** | Voice assistant that sets timers | Background async tasks, tool calling |
 | **[spanish_teacher](demos/spanish_teacher/)** | Language lesson with pronunciation practice | Educational UX, hiding imperfect STT from the learner |
-| **[web_search](demos/web_search/)** | Voice-powered search and weather | Async/deferred tool calls, Linkup web search, Open-Meteo weather |
-| **[hotel](demos/hotel/)** | Hotel booking agent for Paris, Bali, Dubai | Deferred tool results with natural chit-chat during wait |
-| **[business_bank](demos/business_bank/)** | Banking agent with PIN auth, lost cards, loans | Security flows, multi-step business logic |
+| **[web_search](demos/web_search/)** | Voice-powered search and weather | Deferred tool calls, Linkup search, Open-Meteo weather |
+| **[hotel](demos/hotel/)** | Hotel booking agent for Paris, Bali, Dubai | Deferred tool results with natural chit-chat |
+| **[business_bank](demos/business_bank/)** | Banking agent with PIN auth and loan applications | Security flows, multi-step business logic |
 | **[mtg_adviser](demos/mtg_adviser/)** | Magic: The Gathering deck building assistant | External API integration (Scryfall) |
 | **[mcp_demo](demos/mcp_demo/)** | Voice AI connected to MCP servers | Plug in any MCP server for instant tool access |
-| **[voice_text_adventure](demos/voice_text_adventure/)** | Play 50+ classic text adventures (Zork, etc.) by voice | Game engine integration, dramatic narration styles |
+| **[voice_text_adventure](demos/voice_text_adventure/)** | Play 50+ classic text adventures by voice | Game engine integration (Jericho), narrator styles |
 
-## Vibe-coding a new demo
+## Building a New Demo
 
-The fastest way to build a new voice app is to copy an existing demo and modify it with an AI coding assistant. Every demo follows the same pattern:
-
-### 1. Copy the template
+Copy an existing demo and modify it — works great with AI coding assistants:
 
 ```bash
 cp -r demos/simple_chat demos/my_demo
@@ -71,31 +110,15 @@ cd demos/my_demo
 uv sync
 ```
 
-### 2. Describe what you want
-
-Open the demo in your AI coding tool (Claude Code, Cursor, etc.) and describe your idea. A good prompt includes:
-
-- **The persona** — who is the AI character?
-- **The tools** — what actions can the AI take?
-- **The game/app logic** — what state do you track?
-
-For example:
-
-> Make this a pizza ordering assistant. The AI is "Marco", a friendly Italian pizzaiolo.
-> He can: check_menu, add_to_order, remove_from_order, confirm_order.
-> Track the order items and total price. When the order is confirmed, show a summary.
-
-### 3. What to change
-
-A demo has three parts:
+Every demo has three files:
 
 | File | What to edit | What it controls |
 |------|-------------|-----------------|
-| `main.py` | System prompt, tool definitions, tool handlers | The AI's personality and what it can do |
+| `main.py` | System prompt, tool definitions, tool handlers | The AI's personality and capabilities |
 | `static/index.html` | UI layout, colors, game state display | What the user sees |
-| `config.yaml` (optional) | TTS/STT/session settings | Voice tuning |
+| `config.yaml` | TTS/STT/session settings | Voice tuning (optional) |
 
-The core loop in every `main.py` looks like this:
+The core pattern in every `main.py`:
 
 ```python
 # 1. Define tools
@@ -107,7 +130,7 @@ tools = [
     ),
 ]
 
-# 2. Start session with a system prompt and tools
+# 2. Start a session
 config = gradbot.SessionConfig(
     voice_id=voice.voice_id,
     instructions="You are Marco, a friendly pizzaiolo...",
@@ -123,53 +146,32 @@ input_handle, output_handle = await gradbot.run(
 
 # 3. Handle tool calls in the output loop
 if msg.msg_type == "tool_call":
-    if msg.tool_call.tool_name == "add_to_order":
-        args = json.loads(msg.tool_call.args_json)
-        order.append(args["pizza"])
-        await msg.tool_call_handle.send(json.dumps({"result": "Added!"}))
+    args = json.loads(msg.tool_call.args_json)
+    order.append(args["pizza"])
+    await msg.tool_call_handle.send(json.dumps({"result": "Added!"}))
 ```
 
-### 4. Tips
+### Tips
 
-- **Start from `simple_chat`** for basic conversations, or **`fantasy_shop`** if you need tool calling and game state.
-- **Don't overthink the frontend** — the AI assistant can update the HTML for you. Describe the UI you want.
-- **Deferred tool calls** — if a tool takes time (API call, search), just delay the `tool_handle.send()`. The AI will keep talking naturally while waiting. See `hotel` and `web_search` for examples.
-- **Voice selection** — use `gradbot.flagship_voices()` to list all 14 voices, or `gradbot.flagship_voice("emma")` to pick one by name.
-- **Mid-conversation config changes** — call `input_handle.send_config(new_config)` to switch voice, language, or system prompt without restarting.
+- **Start from `simple_chat`** for basic conversations, or **`fantasy_shop`** for tool calling and game state.
+- **Deferred tool calls** — delay `tool_handle.send()` and the AI keeps talking while waiting. See `hotel` and `web_search`.
+- **Voice selection** — `gradbot.flagship_voices()` lists all 14 voices, `gradbot.flagship_voice("emma")` picks one by name.
+- **Mid-conversation changes** — `input_handle.send_config(new_config)` switches voice, language, or prompt without restarting.
 
-## Building from source
+## Integrations
 
-```bash
-cargo build              # debug build
-cargo build --release    # release build
-cargo clippy             # lint
-```
-
-## Python bindings
-
-See [gradbot_py/README.md](gradbot_py/README.md) for the full Python API reference.
-
-## Architecture
-
-**gradbot** (the core library) coordinates three services in a real-time multiplexing loop:
-
-- **STT** (Speech-to-Text) — streams microphone audio to Gradium ASR
-- **LLM** — sends transcriptions to an OpenAI-compatible API, handles tool calls
-- **TTS** (Text-to-Speech) — streams LLM responses to Gradium TTS, encodes audio
-
-The multiplexer handles interruptions (user speaks while AI is talking), turn tracking, and graceful audio fade-out.
-
-**Transport layer** supports two WebSocket protocols:
-- OpenAI Realtime API compatible (`ws-openai`)
-- Twilio Media Streams (`twilio`)
-
-**gradbot_server** is a standalone WebSocket server for hosted deployment. It runs the STT/LLM/TTS coordination loop remotely while Python clients connect over WS to stream audio and handle tool calls. See [Remote Mode](#remote-mode) below.
-
-**Browser audio** (`js_audio_processor/`) provides an AudioWorklet-based pipeline with Opus encoding/decoding, jitter buffering, and synchronized text display.
+| Category | Services |
+|----------|----------|
+| **STT** | [Gradium](https://gradium.ai) streaming ASR |
+| **TTS** | [Gradium](https://gradium.ai) streaming TTS (14 voices, 5 languages) |
+| **LLM** | Any OpenAI-compatible API — OpenAI, Groq, OpenRouter, Ollama, LM Studio, etc. |
+| **Telephony** | Twilio Media Streams |
+| **Tools** | MCP (Model Context Protocol), custom JSON Schema tools |
+| **Transport** | WebSocket (OpenAI Realtime API compatible, Twilio protocol) |
 
 ## Remote Mode
 
-For hosted deployment, `gradbot_server` runs the coordination loop on a server with its own LLM credentials, while clients connect over WebSocket. This lets you host the server centrally and only distribute a `GRADIUM_API_KEY` to clients for STT/TTS billing.
+For hosted deployment, `gradbot_server` runs the STT/LLM/TTS loop on a central server while clients connect over WebSocket. This keeps LLM credentials server-side.
 
 ### Running the server
 
@@ -189,13 +191,13 @@ llm_api_key = "$LLM_API_KEY"
 llm_model_name = "gpt-4o"
 
 [pinned]
-# Fields here override any client-provided values (e.g., lock down LLM config)
+# Fields listed here override client-provided values
 # llm_extra_config = '{"reasoning": {"effort": "none"}}'
 ```
 
 ### Connecting from Python
 
-Demos automatically use remote mode when `gradbot_server` is configured in `config.yaml`:
+Add to `config.yaml` — no code changes needed:
 
 ```yaml
 gradbot_server:
@@ -203,7 +205,7 @@ gradbot_server:
   api_key: "grd_..."
 ```
 
-No code changes needed — `gradbot.run()` transparently proxies over the WebSocket. You can also connect explicitly:
+Or connect explicitly:
 
 ```python
 input_handle, output_handle = await gradbot.run(
@@ -216,6 +218,68 @@ input_handle, output_handle = await gradbot.run(
 # Same handles, same API — tool calls, events, everything works identically
 ```
 
-### Config pinning
+## Configuration
 
-The server can pin config fields (e.g., LLM credentials) so clients can't override them. On connection, the server reports which fields were pinned (field names only, never values).
+Gradbot supports three layers of configuration, applied in order:
+
+| Layer | Format | Used by |
+|-------|--------|---------|
+| Environment variables | `GRADIUM_API_KEY`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` | All modes |
+| YAML config | `demos/config.yaml` + per-demo overrides | Python demos |
+| TOML config | `configs/gradbot.toml` | Rust server binary |
+
+See [`demos/config.example.yaml`](demos/config.example.yaml) for all available YAML options and [`gradbot_server/config.example.toml`](gradbot_server/config.example.toml) for server configuration.
+
+## Building from Source
+
+### Rust
+
+```bash
+cargo build              # debug
+cargo build --release    # release
+cargo clippy             # lint
+cargo test               # tests
+```
+
+### Python bindings
+
+```bash
+cd demos/simple_chat     # or any demo
+uv sync                  # builds via maturin automatically
+```
+
+To rebuild after Rust changes:
+
+```bash
+uv sync --reinstall-package gradbot
+```
+
+### Docker
+
+```bash
+docker build -t gradbot .
+docker run -e GRADIUM_API_KEY=grd_... -e LLM_API_KEY=sk-... -p 8000:8000 gradbot
+```
+
+## Project Structure
+
+```
+gradbot/
+├── gradbot_lib/            # Core Rust library (STT/LLM/TTS multiplexing)
+├── gradbot_py/             # Python bindings (PyO3 + maturin)
+│   └── gradbot/            # Python package (fastapi helpers, config, audio worklet)
+├── gradbot_server/         # Standalone WebSocket server (remote mode)
+├── src/                    # Server binary (OpenAI & Twilio WebSocket protocols)
+├── demos/                  # Example applications
+│   ├── app.py              # Combined app mounting all demos (for Docker)
+│   └── config.example.yaml # Configuration template
+└── configs/                # TOML configs for the Rust server binary
+```
+
+## Python API Reference
+
+See [gradbot_py/README.md](gradbot_py/README.md) for the full Python API documentation.
+
+## License
+
+Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
