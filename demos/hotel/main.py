@@ -95,6 +95,16 @@ AGENT_VOICES = {
     "Sydney": "Sydney",
 }
 
+# Language config: lang_code -> (voice_id, Lang enum, rewrite_rules)
+LANG_CONFIG = {
+    "en": (None, gradbot.Lang.En, "en"),               # None = use agent voice
+    "fr": (gradbot.flagship_voice("Elise").voice_id, gradbot.Lang.Fr, "fr"),
+    "es": (gradbot.flagship_voice("Valentina").voice_id, gradbot.Lang.Es, "es"),
+    "de": (gradbot.flagship_voice("Mia").voice_id, gradbot.Lang.De, "de"),
+}
+
+LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish", "de": "German"}
+
 # ---------------------------------------------------------------------------
 # Prompts
 # ---------------------------------------------------------------------------
@@ -134,6 +144,9 @@ def get_phase1_prompt(agent_name: str, filters: dict | None = None) -> str:
             prompt += "Acknowledge what they've filled in. Do NOT ask again for information they already provided.\n"
             if filters.get("destination"):
                 prompt += f"Since they already chose {filters['destination']}, you may call search_hotels right after your greeting (this counts as the caller choosing a destination).\n"
+
+        if filters.get("language") and filters["language"] != "English":
+            prompt += f"\nIMPORTANT: The caller selected {filters['language']}. You MUST speak and respond ONLY in {filters['language']}.\n"
 
     return prompt
 
@@ -248,17 +261,20 @@ async def websocket_chat(websocket: WebSocket):
     agent_name = "Sophie"
     padding_bonus = 0.0
     voice = None
+    lang = "en"
 
     def make_config(instructions: str) -> gradbot.SessionConfig:
+        lang_voice_id, lang_enum, rewrite = LANG_CONFIG.get(lang, LANG_CONFIG["en"])
+        vid = lang_voice_id or voice.voice_id  # Use lang voice if set, else agent voice
         return gradbot.SessionConfig(
-            voice_id=voice.voice_id,
+            voice_id=vid,
             instructions=instructions,
-            language=gradbot.Lang.En,
+            language=lang_enum,
             tools=tools,
             **merge_overrides(_OVERRIDES,
                 flush_duration_s=FLUSH_FOR_S,
                 padding_bonus=padding_bonus,
-                rewrite_rules="en",
+                rewrite_rules=rewrite,
             ),
         )
 
@@ -388,9 +404,12 @@ async def websocket_chat(websocket: WebSocket):
             await tool_handle.send_error(f"Unknown tool: {tool_name}")
 
     def on_start(msg: dict) -> gradbot.SessionConfig:
-        nonlocal agent_name, padding_bonus, voice
+        nonlocal agent_name, padding_bonus, voice, lang
         agent_name = msg.get("agent", "Sophie")
         padding_bonus = float(msg.get("padding_bonus", 0.0))
+        lang = msg.get("language", "en")
+        if lang not in LANG_CONFIG:
+            lang = "en"
         voice_key = AGENT_VOICES.get(agent_name, "Eva")
         voice = gradbot.flagship_voice(voice_key)
 
@@ -400,19 +419,23 @@ async def websocket_chat(websocket: WebSocket):
             "check_out": msg.get("check_out", ""),
             "travelers": msg.get("travelers", 2),
             "budget": msg.get("budget", 5000),
+            "language": LANG_NAMES.get(lang, "English"),
         }
-        logger.info("Starting hotel reservation chat with %s (voice: %s, filters: %s)",
-                     agent_name, voice_key, filters)
+        logger.info("Starting hotel reservation chat with %s (lang=%s, filters: %s)",
+                     agent_name, lang, filters)
+
+        lang_voice_id, lang_enum, rewrite = LANG_CONFIG[lang]
+        vid = lang_voice_id or voice.voice_id
 
         return gradbot.SessionConfig(
-            voice_id=voice.voice_id,
+            voice_id=vid,
             instructions=get_phase1_prompt(agent_name, filters),
-            language=gradbot.Lang.En,
+            language=lang_enum,
             tools=tools,
             **merge_overrides(_OVERRIDES,
                 flush_duration_s=FLUSH_FOR_S,
                 padding_bonus=padding_bonus,
-                rewrite_rules="en",
+                rewrite_rules=rewrite,
                 assistant_speaks_first=True,
             ),
         )
