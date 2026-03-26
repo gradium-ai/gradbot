@@ -166,7 +166,7 @@
 
         .stage-frame {
             border-radius: 16px;
-            background: url('static/bg.png') center / cover no-repeat, var(--stage);
+            background: url('./static/bg.png') center / cover no-repeat, var(--stage);
             min-height: 600px;
             overflow: hidden;
             display: flex;
@@ -787,10 +787,10 @@
         </main>
     </div>
 
-    <script src="static/js/opus-encoder.js"></script>
-    <script src="static/js/audio-processor.js"></script>
-    <script src="static/js/synced-audio-player.js"></script>
-    <script>fetch("api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
+    <script src="./static/js/opus-encoder.js"></script>
+    <script src="./static/js/audio-processor.js"></script>
+    <script src="./static/js/synced-audio-player.js"></script>
+    <script>fetch("./api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
 
     <script>
         let ws = null;
@@ -1051,7 +1051,7 @@
                 setStatus('Connecting...', 'connecting');
 
                 player = new SyncedAudioPlayer({
-                    basePath: 'static/js',
+                    basePath: './static/js',
                     sampleRate: 24000,
                     pcmOutput: window.__pcmOutput || false,
                     echoCancellation: echoCancellationToggle.checked,
@@ -1146,7 +1146,7 @@
         startBtn.addEventListener('click', startCall);
         stopBtn.addEventListener('click', endCall);
 
-        AudioProcessor.preloadDecoder('static/js');
+        AudioProcessor.preloadDecoder('./static/js');
     </script>
 </body>
 </html>
