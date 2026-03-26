@@ -1,8 +1,8 @@
 """
 Hotel Reservation Demo - Voice AI hotel booking agent
 
-A voice agent that helps callers search for and book hotels in Paris, Bali, and Dubai.
-Searches are deferred (10-20s random delay) to demonstrate chit-chat while waiting.
+A voice agent that helps callers search for and book hotels anywhere in the world.
+Uses Linkup web search to find real hotels and room information.
 
 Run with: uvicorn main:app --reload
 """
@@ -13,10 +13,11 @@ import logging
 import os
 import random
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket
+from linkup import LinkupClient
 
 import gradbot
 from gradbot.fastapi import websocket_chat_handler, setup_demo_routes
@@ -35,26 +36,42 @@ _CLIENT_CONFIG = client_config(_YAML_CFG)
 
 logger = logging.getLogger(__name__)
 
+linkup_client = LinkupClient(
+    api_key=_YAML_CFG.get("linkup", {}).get("api_key") or os.environ.get("LINKUP_API_KEY", ""),
+)
 
-def compact_phone(phone: str) -> str:
-    """Strip spaces and dashes from phone number so TTS reads it as a block."""
-    return phone.replace(" ", "").replace("-", "")
 
-
-# Load hotel data
-HOTELS_PATH = Path(__file__).parent / "hotels.json"
-with open(HOTELS_PATH) as f:
-    HOTEL_DATA = json.load(f)
+async def do_search(query: str) -> dict:
+    """Run Linkup search in a thread pool."""
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: linkup_client.search(
+                query=query,
+                depth="standard",
+                output_type="sourcedAnswer",
+            ),
+        )
+        sources = [
+            {"title": s.name, "href": s.url, "body": s.snippet}
+            for s in (result.sources or [])
+        ]
+        logger.info("Linkup search '%s': %d sources", query, len(sources))
+        return {
+            "answer": result.answer or "",
+            "sources": sources,
+        }
+    except Exception as e:
+        logger.error("Linkup search '%s' failed: %s", query, e)
+        return {"answer": "", "sources": []}
 
 
 @dataclass
 class BookingState:
     """Tracks the current booking session."""
-    current_city: str | None = None
-    selected_hotel_id: str | None = None
-    check_in: str | None = None
-    check_out: str | None = None
-    guests: int = 1
+    current_destination: str | None = None
+    selected_hotel: str | None = None
     booked: bool = False
 
 
@@ -64,26 +81,8 @@ AGENT_VOICES = {
 }
 
 # ---------------------------------------------------------------------------
-# Shared prompt fragments
+# Prompts
 # ---------------------------------------------------------------------------
-
-_CITY_KEYS = list(HOTEL_DATA["cities"].keys())
-_AVAILABLE_CITIES = ", ".join(
-    city_data["name"] for city_data in HOTEL_DATA["cities"].values()
-)
-
-# Build city knowledge block once
-_CITY_KNOWLEDGE = ""
-for _key, _city in HOTEL_DATA["cities"].items():
-    _CITY_KNOWLEDGE += f"\n--- {_city['name']} ({_city['country']}) ---\n"
-    _CITY_KNOWLEDGE += f"Description: {_city['description']}\n"
-    _CITY_KNOWLEDGE += "Current events:\n"
-    for _ev in _city.get("events", []):
-        _CITY_KNOWLEDGE += f"  - {_ev}\n"
-    _CITY_KNOWLEDGE += "Top attractions:\n"
-    for _att in _city.get("attractions", []):
-        _CITY_KNOWLEDGE += f"  - {_att}\n"
-
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _BASE_PROMPT_TEMPLATE = (_PROMPTS_DIR / "base.txt").read_text()
@@ -98,84 +97,62 @@ def _base_prompt(agent_name: str) -> str:
 
 
 def get_phase1_prompt(agent_name: str) -> str:
-    """Phase 1: City selection — caller hasn't picked a city yet, or we're searching."""
-    return _base_prompt(agent_name) + _PHASE1_PROMPT_TEMPLATE.format(
-        available_cities=_AVAILABLE_CITIES,
-        city_keys=', '.join(_CITY_KEYS),
-        city_knowledge=_CITY_KNOWLEDGE,
-    )
+    """Phase 1: Destination selection."""
+    return _base_prompt(agent_name) + _PHASE1_PROMPT_TEMPLATE
 
 
-def get_phase2_prompt(agent_name: str, city_name: str, hotel_summaries: list[dict]) -> str:
-    """Phase 2: Hotel selection — hotels are loaded, caller needs to pick one."""
-    hotel_list = ""
-    for h in hotel_summaries:
-        hotel_list += f"\n- {h['name']} (ID: {h['id']}, {h['stars']}\u2605) \u2014 {h['description']}. Price range: {h['price_range']}. Phone: {h['phone']}"
-
-    hotel_names = ", ".join(h["name"] for h in hotel_summaries)
-    hotel_ids = ", ".join(h["id"] for h in hotel_summaries)
-
+def get_phase2_prompt(agent_name: str, destination: str, search_answer: str) -> str:
+    """Phase 2: Hotel selection from search results."""
     return _base_prompt(agent_name) + _PHASE2_PROMPT_TEMPLATE.format(
-        city_name=city_name,
-        hotel_list=hotel_list,
-        hotel_names=hotel_names,
-        hotel_ids=hotel_ids,
-        available_cities=_AVAILABLE_CITIES,
-        city_keys=', '.join(_CITY_KEYS),
-        city_knowledge=_CITY_KNOWLEDGE,
+        destination=destination,
+        search_results=search_answer,
     )
 
 
-def get_phase3_prompt(agent_name: str, hotel_name: str, room_summaries: list[dict], hotel_phone: str) -> str:
-    """Phase 3: Room selection & booking — rooms are loaded, caller needs to pick one."""
-    room_list = ""
-    for r in room_summaries:
-        room_list += f"\n- {r['type']}: ${r['price_per_night']}/night \u2014 {r['description']} (max {r['max_guests']} guests)"
-
+def get_phase3_prompt(agent_name: str, hotel_name: str, search_answer: str) -> str:
+    """Phase 3: Room selection & booking from search results."""
     return _base_prompt(agent_name) + _PHASE3_PROMPT_TEMPLATE.format(
         hotel_name=hotel_name,
-        hotel_phone=hotel_phone,
-        room_list=room_list,
-        available_cities=_AVAILABLE_CITIES,
-        city_keys=', '.join(_CITY_KEYS),
+        search_results=search_answer,
     )
 
 
 def build_tools() -> list[gradbot.ToolDef]:
-    city_keys = ", ".join(HOTEL_DATA["cities"].keys())
-    all_hotel_ids = []
-    for city_data in HOTEL_DATA["cities"].values():
-        for hotel in city_data["hotels"]:
-            all_hotel_ids.append(hotel["id"])
-    hotel_ids_str = ", ".join(all_hotel_ids)
-
     return [
         gradbot.ToolDef(
             name="search_hotels",
-            description=f"Search for available hotels in a city. Takes some time to query the system. Keep chatting with the caller about the destination while waiting for results! Available cities: {city_keys}",
+            description="Search the web for available hotels in a destination. Takes some time to search. Keep chatting with the caller about the destination while waiting for results! IMPORTANT: Always include the caller's preferences (budget, style, etc.) in the preferences field so the search is targeted.",
             parameters_json=json.dumps({
                 "type": "object",
                 "properties": {
-                    "city": {
+                    "destination": {
                         "type": "string",
-                        "description": f"The city to search in. One of: {city_keys}"
+                        "description": "The city or destination to search hotels in (e.g. 'Paris', 'Bali', 'Tokyo')"
+                    },
+                    "preferences": {
+                        "type": "string",
+                        "description": "Caller's requirements: budget range, style, amenities, etc. (e.g. 'under 100 euros per night, boutique style' or 'luxury 5-star with spa')"
                     }
                 },
-                "required": ["city"]
+                "required": ["destination"]
             }),
         ),
         gradbot.ToolDef(
             name="get_hotel_details",
-            description=f"Get detailed room information and prices for a specific hotel. You MUST call this before you can talk about rooms or prices. Takes some time - keep chatting with the caller! Known hotel IDs: {hotel_ids_str}",
+            description="Search the web for detailed room information and prices for a specific hotel. You MUST call this before you can talk about specific rooms or prices. Takes some time - keep chatting with the caller!",
             parameters_json=json.dumps({
                 "type": "object",
                 "properties": {
-                    "hotel_id": {
+                    "hotel_name": {
                         "type": "string",
-                        "description": f"The hotel ID to look up. One of: {hotel_ids_str}"
+                        "description": "The full name of the hotel to look up"
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": "The city or destination the hotel is in"
                     }
                 },
-                "required": ["hotel_id"]
+                "required": ["hotel_name"]
             }),
         ),
         gradbot.ToolDef(
@@ -184,13 +161,13 @@ def build_tools() -> list[gradbot.ToolDef]:
             parameters_json=json.dumps({
                 "type": "object",
                 "properties": {
-                    "hotel_id": {
+                    "hotel_name": {
                         "type": "string",
-                        "description": "The hotel ID"
+                        "description": "The hotel name"
                     },
                     "room_type": {
                         "type": "string",
-                        "description": "The room type (e.g. 'Classic Room', 'Deluxe Suite')"
+                        "description": "The room type (e.g. 'Deluxe Room', 'Suite')"
                     },
                     "check_in": {
                         "type": "string",
@@ -209,7 +186,7 @@ def build_tools() -> list[gradbot.ToolDef]:
                         "description": "Name for the reservation"
                     }
                 },
-                "required": ["hotel_id", "room_type", "check_in", "check_out", "guests", "guest_name"]
+                "required": ["hotel_name", "room_type", "check_in", "check_out", "guests", "guest_name"]
             }),
         ),
     ]
@@ -248,191 +225,92 @@ async def websocket_chat(websocket: WebSocket):
             ),
         )
 
-    async def handle_search_hotels(city_key: str, tool_handle, input_handle, websocket: WebSocket):
-        """Search hotels with a realistic delay."""
-        city_names = {k: v["name"] for k, v in HOTEL_DATA["cities"].items()}
-        city_name = city_names.get(city_key, city_key)
-
+    async def handle_search_hotels(destination: str, preferences: str | None, tool_handle, input_handle, websocket: WebSocket):
+        """Search hotels via Linkup web search."""
         await websocket.send_json({
             "type": "tool_started",
             "tool": "search_hotels",
-            "message": f"Searching hotels in {city_name}...",
+            "message": f"Searching hotels in {destination}...",
         })
 
-        delay = random.uniform(8, 15)
-        logger.info("Searching hotels in %s (delay: %.1fs)", city_key, delay)
-        await asyncio.sleep(delay)
+        if preferences:
+            query = f"hotels in {destination} {preferences} with star ratings, prices per night, and brief descriptions"
+        else:
+            query = f"best hotels in {destination} with star ratings, price ranges, amenities, and brief descriptions"
+        logger.info("Searching hotels in %s via Linkup (prefs: %s)", destination, preferences)
+        result = await do_search(query)
 
-        city_data = HOTEL_DATA["cities"].get(city_key)
-        if not city_data:
-            available = ", ".join(HOTEL_DATA["cities"].keys())
-            await tool_handle.send(json.dumps({
-                "success": False,
-                "message": f"City '{city_key}' not found. Available cities: {available}.",
-            }))
-            return
+        state.current_destination = destination
 
-        state.current_city = city_key
-
-        hotel_summaries = []
-        hotels_for_frontend = []
-        for hotel in city_data["hotels"]:
-            price_range = [r["price_per_night"] for r in hotel["rooms"]]
-            summary = {
-                "id": hotel["id"],
-                "name": hotel["name"],
-                "stars": hotel["stars"],
-                "description": hotel["description"],
-                "phone": compact_phone(hotel.get("phone", "")),
-                "price_range": f"${min(price_range)} - ${max(price_range)} per night",
-                "amenities": hotel["amenities"],
-            }
-            hotel_summaries.append(summary)
-            hotels_for_frontend.append({
-                **summary,
-                "phone": hotel.get("phone", ""),
-                "image_url": hotel["image_url"],
-            })
-
+        # Send sources to frontend
         await websocket.send_json({
-            "type": "hotel_results",
-            "city": city_data["name"],
-            "city_image": city_data["image_url"],
-            "hotels": hotels_for_frontend,
+            "type": "search_results",
+            "query": f"Hotels in {destination}",
+            "results": result["sources"],
         })
 
-        # Swap to phase 2 prompt
-        phase2 = get_phase2_prompt(agent_name, city_data["name"], hotel_summaries)
+        # Swap to phase 2 prompt with search results
+        phase2 = get_phase2_prompt(agent_name, destination, result["answer"])
         await input_handle.send_config(make_config(phase2))
-        logger.info("Switched to phase 2 prompt for %s", city_data["name"])
+        logger.info("Switched to phase 2 prompt for %s", destination)
 
         await tool_handle.send(json.dumps({
             "success": True,
-            "city": city_data["name"],
-            "country": city_data["country"],
-            "hotels": hotel_summaries,
-            "message": f"Hotels for {city_data['name']} are now loaded. Present the options highlighting star ratings and key features. Ask which one interests them!"
-                f"\n\nREMINDER: You do NOT have room details yet. The INSTANT the caller picks a hotel, call get_hotel_details. Do NOT make up rooms or prices.",
+            "destination": destination,
+            "answer": result["answer"],
+            "sources": result["sources"],
+            "message": f"Hotel search results for {destination} are ready. Present the top hotel options to the caller based on the search results. Highlight star ratings, price ranges, and key features. Ask which one interests them!"
+                f"\n\nREMINDER: You do NOT have specific room details yet. The INSTANT the caller picks a hotel, call get_hotel_details. Do NOT make up specific room types or exact prices.",
         }))
 
-        logger.info("Search complete for %s: %d hotels", city_key, len(hotel_summaries))
+        logger.info("Search complete for %s: %d sources", destination, len(result["sources"]))
 
-    async def handle_hotel_details(hotel_id: str, tool_handle, input_handle, websocket: WebSocket):
-        """Get hotel details with a realistic delay."""
-        hotel_name_preview = hotel_id
-        for city_data in HOTEL_DATA["cities"].values():
-            for h in city_data["hotels"]:
-                if h["id"] == hotel_id:
-                    hotel_name_preview = h["name"]
-                    break
-
+    async def handle_hotel_details(hotel_name: str, destination: str | None, tool_handle, input_handle, websocket: WebSocket):
+        """Get hotel details via Linkup web search."""
         await websocket.send_json({
             "type": "tool_started",
             "tool": "get_hotel_details",
-            "message": f"Loading rooms for {hotel_name_preview}...",
+            "message": f"Loading details for {hotel_name}...",
         })
 
-        delay = random.uniform(4, 8)
-        logger.info("Loading details for %s (delay: %.1fs)", hotel_id, delay)
-        await asyncio.sleep(delay)
+        dest = destination or state.current_destination or ""
+        query = f"{hotel_name} {dest} hotel room types, prices per night, room descriptions, and amenities"
+        logger.info("Loading details for %s via Linkup", hotel_name)
+        result = await do_search(query)
 
-        hotel = None
-        for city_data in HOTEL_DATA["cities"].values():
-            for h in city_data["hotels"]:
-                if h["id"] == hotel_id:
-                    hotel = h
-                    break
-            if hotel:
-                break
+        state.selected_hotel = hotel_name
 
-        if not hotel:
-            await tool_handle.send(json.dumps({
-                "success": False,
-                "message": f"Hotel '{hotel_id}' not found.",
-            }))
-            return
-
-        state.selected_hotel_id = hotel_id
-
-        room_summaries = []
-        rooms_for_frontend = []
-        for room in hotel["rooms"]:
-            room_summaries.append({
-                "type": room["type"],
-                "price_per_night": room["price_per_night"],
-                "description": room["description"],
-                "max_guests": room["max_guests"],
-            })
-            rooms_for_frontend.append({
-                **room,
-            })
-
+        # Send sources to frontend
         await websocket.send_json({
-            "type": "hotel_details",
-            "hotel": {
-                "id": hotel["id"],
-                "name": hotel["name"],
-                "stars": hotel["stars"],
-                "phone": hotel.get("phone", ""),
-                "description": hotel["description"],
-                "image_url": hotel["image_url"],
-                "amenities": hotel["amenities"],
-                "rooms": rooms_for_frontend,
-            },
+            "type": "search_results",
+            "query": f"Rooms at {hotel_name}",
+            "results": result["sources"],
         })
 
-        # Swap to phase 3 prompt
-        phone = compact_phone(hotel.get("phone", ""))
-        phase3 = get_phase3_prompt(agent_name, hotel["name"], room_summaries, phone)
+        # Swap to phase 3 prompt with search results
+        phase3 = get_phase3_prompt(agent_name, hotel_name, result["answer"])
         await input_handle.send_config(make_config(phase3))
-        logger.info("Switched to phase 3 prompt for %s", hotel["name"])
+        logger.info("Switched to phase 3 prompt for %s", hotel_name)
 
         await tool_handle.send(json.dumps({
             "success": True,
-            "hotel_name": hotel["name"],
-            "stars": hotel["stars"],
-            "phone": phone,
-            "amenities": hotel["amenities"],
-            "rooms": room_summaries,
-            "message": f"Room details for {hotel['name']} are ready. Present each room type with its price per night. Help them choose!",
+            "hotel_name": hotel_name,
+            "answer": result["answer"],
+            "sources": result["sources"],
+            "message": f"Room details for {hotel_name} are ready. Present the room options with prices from the search results. Help the caller choose!",
         }))
 
-        logger.info("Details loaded for %s", hotel_id)
+        logger.info("Details loaded for %s", hotel_name)
 
     async def handle_book_room(args: dict, tool_handle, websocket: WebSocket):
-        """Process a booking."""
-        hotel_id = args["hotel_id"]
-        room_type = args["room_type"]
-
-        hotel = None
-        room = None
-        for city_data in HOTEL_DATA["cities"].values():
-            for h in city_data["hotels"]:
-                if h["id"] == hotel_id:
-                    hotel = h
-                    for r in h["rooms"]:
-                        if r["type"].lower() == room_type.lower():
-                            room = r
-                            break
-                    break
-            if hotel:
-                break
-
-        if not hotel or not room:
-            await tool_handle.send(json.dumps({
-                "success": False,
-                "message": "Could not find the specified hotel or room type.",
-            }))
-            return
-
+        """Process a simulated booking."""
         state.booked = True
         confirmation = f"{random.choice('ABCDEFGHJKLMNPQRSTUVWXYZ')}{random.randint(1000, 9999)}"
 
         booking_info = {
             "confirmation_number": confirmation,
-            "hotel": hotel["name"],
-            "room": room["type"],
-            "price_per_night": room["price_per_night"],
+            "hotel": args["hotel_name"],
+            "room": args["room_type"],
             "check_in": args["check_in"],
             "check_out": args["check_out"],
             "guests": args["guests"],
@@ -458,12 +336,14 @@ async def websocket_chat(websocket: WebSocket):
         logger.info("Tool call: %s - %s", tool_name, args)
 
         if tool_name == "search_hotels":
-            city = args.get("city", "").lower().strip()
-            await handle_search_hotels(city, tool_handle, input_handle, websocket)
+            destination = args.get("destination", "").strip()
+            preferences = args.get("preferences")
+            await handle_search_hotels(destination, preferences, tool_handle, input_handle, websocket)
 
         elif tool_name == "get_hotel_details":
-            hotel_id = args.get("hotel_id", "")
-            await handle_hotel_details(hotel_id, tool_handle, input_handle, websocket)
+            hotel_name = args.get("hotel_name", "")
+            destination = args.get("destination")
+            await handle_hotel_details(hotel_name, destination, tool_handle, input_handle, websocket)
 
         elif tool_name == "book_room":
             await handle_book_room(args, tool_handle, websocket)

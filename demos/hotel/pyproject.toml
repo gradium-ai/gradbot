@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "gradbot",
     "pyyaml>=6.0",
+    "linkup-sdk",
 ]
 
 [tool.uv.sources]

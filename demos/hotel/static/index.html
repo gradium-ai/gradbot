@@ -176,149 +176,77 @@
             to { transform: rotate(360deg); }
         }
 
-        /* City header */
-        .city-header {
-            position: relative;
-            border-radius: 10px;
-            overflow: hidden;
-            margin-bottom: 1rem;
-            height: 120px;
+        /* Search results */
+        .query-header {
+            margin-bottom: 0.75rem;
+            padding: 0.6rem 0.75rem;
+            background: rgba(100, 181, 246, 0.08);
+            border-radius: 8px;
         }
 
-        .city-header img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
+        .query-label {
+            font-size: 0.65rem;
+            color: #7b8fa8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.2rem;
         }
 
-        .city-header .city-overlay {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 0.75rem 1rem;
-            background: linear-gradient(transparent, rgba(0,0,0,0.8));
+        .query-text {
+            font-size: 0.9rem;
+            color: #e1bee7;
+            font-weight: 600;
         }
 
-        .city-header .city-name {
-            font-size: 1.3rem;
-            font-weight: bold;
-        }
-
-        /* Hotel cards */
-        .hotel-card {
+        .result-card {
             background: rgba(255, 255, 255, 0.04);
             border-radius: 10px;
-            overflow: hidden;
-            margin-bottom: 0.75rem;
+            padding: 0.75rem;
+            margin-bottom: 0.6rem;
             border: 1px solid rgba(100, 181, 246, 0.1);
             transition: border-color 0.2s;
         }
 
-        .hotel-card:hover {
+        .result-card:hover {
             border-color: rgba(100, 181, 246, 0.3);
         }
 
-        .hotel-card img {
-            width: 100%;
-            height: 140px;
-            object-fit: cover;
-        }
-
-        .hotel-card-body {
-            padding: 0.75rem;
-        }
-
-        .hotel-card-name {
-            font-size: 1rem;
+        .result-card-title {
+            font-size: 0.9rem;
             font-weight: bold;
-            color: #e1bee7;
             margin-bottom: 0.2rem;
         }
 
-        .hotel-card-stars {
-            color: #ffd54f;
-            font-size: 0.8rem;
-            margin-bottom: 0.3rem;
+        .result-card-title a {
+            color: #e1bee7;
+            text-decoration: none;
         }
 
-        .hotel-card-desc {
-            font-size: 0.8rem;
-            color: #9ca3af;
-            line-height: 1.4;
-            margin-bottom: 0.4rem;
+        .result-card-title a:hover {
+            text-decoration: underline;
         }
 
-        .hotel-card-price {
-            font-size: 0.85rem;
+        .result-card-url {
+            font-size: 0.7rem;
             color: #64b5f6;
-            font-weight: 600;
-        }
-
-        .hotel-card-phone {
-            font-size: 0.8rem;
-            color: #90caf9;
-            margin-top: 0.3rem;
-        }
-
-        .hotel-card-amenities {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.3rem;
-            margin-top: 0.4rem;
-        }
-
-        .amenity-tag {
-            font-size: 0.65rem;
-            padding: 0.15rem 0.4rem;
-            background: rgba(100, 181, 246, 0.1);
-            border-radius: 4px;
-            color: #90caf9;
-        }
-
-        /* Room cards */
-        .room-card {
-            background: rgba(255, 255, 255, 0.04);
-            border-radius: 10px;
-            overflow: hidden;
-            margin-bottom: 0.75rem;
-            border: 1px solid rgba(225, 190, 231, 0.15);
-        }
-
-        .room-card img {
-            width: 100%;
-            height: 120px;
-            object-fit: cover;
-        }
-
-        .room-card-body {
-            padding: 0.75rem;
-        }
-
-        .room-card-type {
-            font-size: 0.95rem;
-            font-weight: bold;
-            color: #e1bee7;
-            margin-bottom: 0.2rem;
-        }
-
-        .room-card-price {
-            font-size: 1.1rem;
-            color: #4ade80;
-            font-weight: bold;
             margin-bottom: 0.3rem;
         }
 
-        .room-card-desc {
+        .result-card-body {
             font-size: 0.8rem;
             color: #9ca3af;
             line-height: 1.4;
         }
 
-        .room-card-guests {
-            font-size: 0.75rem;
-            color: #7b8fa8;
-            margin-top: 0.3rem;
+        .search-empty {
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #4a5568;
+            font-style: italic;
+            text-align: center;
+            padding: 2rem;
         }
 
         /* Booking confirmed */
@@ -687,79 +615,33 @@
             `;
         }
 
-        function showHotelResults(data) {
-            let html = '';
-
-            // City header
-            if (data.city_image) {
-                html += `
-                    <div class="city-header">
-                        <img src="${esc(data.city_image)}" alt="${esc(data.city)}">
-                        <div class="city-overlay">
-                            <div class="city-name">${esc(data.city)}</div>
-                        </div>
-                    </div>
-                `;
-            }
-
-            // Hotel cards
-            data.hotels.forEach(hotel => {
-                const stars = '&#9733;'.repeat(hotel.stars);
-                const phoneHtml = hotel.phone ? `<div class="hotel-card-phone">Tel: ${esc(hotel.phone)}</div>` : '';
-                html += `
-                    <div class="hotel-card">
-                        <img src="${esc(hotel.image_url)}" alt="${esc(hotel.name)}">
-                        <div class="hotel-card-body">
-                            <div class="hotel-card-name">${esc(hotel.name)}</div>
-                            <div class="hotel-card-stars">${stars}</div>
-                            <div class="hotel-card-desc">${esc(hotel.description)}</div>
-                            <div class="hotel-card-price">${esc(hotel.price_range)}</div>
-                            ${phoneHtml}
-                            <div class="hotel-card-amenities">
-                                ${hotel.amenities.map(a => `<span class="amenity-tag">${esc(a)}</span>`).join('')}
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-
-            hotelContent.innerHTML = html;
+        function getDomain(url) {
+            try { return new URL(url).hostname; } catch { return url; }
         }
 
-        function showHotelDetails(data) {
-            const hotel = data.hotel;
-            const stars = '&#9733;'.repeat(hotel.stars);
-            const phoneHtml = hotel.phone ? `<div class="hotel-card-phone">Tel: ${esc(hotel.phone)}</div>` : '';
+        function showSearchResults(data) {
+            let html = '';
 
-            let html = `
-                <div class="hotel-card" style="margin-bottom: 1rem;">
-                    <img src="${esc(hotel.image_url)}" alt="${esc(hotel.name)}">
-                    <div class="hotel-card-body">
-                        <div class="hotel-card-name">${esc(hotel.name)}</div>
-                        <div class="hotel-card-stars">${stars}</div>
-                        <div class="hotel-card-desc">${esc(hotel.description)}</div>
-                        ${phoneHtml}
-                        <div class="hotel-card-amenities">
-                            ${hotel.amenities.map(a => `<span class="amenity-tag">${esc(a)}</span>`).join('')}
-                        </div>
-                    </div>
+            html += `
+                <div class="query-header">
+                    <div class="query-label">Search query</div>
+                    <div class="query-text">${esc(data.query)}</div>
                 </div>
             `;
 
-            // Room cards
-            hotel.rooms.forEach(room => {
-                html += `
-                    <div class="room-card">
-                        <img src="${esc(room.image_url)}" alt="${esc(room.type)}">
-                        <div class="room-card-body">
-                            <div class="room-card-type">${esc(room.type)}</div>
-                            <div class="room-card-price">$${room.price_per_night}/night</div>
-                            <div class="room-card-desc">${esc(room.description)}</div>
-                            <div class="room-card-guests">Up to ${room.max_guests} guests</div>
+            if (!data.results || data.results.length === 0) {
+                html += `<div class="search-empty">No results found</div>`;
+            } else {
+                data.results.forEach(result => {
+                    html += `
+                        <div class="result-card">
+                            <div class="result-card-title"><a href="${esc(result.href)}" target="_blank" rel="noopener">${esc(result.title)}</a></div>
+                            <div class="result-card-url">${esc(getDomain(result.href))}</div>
+                            <div class="result-card-body">${esc(result.body)}</div>
                         </div>
-                    </div>
-                `;
-            });
+                    `;
+                });
+            }
 
             hotelContent.innerHTML = html;
         }
@@ -775,7 +657,6 @@
                     <div class="booking-detail"><span class="label">Check-out</span><span class="value">${esc(b.check_out)}</span></div>
                     <div class="booking-detail"><span class="label">Guests</span><span class="value">${b.guests}</span></div>
                     <div class="booking-detail"><span class="label">Guest Name</span><span class="value">${esc(b.guest_name)}</span></div>
-                    <div class="booking-detail"><span class="label">Rate</span><span class="value">$${b.price_per_night}/night</span></div>
                     <div class="confirmation-number">${esc(b.confirmation_number)}</div>
                 </div>
             `;
@@ -861,13 +742,9 @@
                     addSystemMessage(msg.message, true);
                     showSearching(msg.message);
                     break;
-                case 'hotel_results':
+                case 'search_results':
                     clearLoadingMessages();
-                    showHotelResults(msg);
-                    break;
-                case 'hotel_details':
-                    clearLoadingMessages();
-                    showHotelDetails(msg);
+                    showSearchResults(msg);
                     break;
                 case 'booking_confirmed':
                     clearLoadingMessages();
