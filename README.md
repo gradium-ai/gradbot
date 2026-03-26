@@ -20,22 +20,22 @@
 
 Gradbot gives you the event loop for voice agents. You write the logic, it handles the rest.
 
-At its core is a multiplexing engine written in Rust that coordinates three streams in real time — **speech-to-text**, **LLM inference**, and **text-to-speech** — while managing conversational state, turn-taking, and interruptions. It works with any **OpenAI-compatible LLM** (GPT-4o, Claude, Groq, Ollama, LM Studio, etc.) and uses **[Gradium](https://gradium.ai)** for streaming STT/TTS across 14 voices and 5 languages.
+At its core is a multiplexing engine written in Rust that coordinates three streams in real time: **speech-to-text**, **LLM inference**, and **text-to-speech** while managing conversational state, turn-taking, and interruptions. It works with any **OpenAI-compatible LLM** (GPT-4o, Claude, Groq, Ollama, LM Studio, etc.) and uses **[Gradium](https://gradium.ai)** for streaming STT/TTS across multiple voices from the Gradium voice catalog and 5 languages.
 
 Whether you're building a [dungeon crawler game](demos/voice_text_adventure/) or a [travel booking assistant](demos/hotel/), Gradbot lets you go from idea to working voice experience in around 60 lines of code.
 
 ## Features
 
-- **STT, LLM, and TTS coordinated in one loop** — Rust multiplexer streams all three concurrently
-- **Turn-taking, fillers, and barge-in handled automatically** — graceful audio fade-out on interruption
-- **Bi-directional audio streaming** — with VAD and silence detection out of the box
-- **Async tool calling** — the AI keeps talking naturally while slow tools execute in the background; lost calls are tracked and recovered
-- **Live transcription and tool calls in the same cycle** — define tools as JSON Schema, handle results sync or async
-- **14 voices, 5 languages** — English, French, German, Spanish, Portuguese; unlimited voices via cloning
-- **Mid-session reconfiguration** — change voice, language, prompt, or tools without restarting
-- **MCP integration** — connect any MCP server for instant tool access
-- **Remote mode** — deploy `gradbot_server` centrally; clients connect over WebSocket with the same API
-- **Config pinning** — lock down LLM credentials server-side while clients control voice and prompt
+- **STT, LLM, and TTS coordinated in one loop**: Rust multiplexer streams all three concurrently
+- **Turn-taking, fillers, and barge-in handled automatically**: graceful audio fade-out on interruption
+- **Bi-directional audio streaming**: with VAD and silence detection out of the box
+- **Async tool calling**: the AI keeps talking naturally while slow tools execute in the background; lost calls are tracked and recovered
+- **Live transcription and tool calls in the same cycle**: define tools as JSON Schema, handle results sync or async
+- **14 voices, 5 languages**: English, French, German, Spanish, Portuguese; unlimited voices via cloning
+- **Mid-session reconfiguration**: change voice, language, prompt, or tools without restarting
+- **MCP integration**: connect any MCP server for instant tool access
+- **Remote mode**: deploy `gradbot_server` centrally; clients connect over WebSocket with the same API
+- **Config pinning**: lock down LLM credentials server-side while clients control voice and prompt
 
 ## Quick Start
 
@@ -71,7 +71,7 @@ uv run uvicorn main:app --reload
 
 ## Architecture
 
-The multiplexer runs a state machine (**Listening** → **Flushing** → **Processing**) that handles concurrent audio streams, interruption detection, and turn management. Gradbot flushes trailing audio by pushing silence into the STT buffer so the LLM gets your complete utterance before replying — no extra latency from voice activity detection delays. If the user goes quiet, the LLM is prompted to re-engage naturally instead of creating dead air.
+The multiplexer runs a state machine (**Listening** → **Flushing** → **Processing**) that handles concurrent audio streams, interruption detection, and turn management. Gradbot flushes trailing audio by pushing silence into the STT buffer so the LLM gets your complete utterance before replying. There is no extra latency from voice activity detection delays. If the user goes quiet, the LLM is prompted to re-engage naturally instead of creating dead air.
 
 ## Who Should Use Gradbot
 
@@ -105,7 +105,7 @@ Every demo is a standalone FastAPI + WebSocket app. Pick one, `uv sync`, and run
 
 ## Building a New Demo
 
-Copy an existing demo and modify it — works great with AI coding assistants:
+Copy an existing demo and modify it yourself, or ask your AI coding assistants:
 
 ```bash
 cp -r demos/simple_chat demos/my_demo
