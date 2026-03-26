@@ -1,562 +1,787 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <link rel="icon" href="static/favicon.ico">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wanderlust Travel - Hotel Reservations</title>
+    <title>Gradbot Booking</title>
     <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
+        :root {
+            color-scheme: light;
+            --page-bg: #f7f5f2;
+            --surface: #fbfaf8;
+            --border: #b9b7b2;
+            --border-strong: #8f8a82;
+            --text: #161514;
+            --muted: #66615a;
+            --stage: #050505;
+            --track: #d7d420;
+            --chip: #efeeeb;
         }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #0c1220 0%, #1a2744 50%, #0c1220 100%);
             min-height: 100vh;
-            color: #e8edf5;
+            background: var(--page-bg);
+            color: var(--text);
+            font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
         }
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 1.5rem;
-        }
+        button, input, select { font: inherit; }
+        button { cursor: pointer; }
 
-        h1 {
-            text-align: center;
-            margin-bottom: 0.25rem;
-            font-size: 2.2rem;
-            background: linear-gradient(90deg, #64b5f6, #e1bee7, #f48fb1);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
+        /* ── Page shell ── */
+        .page { max-width: 1320px; margin: 0 auto; padding: 0 28px 28px; }
 
-        .subtitle {
-            text-align: center;
-            color: #7b8fa8;
-            margin-bottom: 1.5rem;
-            font-size: 0.95rem;
-        }
-
-        /* Agent card */
-        .agent-card {
-            background: rgba(255, 255, 255, 0.06);
-            border-radius: 16px;
-            padding: 1rem 1.25rem;
-            margin-bottom: 1.25rem;
-            border: 1px solid rgba(100, 181, 246, 0.2);
+        header {
             display: flex;
             align-items: center;
-            gap: 1rem;
+            gap: 24px;
+            padding: 16px 0;
         }
 
-        .agent-avatar {
-            width: 50px;
-            height: 50px;
+        .brand { display: flex; align-items: center; gap: 10px; }
+        .brand-title { font-size: 20px; font-weight: 700; color: var(--text); }
+
+        .nav { display: flex; gap: 28px; margin-left: auto; }
+        .nav a {
+            text-decoration: none;
+            color: var(--muted);
+            font-size: 15px;
+            font-weight: 500;
+            transition: color .15s;
+        }
+        .nav a:hover { color: var(--text); }
+
+        .profile-avatar {
+            width: 44px; height: 44px;
             border-radius: 50%;
-            background: linear-gradient(135deg, #64b5f6, #ce93d8);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
+            overflow: hidden;
             flex-shrink: 0;
         }
 
-        .agent-info h2 {
-            font-size: 1.15rem;
-            margin-bottom: 0.15rem;
-        }
-
-        .agent-info .role {
-            color: #7b8fa8;
-            font-size: 0.85rem;
-        }
-
-        .recording-indicator {
-            margin-left: auto;
-            display: none;
-            align-items: center;
-            gap: 0.5rem;
-            color: #4ade80;
-            font-size: 0.85rem;
-        }
-
-        .recording-indicator.active {
-            display: flex;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
-
-        .recording-dot {
-            width: 10px;
-            height: 10px;
-            background: #4ade80;
-            border-radius: 50%;
-            animation: pulse 1.2s infinite;
-        }
-
-        /* Two-column layout */
-        .main-panels {
+        /* ── Main layout: sidebar + workspace ── */
+        .main-layout {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1.25rem;
-            margin-bottom: 1.25rem;
+            grid-template-columns: 220px minmax(0, 1fr);
+            gap: 24px;
         }
 
-        @media (max-width: 768px) {
-            .main-panels {
-                grid-template-columns: 1fr;
-            }
+        @media (max-width: 900px) {
+            .main-layout { grid-template-columns: 1fr; }
+            .filters { display: none; }
+            .nav { display: none; }
+            .profile-avatar { display: none; }
+            .page { padding: 0 12px 12px; }
         }
 
-        /* Hotel Display Panel */
-        .hotel-panel {
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 12px;
-            padding: 1rem;
-            border: 1px solid rgba(100, 181, 246, 0.15);
-            min-height: 450px;
-            max-height: 650px;
+        /* ── Sidebar filters ── */
+        .filters {
+            padding-top: 8px;
+        }
+
+        .filters-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 20px;
+        }
+
+        .filter-group { margin-bottom: 20px; }
+
+        .filter-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+
+        .filter-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            background: var(--surface);
+            font-size: 14px;
+            color: var(--text);
+            outline: none;
+        }
+        .filter-input:focus { border-color: var(--border-strong); }
+        .filter-input::placeholder { color: var(--border); }
+
+        .filter-display {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            background: var(--surface);
+            font-size: 14px;
+            color: var(--text);
+        }
+        .filter-display-left { display: flex; align-items: center; gap: 8px; }
+
+        .traveler-stepper {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            background: var(--surface);
+        }
+        .traveler-stepper button {
+            width: 38px; height: 38px;
+            border: none;
+            background: transparent;
+            font-size: 18px;
+            color: var(--muted);
+        }
+        .traveler-stepper button:hover { background: var(--chip); }
+        .traveler-value {
+            flex: 1;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .budget-slider-wrap { padding: 4px 0; }
+        .budget-slider {
+            width: 100%;
+            accent-color: var(--track);
+            cursor: pointer;
+        }
+        .budget-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 2px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        /* ── Workspace ── */
+        .workspace { min-width: 0; }
+
+        .stage-frame {
+            border-radius: 16px;
+            background: url('static/bg.png') center / cover no-repeat, var(--stage);
+            min-height: 600px;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
+            position: relative;
+        }
+
+        /* Summary bar - only shown in idle state */
+        .workspace-summary {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            padding: 20px 24px 16px;
+            background:
+                linear-gradient(180deg, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.15), transparent);
+            position: relative;
+            z-index: 2;
+            flex-shrink: 0;
+        }
+
+        .stage-frame.in-call .workspace-summary { display: none; }
+
+        .summary-kicker {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: rgba(255, 255, 255, 0.5);
+            margin-bottom: 2px;
+        }
+
+        .summary-text {
+            font-size: 16px;
+            font-weight: 600;
+            color: #f5f2ec;
+            max-width: 50ch;
+        }
+
+        /* Idle state: full background visible with centered text */
+        .stage-idle {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 2rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .idle-title {
+            font-size: 28px;
+            font-weight: 650;
+            color: #f5f2ec;
+            margin-bottom: 8px;
+            text-shadow: 0 2px 20px rgba(0,0,0,0.5);
+        }
+
+        .idle-body {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.7);
+            max-width: 42ch;
+            margin: 0 auto;
+            line-height: 1.5;
+            text-shadow: 0 1px 10px rgba(0,0,0,0.5);
+        }
+
+        /* In-call: frosted overlay + two panels */
+        .stage-frame.in-call::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: rgba(5, 5, 5, 0.88);
+            backdrop-filter: blur(32px);
+            -webkit-backdrop-filter: blur(32px);
+            z-index: 0;
+        }
+        .stage-frame.in-call > * {
+            position: relative;
+            z-index: 1;
+        }
+
+        .stage-panels {
+            display: none;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            flex: 1;
+            padding: 0 16px 16px;
+            min-height: 0;
+        }
+
+        .stage-frame.in-call .stage-idle { display: none; }
+        .stage-frame.in-call .stage-panels { display: grid; }
+
+        @media (max-width: 768px) {
+            .stage-panels { grid-template-columns: 1fr; }
+        }
+
+        .stage-panel {
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            padding: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            max-height: 520px;
         }
 
         .panel-header {
-            font-size: 0.8rem;
-            color: #64b5f6;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.5);
             text-transform: uppercase;
             letter-spacing: 1.5px;
-            margin-bottom: 0.75rem;
+            margin-bottom: 10px;
+            flex-shrink: 0;
         }
 
-        .hotel-content {
+        .panel-scroll {
             flex: 1;
             overflow-y: auto;
             min-height: 0;
         }
 
-        .hotel-empty {
+        .panel-empty {
             height: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #4a5568;
-            font-style: italic;
+            color: rgba(255, 255, 255, 0.25);
+            font-size: 14px;
             text-align: center;
             padding: 2rem;
         }
 
-        /* Searching spinner */
+        /* ── Search results cards ── */
         .searching {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 1rem;
+            gap: 10px;
             padding: 2rem;
-            color: #64b5f6;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 13px;
         }
 
         .spinner {
-            width: 36px;
-            height: 36px;
-            border: 3px solid rgba(100, 181, 246, 0.2);
-            border-top-color: #64b5f6;
+            width: 28px; height: 28px;
+            border: 2.5px solid rgba(255, 255, 255, 0.1);
+            border-top-color: rgba(255, 255, 255, 0.5);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
 
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* Search results */
         .query-header {
-            margin-bottom: 0.75rem;
-            padding: 0.6rem 0.75rem;
-            background: rgba(100, 181, 246, 0.08);
+            margin-bottom: 10px;
+            padding: 8px 10px;
+            background: rgba(255, 255, 255, 0.04);
             border-radius: 8px;
         }
-
         .query-label {
-            font-size: 0.65rem;
-            color: #7b8fa8;
+            font-size: 9px;
+            color: rgba(255, 255, 255, 0.35);
             text-transform: uppercase;
             letter-spacing: 1px;
-            margin-bottom: 0.2rem;
+            margin-bottom: 2px;
         }
-
         .query-text {
-            font-size: 0.9rem;
-            color: #e1bee7;
+            font-size: 13px;
+            color: #f5f2ec;
             font-weight: 600;
         }
 
         .result-card {
+            display: block;
+            text-decoration: none;
+            color: inherit;
             background: rgba(255, 255, 255, 0.04);
-            border-radius: 10px;
-            padding: 0.75rem;
-            margin-bottom: 0.6rem;
-            border: 1px solid rgba(100, 181, 246, 0.1);
-            transition: border-color 0.2s;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            transition: border-color .15s;
         }
-
-        .result-card:hover {
-            border-color: rgba(100, 181, 246, 0.3);
-        }
+        .result-card:hover { border-color: rgba(255, 255, 255, 0.18); }
 
         .result-card-title {
-            font-size: 0.9rem;
-            font-weight: bold;
-            margin-bottom: 0.2rem;
+            font-size: 13px;
+            font-weight: 600;
+            color: #e8e4dd;
+            margin-bottom: 2px;
         }
-
-        .result-card-title a {
-            color: #e1bee7;
-            text-decoration: none;
-        }
-
-        .result-card-title a:hover {
-            text-decoration: underline;
-        }
-
         .result-card-url {
-            font-size: 0.7rem;
-            color: #64b5f6;
-            margin-bottom: 0.3rem;
+            font-size: 11px;
+            color: rgba(215, 212, 32, 0.7);
+            margin-bottom: 4px;
         }
-
         .result-card-body {
-            font-size: 0.8rem;
-            color: #9ca3af;
-            line-height: 1.4;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.45);
+            line-height: 1.45;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
 
-        .search-empty {
+        /* ── Result card image ── */
+        .result-card-img {
+            border-radius: 6px;
+            overflow: hidden;
+            margin-bottom: 8px;
+            max-height: 140px;
+        }
+
+        .result-card-img img {
+            width: 100%;
             height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #4a5568;
-            font-style: italic;
-            text-align: center;
-            padding: 2rem;
+            object-fit: cover;
+            display: block;
         }
 
-        /* Booking confirmed */
+        /* ── Booking confirmed ── */
         .booking-card {
-            background: linear-gradient(135deg, rgba(74, 222, 128, 0.1), rgba(100, 181, 246, 0.1));
-            border: 1px solid rgba(74, 222, 128, 0.3);
+            background: rgba(74, 222, 128, 0.08);
+            border: 1px solid rgba(74, 222, 128, 0.25);
             border-radius: 12px;
-            padding: 1.25rem;
+            padding: 16px;
             text-align: center;
         }
-
         .booking-card h3 {
             color: #4ade80;
-            font-size: 1.2rem;
-            margin-bottom: 0.75rem;
+            font-size: 16px;
+            margin-bottom: 10px;
         }
-
         .booking-detail {
             display: flex;
             justify-content: space-between;
-            padding: 0.35rem 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            font-size: 0.85rem;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            font-size: 13px;
         }
-
-        .booking-detail .label {
-            color: #7b8fa8;
-        }
-
-        .booking-detail .value {
-            font-weight: 600;
-        }
-
+        .booking-detail .label { color: rgba(255, 255, 255, 0.4); }
+        .booking-detail .value { font-weight: 600; color: #f5f2ec; }
         .confirmation-number {
-            font-size: 1.5rem;
+            font-size: 22px;
             font-weight: bold;
-            color: #64b5f6;
-            margin-top: 0.75rem;
+            color: rgba(215, 212, 32, 0.9);
+            margin-top: 10px;
             letter-spacing: 2px;
         }
 
-        /* Transcript Panel */
-        .transcript-panel {
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 12px;
-            padding: 1rem;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            display: flex;
-            flex-direction: column;
-            min-height: 450px;
-            max-height: 650px;
-        }
-
-        .transcript-container {
-            flex: 1;
-            overflow-y: auto;
-            min-height: 0;
-        }
-
+        /* ── Transcript ── */
         .transcript-entry {
-            margin-bottom: 0.6rem;
-            padding: 0.6rem 0.85rem;
+            margin-bottom: 8px;
+            padding: 8px 12px;
             border-radius: 8px;
-            max-width: 85%;
-            font-size: 0.9rem;
+            max-width: 90%;
+            font-size: 13px;
             line-height: 1.45;
+            color: #f5f2ec;
         }
-
         .transcript-entry.user {
-            background: rgba(100, 181, 246, 0.15);
+            background: rgba(100, 181, 246, 0.12);
             margin-left: auto;
             text-align: right;
-            border: 1px solid rgba(100, 181, 246, 0.2);
-        }
-
-        .transcript-entry.assistant {
-            background: rgba(225, 190, 231, 0.1);
-            border: 1px solid rgba(225, 190, 231, 0.15);
-        }
-
-        .transcript-entry.system {
-            background: rgba(100, 181, 246, 0.1);
             border: 1px solid rgba(100, 181, 246, 0.15);
+        }
+        .transcript-entry.assistant {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .transcript-entry.system {
+            background: rgba(215, 212, 32, 0.06);
+            border: 1px solid rgba(215, 212, 32, 0.1);
             max-width: 100%;
             text-align: center;
-            font-size: 0.8rem;
-            color: #64b5f6;
+            font-size: 12px;
+            color: rgba(215, 212, 32, 0.7);
             font-style: italic;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 0.5rem;
+            gap: 6px;
         }
 
         .system-spinner {
-            width: 14px;
-            height: 14px;
-            border: 2px solid rgba(100, 181, 246, 0.25);
-            border-top-color: #64b5f6;
+            width: 12px; height: 12px;
+            border: 2px solid rgba(215, 212, 32, 0.15);
+            border-top-color: rgba(215, 212, 32, 0.6);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
             flex-shrink: 0;
         }
 
         .transcript-speaker {
-            font-size: 0.65rem;
-            color: #7b8fa8;
-            margin-bottom: 0.15rem;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.35);
+            margin-bottom: 2px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
 
-        /* Controls */
-        .controls-row {
+        /* ── Call dock ── */
+        .call-dock {
+            margin-top: 16px;
+            border-radius: 16px;
+            background: rgba(17, 17, 17, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: #f3f1ec;
+            padding: 10px 16px;
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            align-items: center;
+            gap: 16px;
+        }
+
+        @media (max-width: 768px) {
+            .call-dock {
+                grid-template-columns: 1fr;
+                gap: 10px;
+                justify-items: center;
+                padding: 10px 12px;
+            }
+            .dock-settings { justify-self: center; }
+            .dock-cluster { flex-wrap: wrap; justify-content: center; }
+        }
+
+        .dock-cluster {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            min-width: 0;
+        }
+
+        .recording-indicator {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #4ade80;
+            white-space: nowrap;
+        }
+        .recording-indicator.active { display: flex; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .recording-dot {
+            width: 8px; height: 8px;
+            background: #4ade80;
+            border-radius: 50%;
+            animation: pulse 1.2s infinite;
+        }
+
+        .dock-label {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .agent-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .agent-avatar-mini {
+            width: 24px; height: 24px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #64b5f6, #ce93d8);
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 1.5rem;
-            margin-bottom: 1rem;
+            font-size: 11px;
+            font-weight: 700;
+            color: #fff;
         }
 
-        .settings-toggle {
+        .dock-select {
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.06);
+            color: #f3f1ec;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .dock-settings {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-            font-size: 0.8rem;
-            color: #7b8fa8;
+            gap: 14px;
+            justify-self: end;
+        }
+
+        .setting-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
         }
 
         .toggle-switch {
             position: relative;
-            width: 40px;
-            height: 22px;
+            width: 34px; height: 18px;
         }
-
-        .toggle-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
         .toggle-slider {
             position: absolute;
             cursor: pointer;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(255, 255, 255, 0.15);
-            transition: 0.3s;
-            border-radius: 22px;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.12);
+            transition: .2s;
+            border-radius: 18px;
         }
-
         .toggle-slider:before {
             position: absolute;
             content: "";
-            height: 38px;
-            width: 16px;
-            left: 3px;
-            bottom: 3px;
+            height: 14px; width: 14px;
+            left: 2px; bottom: 2px;
             background: white;
-            transition: 0.3s;
+            transition: .2s;
             border-radius: 50%;
         }
+        .toggle-switch input:checked + .toggle-slider { background: var(--track); }
+        .toggle-switch input:checked + .toggle-slider:before { transform: translateX(16px); }
 
-        .toggle-switch input:checked + .toggle-slider {
-            background: linear-gradient(90deg, #64b5f6, #ce93d8);
-        }
-
-        .toggle-switch input:checked + .toggle-slider:before {
-            transform: translateX(18px);
+        .dock-actions {
+            display: flex;
+            gap: 8px;
         }
 
         .btn {
-            padding: 0.8rem 2rem;
+            padding: 8px 24px;
             border: none;
-            border-radius: 50px;
-            font-size: 1rem;
-            font-weight: bold;
+            border-radius: 999px;
+            font-size: 14px;
+            font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all .2s;
         }
-
         .btn-primary {
-            background: linear-gradient(90deg, #64b5f6, #ce93d8);
-            color: white;
+            background: var(--track);
+            color: #1a1a1a;
         }
-
-        .btn-primary:hover {
-            transform: scale(1.05);
-            box-shadow: 0 6px 20px rgba(100, 181, 246, 0.35);
-        }
-
-        .btn-primary:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
+        .btn-primary:hover { filter: brightness(1.1); }
         .btn-secondary {
-            background: rgba(244, 67, 54, 0.2);
-            color: #ef5350;
-            border: 1px solid rgba(244, 67, 54, 0.3);
+            background: rgba(244, 67, 54, 0.15);
+            color: #f65d4e;
+            border: 1px solid rgba(244, 67, 54, 0.25);
         }
-
-        .btn-secondary:hover {
-            background: rgba(244, 67, 54, 0.3);
-        }
+        .btn-secondary:hover { background: rgba(244, 67, 54, 0.25); }
 
         .status {
             text-align: center;
-            padding: 0.35rem;
-            font-size: 0.8rem;
-            border-radius: 6px;
+            padding: 6px;
+            font-size: 13px;
+            border-radius: 8px;
+            margin-top: 12px;
         }
-
-        .status.connecting { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
-        .status.connected { background: rgba(76, 175, 80, 0.15); color: #4caf50; }
-        .status.disconnected { background: rgba(244, 67, 54, 0.15); color: #f44336; }
-        .status.idle { color: #4a5568; }
-
-        @keyframes recording-pulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4); }
-            50% { box-shadow: 0 0 0 8px rgba(244, 67, 54, 0); }
-        }
-
-        .btn.recording {
-            animation: recording-pulse 1.5s infinite;
-            background: linear-gradient(90deg, #ef5350, #f48fb1);
-        }
-
-        .powered-by {
-            position: fixed;
-            top: 1rem;
-            right: 1.5rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            color: #7b8fa8;
-            font-size: 0.75rem;
-            opacity: 0.7;
-            z-index: 100;
-        }
-
-        .powered-by svg {
-            height: 38px;
-            width: auto;
-        }
+        .status.connecting { background: rgba(255, 193, 7, 0.1); color: #d4a017; }
+        .status.connected { background: rgba(76, 175, 80, 0.1); color: #4caf50; }
+        .status.disconnected { background: rgba(244, 67, 54, 0.1); color: #e53935; }
+        .status.idle { color: var(--muted); }
     </style>
 </head>
 <body>
-    <div class="powered-by">
-        <span>Powered by</span>
-        <svg viewBox="0 0 1201 262" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M60.7237 245.259C41.8152 234.104 26.9637 218.579 16.1814 198.682C5.39202 178.792 0 156.234 0 131C0 105.773 5.45416 83.2112 16.3625 63.3145C27.2708 43.4286 42.1792 27.8993 61.0877 16.7375C79.9944 5.58271 100.721 0 123.264 0C142.9 0 160.655 4.06533 176.534 12.1889C192.407 20.3195 205.497 31.0549 215.803 44.3952C226.104 57.7389 233.439 71.9285 237.801 86.9673H188.714C183.38 74.8424 174.773 64.8959 162.899 57.1313C151.017 49.3702 137.808 45.4861 123.264 45.4861C108.959 45.4861 96.0497 49.0042 84.5395 56.0367C73.024 63.0764 63.9337 73.0834 57.2687 86.0576C50.5983 99.0389 47.2694 114.021 47.2694 131C47.2694 147.983 50.5983 162.965 57.2687 175.939C63.9337 188.92 73.024 198.927 84.5395 205.96C96.0497 212.999 108.959 216.514 123.264 216.514C136.111 216.514 147.683 213.785 157.99 208.326C168.289 202.868 176.351 195.896 182.169 187.403C187.987 178.913 191.26 170.299 191.988 161.565L193.806 147.375L204.714 159.745H130.174V125.176H239.619V258.361H203.622L199.986 228.884H198.168C193.561 234.47 187.561 239.801 180.17 244.896C172.772 249.992 164.17 254.118 154.353 257.27C144.535 260.419 134.172 262 123.264 262C100.476 262 79.6304 256.421 60.7237 245.259Z" fill="currentColor"/><path d="M255.976 74.2312H294.156L297.792 89.8813H299.61C303.003 85.2758 307.427 81.509 312.881 78.5986C318.335 75.6882 325.062 74.2312 333.063 74.2312H366.878V116.078H335.971C324.336 116.078 315.484 119.174 309.428 125.36C303.365 131.544 300.338 140.584 300.338 152.467V258.361H255.976L255.976 74.2312Z" fill="currentColor"/><path d="M397.604 254.541C387.542 249.57 379.844 242.775 374.514 234.161C369.18 225.554 366.515 215.91 366.515 205.231C366.515 193.348 369.243 182.915 374.697 173.938C380.151 164.965 388.513 157.926 399.785 152.833C411.058 147.737 424.931 145.19 441.42 145.19H485.053V140.826C485.053 130.879 482.019 122.812 475.963 116.626C469.9 110.439 461.656 107.347 451.236 107.347C444.93 107.347 439.357 108.381 434.51 110.439C429.659 112.504 425.84 115.233 423.056 118.626C420.267 122.027 418.387 125.542 417.421 129.181H373.424C374.39 118.992 378.088 109.412 384.513 100.432C390.933 91.4591 399.842 84.2381 411.239 78.7798C422.63 73.3215 435.966 70.5923 451.236 70.5923C467.235 70.5923 481.11 73.5667 492.87 79.5083C504.625 85.4571 513.716 93.7618 520.141 104.437C526.561 115.112 529.776 127.24 529.776 140.826V258.361H491.233L487.597 240.167H485.779C481.655 245.749 474.871 250.781 465.417 255.266C455.964 259.754 445.056 262 432.692 262C419.358 262 407.66 259.509 397.604 254.541ZM464.326 220.696C471.11 217.186 476.263 212.146 479.78 205.597C483.292 199.048 485.053 191.529 485.053 183.035V177.577H445.782C434.147 177.577 425.476 179.759 419.784 184.126C414.085 188.494 411.239 194.442 411.239 201.958C411.239 209.236 413.723 215.057 418.694 219.424C423.658 223.792 430.874 225.974 440.328 225.974C449.537 225.974 457.537 224.218 464.326 220.696Z" fill="currentColor"/><path d="M585.587 249.808C572.616 241.684 562.374 230.341 554.862 215.785C547.346 201.23 543.591 184.734 543.591 166.298C543.591 147.62 547.346 131 554.862 116.444C562.374 101.889 572.616 90.6061 585.587 82.6035C598.552 74.5972 612.915 70.5923 628.676 70.5923C640.55 70.5923 651.037 72.7778 660.128 77.1451C669.218 81.509 676.309 86.9673 681.399 93.5201H683.217V3.63889H727.941V258.361H689.398L685.762 237.619H683.943C678.127 244.896 670.61 250.781 661.401 255.266C652.184 259.754 641.276 262 628.676 262C612.915 262 598.552 257.938 585.587 249.808ZM659.947 213.966C667.219 209.36 672.911 202.992 677.035 194.862C681.154 186.738 683.217 177.215 683.217 166.298C683.217 155.381 681.154 145.801 677.035 137.549C672.911 129.305 667.219 122.994 659.947 118.626C652.674 114.259 644.674 112.077 635.948 112.077C627.222 112.077 619.221 114.259 611.949 118.626C604.677 122.994 598.916 129.305 594.678 137.549C590.434 145.801 588.315 155.381 588.315 166.298C588.315 177.215 590.434 186.738 594.678 194.862C598.916 202.992 604.677 209.36 611.949 213.966C619.221 218.579 627.222 220.881 635.948 220.881C644.674 220.881 652.674 218.579 659.947 213.966Z" fill="currentColor"/><path d="M745.757 1.45342H793.391V42.9382H745.757V1.45342ZM747.211 74.2312H791.573V258.361H747.211V74.2312Z" fill="currentColor"/><path d="M978.106 258.361H978.467V143.862C978.24 145.598 978.106 147.371 978.106 149.194V258.361Z" fill="currentColor"/><path d="M933.747 74.2312V179.034C933.747 186.553 931.985 193.469 928.474 199.773C924.956 206.084 920.111 210.999 913.929 214.513C907.747 218.031 900.777 219.787 893.022 219.787C885.504 219.787 878.715 218.031 872.659 214.513C866.598 210.999 861.87 206.141 858.479 199.958C855.08 193.771 853.388 186.799 853.388 179.034V74.2312H809.027V184.855C809.027 200.139 812.118 213.664 818.3 225.43C824.48 237.199 833.083 246.233 844.115 252.537C855.144 258.844 867.688 262 881.749 262C893.385 262 903.868 259.871 913.201 255.632C922.092 251.589 928.923 246.817 933.748 241.338L933.747 74.2312Z" fill="currentColor"/><path d="M1192.09 106.256C1186.15 95.098 1178.03 86.3668 1167.73 80.0556C1157.42 73.7479 1145.97 70.5923 1133.37 70.5923C1120.28 70.5923 1108.64 73.3215 1098.46 78.7798C1088.28 84.2381 1080.77 90.6062 1075.92 97.884H1074.1C1070.22 91.0966 1063.79 84.8494 1054.83 79.1458C1045.86 73.4494 1035.19 70.5923 1022.83 70.5923C1013.13 70.5923 1004.16 72.7778 995.924 77.1451C988.326 81.1669 982.563 85.6276 978.468 90.4756L978.467 143.862C979.085 139.133 980.527 134.721 982.834 130.634C985.981 125.058 990.225 120.691 995.56 117.535C1000.89 114.387 1006.71 112.806 1013.01 112.806C1019.31 112.806 1024.89 114.259 1029.74 117.173C1034.59 120.083 1038.34 124.266 1041.01 129.724C1043.68 135.183 1045.01 141.679 1045.01 149.195V258.361H1089.73V149.195C1089.73 142.404 1091.25 136.22 1094.28 130.634C1097.31 125.058 1101.49 120.691 1106.83 117.535C1112.16 114.387 1117.97 112.806 1124.28 112.806C1130.82 112.806 1136.46 114.259 1141.19 117.173C1145.91 120.083 1149.61 124.266 1152.28 129.724C1154.94 135.183 1156.28 141.679 1156.28 149.195V258.361H1201V144.099C1201 130.034 1198.03 117.415 1192.09 106.256Z" fill="currentColor"/><path d="M977.382 91.7007H975.564L971.927 74.2312H933.747L933.748 241.338C933.986 241.067 934.245 240.804 934.473 240.529H936.291L939.927 258.361L978.106 258.361V149.194C978.106 147.371 978.24 145.598 978.467 143.862L978.468 90.4756C978.12 90.8869 977.704 91.2831 977.382 91.7007Z" fill="currentColor"/></svg>
-    </div>
-    <div class="container">
-        <h1>Wanderlust Travel</h1>
-        <p class="subtitle">Voice-powered hotel reservations</p>
-
-        <div class="agent-card">
-            <div class="agent-avatar" id="agentAvatar">S</div>
-            <div class="agent-info">
-                <h2 id="agentName">Sophie</h2>
-                <p class="role">Reservation Agent</p>
+    <div class="page">
+        <header>
+            <div class="brand">
+                <svg width="36" height="36" viewBox="0 0 84 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M8 21.5L42 8L76 21.5L42 35L8 21.5Z" fill="#E1E119" stroke="#2A2925" stroke-width="2.4" stroke-linejoin="round"/>
+                    <path d="M16 24.5V31.5C16 39.232 27.64 45.5 42 45.5C56.36 45.5 68 39.232 68 31.5V24.5" stroke="#2A2925" stroke-width="2.4" stroke-linecap="round"/>
+                    <path d="M14.5 24V40.5" stroke="#2A2925" stroke-width="2.4" stroke-linecap="round"/>
+                    <circle cx="14.5" cy="43.5" r="3.2" fill="#2A2925"/>
+                </svg>
+                <div class="brand-title">Gradbot Booking</div>
             </div>
-            <select id="agentSelect" style="margin-left: auto; margin-right: 0.75rem; padding: 0.35rem 0.5rem; border-radius: 8px; background: rgba(255,255,255,0.08); color: #e8edf5; border: 1px solid rgba(100,181,246,0.25); font-size: 0.85rem; cursor: pointer;">
-                <option value="Sophie" selected>Sophie</option>
-                <option value="Sydney">Sydney</option>
-            </select>
-            <div class="recording-indicator" id="recordingIndicator">
-                <span class="recording-dot"></span>
-                <span>Listening...</span>
-            </div>
-        </div>
 
-        <div class="main-panels">
-            <div class="hotel-panel">
-                <div class="panel-header">Hotels & Rooms</div>
-                <div class="hotel-content" id="hotelContent">
-                    <div class="hotel-empty">
-                        Tell Sophie where you'd like to travel and she'll find the perfect hotel for you
+            <nav class="nav">
+                <a href="#">Explore</a>
+                <a href="#">Booking</a>
+                <a href="#">Rewards</a>
+                <a href="#">Support</a>
+            </nav>
+
+            <div class="profile-avatar">
+                <svg viewBox="0 0 44 44" width="44" height="44"><rect width="44" height="44" rx="22" fill="#ECE8E1"/><circle cx="22" cy="17" r="9" fill="#7E4D3C"/><path d="M12 41C13.6 32.4 17.94 28.1 22 28.1C26.06 28.1 30.4 32.4 32 41" fill="#C9D6E0"/></svg>
+            </div>
+        </header>
+
+        <main class="main-layout">
+            <aside class="filters">
+                <h1 class="filters-title">Search Filters</h1>
+
+                <div class="filter-group">
+                    <label class="filter-label" for="destinationFilter">Destination</label>
+                    <input class="filter-input" id="destinationFilter" type="text" placeholder="e.g., London">
+                </div>
+
+                <div class="filter-group">
+                    <label class="filter-label" for="checkInDate">Check-in</label>
+                    <input class="filter-input" id="checkInDate" type="date">
+                </div>
+
+                <div class="filter-group">
+                    <label class="filter-label" for="checkOutDate">Check-out</label>
+                    <input class="filter-input" id="checkOutDate" type="date">
+                </div>
+
+                <div class="filter-group">
+                    <label class="filter-label">Travelers</label>
+                    <div class="traveler-stepper">
+                        <button id="travelerMinus" type="button">&#8722;</button>
+                        <span class="traveler-value" id="travelerCount">2 Adults</span>
+                        <button id="travelerPlus" type="button">+</button>
                     </div>
                 </div>
-            </div>
 
-            <div class="transcript-panel">
-                <div class="panel-header">Conversation</div>
-                <div class="transcript-container" id="transcript">
+                <div class="filter-group">
+                    <label class="filter-label">Budget</label>
+                    <div class="budget-slider-wrap">
+                        <input class="budget-slider" id="budgetFilter" type="range" min="0" max="5000" step="100" value="5000">
+                    </div>
+                    <div class="budget-labels">
+                        <span>0</span>
+                        <span id="budgetLabel">0 - 5000+</span>
+                    </div>
                 </div>
-            </div>
-        </div>
+            </aside>
 
-        <div class="controls-row">
-            <div class="settings-toggle">
-                <span>Echo Cancel</span>
-                <label class="toggle-switch">
-                    <input type="checkbox" id="echoCancellation" checked>
-                    <span class="toggle-slider"></span>
-                </label>
-            </div>
+            <section class="workspace">
+                <div class="stage-frame" id="stageFrame">
+                    <div class="workspace-summary">
+                        <div>
+                            <div class="summary-kicker" id="summaryKicker">Hotel booking assistant</div>
+                            <div class="summary-text" id="summaryText">Tell Sophie where you'd like to travel.</div>
+                        </div>
+                    </div>
 
-            <div class="settings-toggle" style="gap: 0.35rem;">
-                <span>Padding</span>
-                <input type="range" id="paddingBonus" min="-4" max="4" step="0.5" value="0"
-                    style="width: 80px; accent-color: #64b5f6; cursor: pointer;">
-                <span id="paddingValue" style="min-width: 2em; text-align: center;">0</span>
-            </div>
+                    <div class="stage-idle" id="stageIdle">
+                        <div>
+                            <div class="idle-title">Ready when you are.</div>
+                            <div class="idle-body">Search results and booking details will appear here once Sophie starts looking.</div>
+                        </div>
+                    </div>
 
-            <button class="btn btn-primary" id="startBtn">Call Sophie</button>
-            <button class="btn btn-secondary" id="stopBtn" style="display: none;">Hang Up</button>
-        </div>
+                    <div class="stage-panels">
+                        <div class="stage-panel">
+                            <div class="panel-header">Search Results</div>
+                            <div class="panel-scroll" id="hotelContent">
+                                <div class="panel-empty">Waiting for search...</div>
+                            </div>
+                        </div>
 
-        <div class="status idle" id="status">Click "Call Sophie" to start your reservation</div>
+                        <div class="stage-panel">
+                            <div class="panel-header">Conversation</div>
+                            <div class="panel-scroll" id="transcript"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="call-dock">
+                    <div class="dock-cluster">
+                        <div class="recording-indicator" id="recordingIndicator">
+                            <span class="recording-dot"></span>
+                            <span>Listening</span>
+                        </div>
+
+                        <div>
+                            <div class="dock-label">Agent</div>
+                            <div class="agent-badge">
+                                <span class="agent-avatar-mini" id="agentAvatar">S</span>
+                                <span id="agentName">Sophie</span>
+                            </div>
+                        </div>
+
+                        <select class="dock-select" id="agentSelect">
+                            <option value="Sophie" selected>Sophie</option>
+                            <option value="Sydney">Sydney</option>
+                        </select>
+                    </div>
+
+                    <div class="dock-settings">
+                        <div class="setting-item">
+                            <span>Echo</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="echoCancellation" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="setting-item">
+                            <span>Pad</span>
+                            <input type="range" id="paddingBonus" min="-4" max="4" step="0.5" value="0"
+                                style="width: 60px; accent-color: var(--track); cursor: pointer;">
+                            <span id="paddingValue" style="min-width: 1.5em; text-align: center;">0</span>
+                        </div>
+                    </div>
+
+                    <div class="dock-actions">
+                        <button class="btn btn-primary" id="startBtn" type="button">Call Sophie</button>
+                        <button class="btn btn-secondary" id="stopBtn" type="button" style="display: none;">Hang Up</button>
+                    </div>
+                </div>
+
+                <div class="status idle" id="status">Click "Call Sophie" to start your reservation</div>
+            </section>
+        </main>
     </div>
 
     <script src="static/js/opus-encoder.js"></script>
@@ -571,40 +796,79 @@
         let turnBubbles = {};
         let userBubble = null;
         let hadAssistantBubble = false;
-        let currentSpeaker = null;
 
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const status = document.getElementById('status');
         const transcript = document.getElementById('transcript');
         const hotelContent = document.getElementById('hotelContent');
+        const stageFrame = document.getElementById('stageFrame');
         const recordingIndicator = document.getElementById('recordingIndicator');
         const echoCancellationToggle = document.getElementById('echoCancellation');
         const paddingSlider = document.getElementById('paddingBonus');
         const paddingValue = document.getElementById('paddingValue');
         const agentSelect = document.getElementById('agentSelect');
-
-        paddingSlider.addEventListener('input', () => {
-            paddingValue.textContent = paddingSlider.value;
-        });
         const agentAvatar = document.getElementById('agentAvatar');
         const agentNameEl = document.getElementById('agentName');
+        const travelerMinus = document.getElementById('travelerMinus');
+        const travelerPlus = document.getElementById('travelerPlus');
+        const travelerCount = document.getElementById('travelerCount');
+        const summaryKicker = document.getElementById('summaryKicker');
+        const summaryText = document.getElementById('summaryText');
+        const destinationFilter = document.getElementById('destinationFilter');
+        const checkInDate = document.getElementById('checkInDate');
+        const checkOutDate = document.getElementById('checkOutDate');
+        const budgetFilter = document.getElementById('budgetFilter');
+        const budgetLabel = document.getElementById('budgetLabel');
+
+        let travelers = 2;
+
+        // Set default dates: check-in = tomorrow, check-out = +3 days
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const checkout = new Date(tomorrow);
+        checkout.setDate(checkout.getDate() + 3);
+        checkInDate.value = tomorrow.toISOString().split('T')[0];
+        checkOutDate.value = checkout.toISOString().split('T')[0];
+
+        budgetFilter.addEventListener('input', () => {
+            const val = parseInt(budgetFilter.value);
+            budgetLabel.textContent = val >= 5000 ? '0 - 5000+' : `0 - ${val}`;
+        });
+
+        function setAgentSummary(kicker, text) {
+            summaryKicker.textContent = kicker;
+            summaryText.textContent = text;
+        }
+
+        const _esc = document.createElement('div');
+        function esc(t) { _esc.textContent = t; return _esc.innerHTML; }
 
         function getAgentName() { return agentSelect.value; }
+
+        function getDomain(url) {
+            try { return new URL(url).hostname; } catch { return url; }
+        }
+
+        // Travelers
+        function updateTravelerLabel() {
+            travelerCount.textContent = `${travelers} ${travelers === 1 ? 'Adult' : 'Adults'}`;
+        }
+        travelerMinus.addEventListener('click', () => { travelers = Math.max(1, travelers - 1); updateTravelerLabel(); });
+        travelerPlus.addEventListener('click', () => { travelers++; updateTravelerLabel(); });
+
+        paddingSlider.addEventListener('input', () => { paddingValue.textContent = paddingSlider.value; });
 
         agentSelect.addEventListener('change', () => {
             const name = getAgentName();
             agentAvatar.textContent = name[0];
             agentNameEl.textContent = name;
             startBtn.textContent = `Call ${name}`;
-            status.textContent = `Click "Call ${name}" to start your reservation`;
-            hotelContent.innerHTML = `<div class="hotel-empty">Tell ${name} where you'd like to travel and she'll find the perfect hotel for you</div>`;
+            setStatus(`Click "Call ${name}" to start your reservation`, 'idle');
+            hotelContent.innerHTML = `<div class="panel-empty">Tell ${name} where you'd like to travel and she'll find the perfect hotel for you</div>`;
         });
 
-        // --- Hotel Display ---
-
-        const _esc = document.createElement('div');
-        function esc(t) { _esc.textContent = t; return _esc.innerHTML; }
+        // --- Results Display ---
 
         function showSearching(msg) {
             hotelContent.innerHTML = `
@@ -615,30 +879,31 @@
             `;
         }
 
-        function getDomain(url) {
-            try { return new URL(url).hostname; } catch { return url; }
-        }
-
         function showSearchResults(data) {
-            let html = '';
-
-            html += `
+            let html = `
                 <div class="query-header">
                     <div class="query-label">Search query</div>
                     <div class="query-text">${esc(data.query)}</div>
                 </div>
             `;
 
+            const images = data.images || [];
+
             if (!data.results || data.results.length === 0) {
-                html += `<div class="search-empty">No results found</div>`;
+                html += '<div class="panel-empty">No results found</div>';
             } else {
-                data.results.forEach(result => {
+                data.results.forEach((result, i) => {
+                    const img = images[i];
+                    const imgHtml = img
+                        ? `<div class="result-card-img"><img src="${esc(img.url)}" alt="${esc(img.title)}" loading="lazy" onerror="this.parentElement.style.visibility='hidden'"></div>`
+                        : '';
                     html += `
-                        <div class="result-card">
-                            <div class="result-card-title"><a href="${esc(result.href)}" target="_blank" rel="noopener">${esc(result.title)}</a></div>
+                        <a class="result-card" href="${esc(result.href)}" target="_blank" rel="noopener">
+                            ${imgHtml}
+                            <div class="result-card-title">${esc(result.title)}</div>
                             <div class="result-card-url">${esc(getDomain(result.href))}</div>
                             <div class="result-card-body">${esc(result.body)}</div>
-                        </div>
+                        </a>
                     `;
                 });
             }
@@ -668,7 +933,7 @@
             if (isUser) {
                 if (userBubble && !hadAssistantBubble) return userBubble;
                 hadAssistantBubble = false;
-                currentSpeaker = 'user';
+
                 userBubble = document.createElement('div');
                 userBubble.className = 'transcript-entry user';
                 const sp = document.createElement('div');
@@ -685,7 +950,7 @@
             let bubble = turnBubbles[turnIdx];
             if (!bubble) {
                 hadAssistantBubble = true;
-                currentSpeaker = 'assistant';
+
                 bubble = document.createElement('div');
                 bubble.className = 'transcript-entry assistant';
                 const sp = document.createElement('div');
@@ -704,7 +969,6 @@
         function handleText({ text, turnIdx, isUser }) {
             const bubble = getBubbleForTurn(turnIdx, isUser);
             bubble.querySelector('.transcript-text').textContent += text + ' ';
-            // Trim old entries
             while (transcript.children.length > 80) {
                 const removed = transcript.removeChild(transcript.firstChild);
                 for (const k in turnBubbles) { if (turnBubbles[k] === removed) delete turnBubbles[k]; }
@@ -714,7 +978,7 @@
         }
 
         function addSystemMessage(text, loading = false) {
-            currentSpeaker = null;
+
             const entry = document.createElement('div');
             entry.className = 'transcript-entry system';
             if (loading) {
@@ -769,9 +1033,10 @@
                 turnBubbles = {};
                 userBubble = null;
                 hadAssistantBubble = false;
-                currentSpeaker = null;
+    
                 const agentName = getAgentName();
-                hotelContent.innerHTML = `<div class="hotel-empty">Tell ${agentName} where you'd like to travel and she'll find the perfect hotel for you</div>`;
+                hotelContent.innerHTML = `<div class="panel-empty">Tell ${agentName} where you'd like to travel</div>`;
+                transcript.innerHTML = '';
 
                 setStatus('Connecting...', 'connecting');
 
@@ -786,9 +1051,7 @@
                         }
                     },
                     onText: handleText,
-                    onEvent: (eventType, msg) => {
-                        handleMessage(msg);
-                    },
+                    onEvent: (eventType, msg) => { handleMessage(msg); },
                     onError: (error) => {
                         console.error('Player error:', error);
                         setStatus('Error: ' + error.message, 'disconnected');
@@ -803,25 +1066,32 @@
                     return;
                 }
 
-                const _bp = window.location.pathname.replace(/\/$/, ""); const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${_bp}/ws/chat`;
+                const _bp = window.location.pathname.replace(/\/$/, "");
+                const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${_bp}/ws/chat`;
                 ws = new WebSocket(wsUrl);
 
                 ws.onopen = () => {
                     setStatus(`Connected - Speak to ${agentName}`, 'connected');
-                    transcript.innerHTML = '';
-                    ws.send(JSON.stringify({ type: 'start', agent: agentName, padding_bonus: parseFloat(paddingSlider.value) }));
+                    ws.send(JSON.stringify({
+                        type: 'start',
+                        agent: agentName,
+                        padding_bonus: parseFloat(paddingSlider.value),
+                        destination: destinationFilter.value.trim(),
+                        check_in: checkInDate.value,
+                        check_out: checkOutDate.value,
+                        travelers: travelers,
+                        budget: parseInt(budgetFilter.value),
+                    }));
                     agentSelect.disabled = true;
                     paddingSlider.disabled = true;
                     isRecording = true;
                     startBtn.style.display = 'none';
-                    stopBtn.style.display = 'inline-block';
-                    startBtn.classList.remove('recording');
+                    stopBtn.style.display = 'inline-flex';
                     recordingIndicator.classList.add('active');
+                    stageFrame.classList.add('in-call');
                 };
 
-                ws.onmessage = (event) => {
-                    player.handleMessage(event.data);
-                };
+                ws.onmessage = (event) => { player.handleMessage(event.data); };
 
                 ws.onclose = () => {
                     setStatus('Call ended', 'disconnected');
@@ -842,9 +1112,10 @@
 
         function endCall() {
             isRecording = false;
-            startBtn.style.display = 'inline-block';
+            startBtn.style.display = 'inline-flex';
             stopBtn.style.display = 'none';
             recordingIndicator.classList.remove('active');
+            stageFrame.classList.remove('in-call');
             agentSelect.disabled = false;
             paddingSlider.disabled = false;
 
@@ -854,16 +1125,14 @@
             }
             ws = null;
 
-            if (player) {
-                player.stop();
-                player = null;
-            }
+            if (player) { player.stop(); player = null; }
+
+            setAgentSummary('Hotel booking assistant', `Tell ${getAgentName()} where you'd like to travel.`);
         }
 
         startBtn.addEventListener('click', startCall);
         stopBtn.addEventListener('click', endCall);
 
-        // Preload decoder
         AudioProcessor.preloadDecoder('static/js');
     </script>
 </body>

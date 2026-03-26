@@ -41,8 +41,8 @@ linkup_client = LinkupClient(
 )
 
 
-async def do_search(query: str) -> dict:
-    """Run Linkup search in a thread pool."""
+async def do_search(query: str, include_images: bool = True) -> dict:
+    """Run Linkup search in a thread pool, optionally fetching images."""
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
@@ -50,29 +50,44 @@ async def do_search(query: str) -> dict:
             lambda: linkup_client.search(
                 query=query,
                 depth="standard",
-                output_type="sourcedAnswer",
+                output_type="searchResults",
+                include_images=include_images,
             ),
         )
-        sources = [
-            {"title": s.name, "href": s.url, "body": s.snippet}
-            for s in (result.sources or [])
-        ]
-        logger.info("Linkup search '%s': %d sources", query, len(sources))
+
+        sources = []
+        images = []
+        for item in (result.results or []):
+            if item.type == "image":
+                images.append({"title": item.name, "url": item.url})
+            else:
+                sources.append({
+                    "title": item.name,
+                    "href": item.url,
+                    "body": item.content[:300] if item.content else "",
+                })
+
+        # Build a text summary from text results for the LLM prompt
+        answer_parts = []
+        for s in sources[:5]:
+            answer_parts.append(f"- {s['title']}: {s['body']}")
+        answer = "\n".join(answer_parts)
+
+        logger.info("Linkup search '%s': %d sources, %d images", query, len(sources), len(images))
         return {
-            "answer": result.answer or "",
+            "answer": answer,
             "sources": sources,
+            "images": images,
         }
     except Exception as e:
         logger.error("Linkup search '%s' failed: %s", query, e)
-        return {"answer": "", "sources": []}
+        return {"answer": "", "sources": [], "images": []}
 
 
 @dataclass
 class BookingState:
     """Tracks the current booking session."""
     current_destination: str | None = None
-    selected_hotel: str | None = None
-    booked: bool = False
 
 
 AGENT_VOICES = {
@@ -96,9 +111,31 @@ def _base_prompt(agent_name: str) -> str:
     return _BASE_PROMPT_TEMPLATE.format(agent_name=agent_name)
 
 
-def get_phase1_prompt(agent_name: str) -> str:
-    """Phase 1: Destination selection."""
-    return _base_prompt(agent_name) + _PHASE1_PROMPT_TEMPLATE
+def get_phase1_prompt(agent_name: str, filters: dict | None = None) -> str:
+    """Phase 1: Destination selection, with optional pre-filled filters."""
+    prompt = _base_prompt(agent_name) + _PHASE1_PROMPT_TEMPLATE
+
+    if filters:
+        parts = []
+        if filters.get("destination"):
+            parts.append(f"- Destination: {filters['destination']}")
+        if filters.get("check_in"):
+            parts.append(f"- Check-in: {filters['check_in']}")
+        if filters.get("check_out"):
+            parts.append(f"- Check-out: {filters['check_out']}")
+        if filters.get("travelers"):
+            parts.append(f"- Travelers: {filters['travelers']}")
+        if filters.get("budget") and filters["budget"] < 5000:
+            parts.append(f"- Budget: up to ${filters['budget']} per night")
+
+        if parts:
+            context = "\n".join(parts)
+            prompt += f"\n\nThe caller has already provided these details via the booking form:\n{context}\n"
+            prompt += "Acknowledge what they've filled in. Do NOT ask again for information they already provided.\n"
+            if filters.get("destination"):
+                prompt += f"Since they already chose {filters['destination']}, you may call search_hotels right after your greeting (this counts as the caller choosing a destination).\n"
+
+    return prompt
 
 
 def get_phase2_prompt(agent_name: str, destination: str, search_answer: str) -> str:
@@ -242,11 +279,12 @@ async def websocket_chat(websocket: WebSocket):
 
         state.current_destination = destination
 
-        # Send sources to frontend
+        # Send sources + images to frontend
         await websocket.send_json({
             "type": "search_results",
             "query": f"Hotels in {destination}",
             "results": result["sources"],
+            "images": result.get("images", []),
         })
 
         # Swap to phase 2 prompt with search results
@@ -278,13 +316,12 @@ async def websocket_chat(websocket: WebSocket):
         logger.info("Loading details for %s via Linkup", hotel_name)
         result = await do_search(query)
 
-        state.selected_hotel = hotel_name
-
         # Send sources to frontend
         await websocket.send_json({
             "type": "search_results",
             "query": f"Rooms at {hotel_name}",
             "results": result["sources"],
+            "images": result.get("images", []),
         })
 
         # Swap to phase 3 prompt with search results
@@ -304,7 +341,6 @@ async def websocket_chat(websocket: WebSocket):
 
     async def handle_book_room(args: dict, tool_handle, websocket: WebSocket):
         """Process a simulated booking."""
-        state.booked = True
         confirmation = f"{random.choice('ABCDEFGHJKLMNPQRSTUVWXYZ')}{random.randint(1000, 9999)}"
 
         booking_info = {
@@ -357,12 +393,20 @@ async def websocket_chat(websocket: WebSocket):
         padding_bonus = float(msg.get("padding_bonus", 0.0))
         voice_key = AGENT_VOICES.get(agent_name, "Eva")
         voice = gradbot.flagship_voice(voice_key)
-        logger.info("Starting hotel reservation chat with %s (voice: %s, padding_bonus: %s)",
-                     agent_name, voice_key, padding_bonus)
+
+        filters = {
+            "destination": msg.get("destination", ""),
+            "check_in": msg.get("check_in", ""),
+            "check_out": msg.get("check_out", ""),
+            "travelers": msg.get("travelers", 2),
+            "budget": msg.get("budget", 5000),
+        }
+        logger.info("Starting hotel reservation chat with %s (voice: %s, filters: %s)",
+                     agent_name, voice_key, filters)
 
         return gradbot.SessionConfig(
             voice_id=voice.voice_id,
-            instructions=get_phase1_prompt(agent_name),
+            instructions=get_phase1_prompt(agent_name, filters),
             language=gradbot.Lang.En,
             tools=tools,
             **merge_overrides(_OVERRIDES,
