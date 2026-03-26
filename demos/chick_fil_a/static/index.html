@@ -243,6 +243,43 @@
             letter-spacing: 0.5px;
         }
 
+        /* ── Language selector ── */
+        .lang-selector {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .lang-btn {
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 2px solid var(--brown-light);
+            background: var(--white);
+            color: var(--text);
+            font-family: 'Lato', sans-serif;
+            font-size: 0.78rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            letter-spacing: 0.5px;
+        }
+        .lang-btn:hover {
+            border-color: var(--red);
+            color: var(--red);
+        }
+        .lang-btn.selected {
+            background: var(--red);
+            border-color: var(--red);
+            color: var(--white);
+        }
+        .lang-label {
+            font-size: 0.7rem;
+            color: var(--brown);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 700;
+        }
+
         /* ── Center: Menu panel ── */
         .menu-panel {
             padding: 24px;
@@ -436,6 +473,13 @@
             <div class="waveform" id="waveform"></div>
             <div class="transcript-area" id="transcriptArea">
                 <div class="placeholder">Tap the mic to start ordering</div>
+            </div>
+            <div class="lang-label">Language</div>
+            <div class="lang-selector" id="langSelector">
+                <button class="lang-btn selected" data-lang="en">EN</button>
+                <button class="lang-btn" data-lang="fr">FR</button>
+                <button class="lang-btn" data-lang="de">DE</button>
+                <button class="lang-btn" data-lang="es">ES</button>
             </div>
             <button class="mic-btn" id="micBtn" title="Start ordering">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
@@ -641,6 +685,17 @@
         bars.push(bar);
     }
 
+    // ── Language selector ──
+    let selectedLang = 'en';
+    const langSelector = document.getElementById('langSelector');
+    langSelector.addEventListener('click', (e) => {
+        const btn = e.target.closest('.lang-btn');
+        if (!btn) return;
+        langSelector.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        selectedLang = btn.dataset.lang;
+    });
+
     // ── State ──
     let ws = null;
     let player = null;
@@ -705,7 +760,7 @@
             ws.onopen = () => {
                 transcriptArea.innerHTML = '';
                 isRunning = true;
-                ws.send(JSON.stringify({ type: 'start' }));
+                ws.send(JSON.stringify({ type: 'start', language: selectedLang }));
                 micBtn.disabled = false;
                 micBtn.classList.add('active');
                 statusText.textContent = 'Listening...';
