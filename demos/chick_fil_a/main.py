@@ -30,13 +30,14 @@ _YAML_CFG = load_config(Path(__file__).parent)
 _OVERRIDES = session_config_overrides(_YAML_CFG)
 _CLIENT_CONFIG = client_config(_YAML_CFG)
 
-# Language → (flagship voice name, Lang enum, rewrite_rules code)
+# Language → (voice_id, Lang enum, rewrite_rules code)
+# English uses a custom voice; other languages use flagship voices.
 LANG_CONFIG = {
-    "en": ("Emma", gradbot.Lang.En, "en"),
-    "fr": ("Elise", gradbot.Lang.Fr, "fr"),
-    "es": ("Valentina", gradbot.Lang.Es, "es"),
-    "de": ("Mia", gradbot.Lang.De, "de"),
-    "pt": ("Alice", gradbot.Lang.Pt, "pt"),
+    "en": ("3jUdJyOi9pgbxBTK", gradbot.Lang.En, "en"),
+    "fr": (gradbot.flagship_voice("Elise").voice_id, gradbot.Lang.Fr, "fr"),
+    "es": (gradbot.flagship_voice("Valentina").voice_id, gradbot.Lang.Es, "es"),
+    "de": (gradbot.flagship_voice("Mia").voice_id, gradbot.Lang.De, "de"),
+    "pt": (gradbot.flagship_voice("Alice").voice_id, gradbot.Lang.Pt, "pt"),
 }
 
 # Load menu data
@@ -351,10 +352,9 @@ async def websocket_order(websocket: WebSocket):
 
     def make_config() -> gradbot.SessionConfig:
         """Build a SessionConfig from current state."""
-        v_name, l_enum, rw = LANG_CONFIG[state.lang]
-        v = gradbot.flagship_voice(v_name)
+        vid, l_enum, rw = LANG_CONFIG[state.lang]
         return gradbot.SessionConfig(
-            voice_id=v.voice_id,
+            voice_id=vid,
             instructions=get_system_prompt(state),
             language=l_enum,
             tools=tools,
