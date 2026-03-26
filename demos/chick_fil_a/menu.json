@@ -5,7 +5,7 @@
       "items": [
         {
           "id": "original_sandwich",
-          "name": "Chick-fil-A Chicken Sandwich",
+          "name": "Classic Chicken Sandwich",
           "description": "A boneless breast of chicken seasoned to perfection, hand-breaded, pressure cooked in 100% refined peanut oil",
           "price": 4.59,
           "options": {
@@ -25,7 +25,7 @@
         },
         {
           "id": "deluxe_sandwich",
-          "name": "Chick-fil-A Deluxe Sandwich",
+          "name": "Deluxe Chicken Sandwich",
           "description": "Classic chicken sandwich with lettuce, tomato, and cheese",
           "price": 5.75,
           "options": {
@@ -49,7 +49,7 @@
           "description": "Bite-sized pieces of boneless chicken breast, seasoned to perfection, hand-breaded and pressure cooked",
           "price": 4.35,
           "options": {
-            "sauce": ["Chick-fil-A Sauce", "Polynesian Sauce", "BBQ Sauce", "Ranch", "Honey Mustard", "Buffalo Sauce"]
+            "sauce": ["House Sauce", "Polynesian Sauce", "BBQ Sauce", "Ranch", "Honey Mustard", "Buffalo Sauce"]
           }
         },
         {
@@ -58,7 +58,7 @@
           "description": "Bite-sized pieces of boneless chicken breast",
           "price": 6.29,
           "options": {
-            "sauce": ["Chick-fil-A Sauce", "Polynesian Sauce", "BBQ Sauce", "Ranch", "Honey Mustard", "Buffalo Sauce"]
+            "sauce": ["House Sauce", "Polynesian Sauce", "BBQ Sauce", "Ranch", "Honey Mustard", "Buffalo Sauce"]
           }
         }
       ]

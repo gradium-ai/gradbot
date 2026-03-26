@@ -243,6 +243,43 @@
             letter-spacing: 0.5px;
         }
 
+        /* ── Language selector ── */
+        .lang-selector {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .lang-btn {
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 2px solid var(--brown-light);
+            background: var(--white);
+            color: var(--text);
+            font-family: 'Lato', sans-serif;
+            font-size: 0.78rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            letter-spacing: 0.5px;
+        }
+        .lang-btn:hover {
+            border-color: var(--red);
+            color: var(--red);
+        }
+        .lang-btn.selected {
+            background: var(--red);
+            border-color: var(--red);
+            color: var(--white);
+        }
+        .lang-label {
+            font-size: 0.7rem;
+            color: var(--brown);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 700;
+        }
+
         /* ── Center: Menu panel ── */
         .menu-panel {
             padding: 24px;
@@ -436,6 +473,13 @@
             <div class="waveform" id="waveform"></div>
             <div class="transcript-area" id="transcriptArea">
                 <div class="placeholder">Tap the mic to start ordering</div>
+            </div>
+            <div class="lang-label">Language</div>
+            <div class="lang-selector" id="langSelector">
+                <button class="lang-btn selected" data-lang="en">EN</button>
+                <button class="lang-btn" data-lang="fr">FR</button>
+                <button class="lang-btn" data-lang="de">DE</button>
+                <button class="lang-btn" data-lang="es">ES</button>
             </div>
             <button class="mic-btn" id="micBtn" title="Start ordering">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
@@ -641,6 +685,25 @@
         bars.push(bar);
     }
 
+    // ── Language selector ──
+    let selectedLang = 'en';
+    const langSelector = document.getElementById('langSelector');
+    const UI_STRINGS = {
+        en: { orderPlaced: 'ORDER PLACED!', thankYou: 'Thank you, {name}!', readySoon: 'Your order will be ready soon! Total: ${total}', subtotal: 'Subtotal', tax: 'Tax', total: 'Total' },
+        fr: { orderPlaced: 'COMMANDE PASSÉE !', thankYou: 'Merci, {name} !', readySoon: 'Votre commande sera prête bientôt ! Total : ${total}', subtotal: 'Sous-total', tax: 'Taxe', total: 'Total' },
+        de: { orderPlaced: 'BESTELLUNG AUFGEGEBEN!', thankYou: 'Danke, {name}!', readySoon: 'Ihre Bestellung ist bald fertig! Gesamt: ${total}', subtotal: 'Zwischensumme', tax: 'Steuer', total: 'Gesamt' },
+        es: { orderPlaced: '¡PEDIDO REALIZADO!', thankYou: '¡Gracias, {name}!', readySoon: '¡Su pedido estará listo pronto! Total: ${total}', subtotal: 'Subtotal', tax: 'Impuesto', total: 'Total' },
+    };
+    function t(key) { return (UI_STRINGS[selectedLang] || UI_STRINGS.en)[key] || UI_STRINGS.en[key]; }
+
+    langSelector.addEventListener('click', (e) => {
+        const btn = e.target.closest('.lang-btn');
+        if (!btn) return;
+        langSelector.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        selectedLang = btn.dataset.lang;
+    });
+
     // ── State ──
     let ws = null;
     let player = null;
@@ -705,7 +768,7 @@
             ws.onopen = () => {
                 transcriptArea.innerHTML = '';
                 isRunning = true;
-                ws.send(JSON.stringify({ type: 'start' }));
+                ws.send(JSON.stringify({ type: 'start', language: selectedLang }));
                 micBtn.disabled = false;
                 micBtn.classList.add('active');
                 statusText.textContent = 'Listening...';
@@ -847,12 +910,15 @@
         const tax = Math.round(subtotal * 0.07 * 100) / 100;
         const total = subtotal + tax;
 
+        document.querySelector('#orderTotals .row:nth-child(1) span:first-child').textContent = t('subtotal');
+        document.querySelector('#orderTotals .row:nth-child(2) span:first-child').textContent = t('tax');
+        document.querySelector('#orderTotals .row.total span:first-child').textContent = t('total');
         subtotalVal.textContent = `$${subtotal.toFixed(2)}`;
         taxVal.textContent = `$${tax.toFixed(2)}`;
         totalVal.textContent = `$${total.toFixed(2)}`;
         orderTotals.style.display = 'block';
 
-        checkoutTotal.textContent = `Total: $${total.toFixed(2)}`;
+        checkoutTotal.textContent = `${t('total')}: $${total.toFixed(2)}`;
         checkoutBtn.style.display = 'block';
     }
 
@@ -862,13 +928,13 @@
         const msg = document.createElement('div');
         msg.className = 'order-placed-msg';
         const h3 = document.createElement('h3');
-        h3.textContent = 'ORDER PLACED!';
+        h3.textContent = t('orderPlaced');
         const nameDiv = document.createElement('div');
         nameDiv.className = 'name';
-        nameDiv.textContent = `Thank you, ${data.customer_name}!`;
+        nameDiv.textContent = t('thankYou').replace('{name}', data.customer_name);
         const detailsDiv = document.createElement('div');
         detailsDiv.className = 'details';
-        detailsDiv.textContent = `Your order will be ready soon! Total: $${total}`;
+        detailsDiv.textContent = t('readySoon').replace('{total}', total);
         msg.appendChild(h3);
         msg.appendChild(nameDiv);
         msg.appendChild(detailsDiv);

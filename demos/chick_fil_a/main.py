@@ -45,6 +45,42 @@ MENU_PATH = Path(__file__).parent / "menu.json"
 with open(MENU_PATH) as f:
     MENU_DATA = json.load(f)
 
+TRANSLATIONS_PATH = Path(__file__).parent / "menu_translations.json"
+with open(TRANSLATIONS_PATH) as f:
+    MENU_TRANSLATIONS = json.load(f)
+
+
+def translate_menu_items(items: list[dict], lang: str) -> list[dict]:
+    """Return a translated copy of menu items for the given language."""
+    if lang == "en":
+        return items
+    item_tr = MENU_TRANSLATIONS.get("items", {})
+    opt_tr = MENU_TRANSLATIONS.get("options", {})
+    translated = []
+    for item in items:
+        t = item_tr.get(item["id"], {}).get(lang, {})
+        new_item = {**item}
+        if t.get("name"):
+            new_item["name"] = t["name"]
+        if t.get("description"):
+            new_item["description"] = t["description"]
+        # Translate options
+        if item.get("options"):
+            new_opts = {}
+            for opt_key, opt_vals in item["options"].items():
+                tr_map = opt_tr.get(opt_key, {}).get(lang, {})
+                new_opts[opt_key] = [tr_map.get(v, v) for v in opt_vals]
+            new_item["options"] = new_opts
+        translated.append(new_item)
+    return translated
+
+
+def translate_category_name(cat_key: str, cat_name: str, lang: str) -> str:
+    """Return the translated category name."""
+    if lang == "en":
+        return cat_name
+    return MENU_TRANSLATIONS.get("categories", {}).get(cat_key, {}).get(lang, cat_name)
+
 
 # ---------------------------------------------------------------------------
 # Session state
@@ -81,11 +117,18 @@ def find_menu_item(item_id: str) -> tuple[dict | None, str | None]:
     return None, None
 
 
+def translate_item_name(item_id: str, fallback: str, lang: str) -> str:
+    """Translate a single item name by its ID."""
+    if lang == "en":
+        return fallback
+    return MENU_TRANSLATIONS.get("items", {}).get(item_id, {}).get(lang, {}).get("name", fallback)
+
+
 def order_items_json(state: OrderState) -> list[dict]:
     """Serialize current order items for the frontend."""
     return [
         {
-            "name": item.item_name,
+            "name": translate_item_name(item.item_id, item.item_name, state.lang),
             "price": item.price,
             "customizations": item.customizations,
         }
@@ -123,7 +166,7 @@ def get_system_prompt(state: OrderState) -> str:
     else:
         order_summary = "\n\nCURRENT ORDER: Empty"
 
-    return f"""You are a friendly and efficient Chick-fil-A ordering assistant.
+    return f"""You are a friendly and efficient restaurant ordering assistant.
 
 You help customers browse the menu, customize their items, and place orders.
 
@@ -214,7 +257,7 @@ CRITICAL:
 - When calling add_to_order, you MUST use the item ID (like "spicy_sandwich"), not the display name!
 - When they want to CHANGE an existing item's options, use modify_item (NOT remove + add)
 
-Start by greeting the customer warmly and asking how you can help them today!
+Start by greeting the customer warmly in {dict(en="English", fr="French", es="Spanish", de="German", pt="Portuguese").get(state.lang, "English")} and asking how you can help them today!
 """
 
 
@@ -367,7 +410,10 @@ async def websocket_order(websocket: WebSocket):
         )
 
     def on_start(msg: dict) -> gradbot.SessionConfig:
-        logger.info("Starting Chick-fil-A ordering session")
+        lang = msg.get("language", "en")
+        if lang in LANG_CONFIG:
+            state.lang = lang
+        logger.info("Starting Chick-fil-A ordering session (lang=%s)", state.lang)
         return make_config()
 
     async def handle_tool_call(tool_call, tool_handle, input_handle, websocket):
@@ -377,13 +423,14 @@ async def websocket_order(websocket: WebSocket):
 
         if tool_name == "show_menu":
             category = args.get("category", "all")
+            lang = state.lang
 
             if category == "all":
                 menu_items = []
                 for cat_key, cat_data in MENU_DATA["categories"].items():
                     menu_items.append({
-                        "category": cat_data["name"],
-                        "items": cat_data["items"]
+                        "category": translate_category_name(cat_key, cat_data["name"], lang),
+                        "items": translate_menu_items(cat_data["items"], lang),
                     })
 
                 await websocket.send_json({
@@ -399,17 +446,20 @@ async def websocket_order(websocket: WebSocket):
             else:
                 cat_data = MENU_DATA["categories"].get(category)
                 if cat_data:
+                    cat_name = translate_category_name(category, cat_data["name"], lang)
+                    items = translate_menu_items(cat_data["items"], lang)
+
                     await websocket.send_json({
                         "type": "menu_display",
-                        "category": cat_data["name"],
-                        "menu": [{"category": cat_data["name"], "items": cat_data["items"]}],
+                        "category": cat_name,
+                        "menu": [{"category": cat_name, "items": items}],
                     })
 
                     await tool_handle.send(json.dumps({
                         "success": True,
-                        "category": cat_data["name"],
-                        "items": cat_data["items"],
-                        "message": f"{cat_data['name']} menu is displayed. Describe the options and help them choose!",
+                        "category": cat_name,
+                        "items": items,
+                        "message": f"{cat_name} menu is displayed. Describe the options and help them choose!",
                     }))
                 else:
                     await tool_handle.send_error(f"Category '{category}' not found")
