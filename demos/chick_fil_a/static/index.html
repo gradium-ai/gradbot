@@ -3,473 +3,476 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chick-fil-A Voice Ordering</title>
+    <title>Friendly Fried Chicken Joint</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Lato:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
+        :root {
+            --red: #E51636;
+            --red-dark: #b01228;
+            --maroon: #5b1014;
+            --cream: #FFF8F0;
+            --cream-dark: #F5EDE3;
+            --brown-light: #D4C4B0;
+            --brown: #8B7355;
+            --text: #3D2B1F;
+            --text-light: #7A6A5E;
+            --white: #FFFFFF;
+            --shadow-sm: 0 1px 3px rgba(61,43,31,0.08);
+            --shadow-md: 0 4px 12px rgba(61,43,31,0.1);
+            --shadow-lg: 0 8px 30px rgba(61,43,31,0.12);
         }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #ee3124 0%, #dd2419 50%, #ee3124 100%);
+            font-family: 'Lato', sans-serif;
+            background: var(--cream);
+            background-image:
+                radial-gradient(circle at 20% 50%, rgba(229,22,54,0.03) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(139,115,85,0.05) 0%, transparent 40%);
             min-height: 100vh;
-            color: #ffffff;
+            color: var(--text);
         }
 
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 1.5rem;
-        }
-
-        h1 {
-            text-align: center;
-            margin-bottom: 0.25rem;
-            font-size: 2.5rem;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-
-        .subtitle {
-            text-align: center;
-            color: #ffe8e6;
-            margin-bottom: 1.5rem;
-            font-size: 1rem;
-        }
-
-        /* Agent card */
-        .agent-card {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 16px;
-            padding: 1rem 1.25rem;
-            margin-bottom: 1.25rem;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            color: #333;
-        }
-
-        .agent-avatar {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #ee3124, #dd2419);
+        /* ── Header strip ── */
+        .top-bar {
+            background: var(--red);
+            padding: 10px 24px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 2rem;
-            flex-shrink: 0;
-            box-shadow: 0 2px 8px rgba(238, 49, 36, 0.4);
+            gap: 12px;
+            box-shadow: 0 2px 8px rgba(229,22,54,0.3);
+        }
+        .top-bar h1 {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.6rem;
+            color: var(--white);
+            letter-spacing: 2px;
         }
 
-        .agent-info h2 {
-            font-size: 1.25rem;
-            margin-bottom: 0.15rem;
-            color: #333;
-        }
-
-        .agent-info .role {
-            color: #666;
-            font-size: 0.9rem;
-        }
-
-        .recording-indicator {
-            margin-left: auto;
-            display: none;
-            align-items: center;
-            gap: 0.5rem;
-            color: #4ade80;
-            font-size: 0.9rem;
-            font-weight: 600;
-        }
-
-        .recording-indicator.active {
-            display: flex;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
-
-        .recording-dot {
-            width: 12px;
-            height: 12px;
-            background: #4ade80;
-            border-radius: 50%;
-            animation: pulse 1.2s infinite;
-        }
-
-        /* Two-column layout */
-        .main-panels {
+        /* ── Layout ── */
+        .layout {
             display: grid;
-            grid-template-columns: 1.5fr 1fr;
-            gap: 1.5rem;
-            margin-bottom: 1.25rem;
+            grid-template-columns: 270px 1fr 320px;
+            gap: 16px;
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 16px;
+            min-height: calc(100vh - 52px);
+        }
+        @media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+
+        /* ── Panels base ── */
+        .panel {
+            background: var(--white);
+            border-radius: 12px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid rgba(212,196,176,0.4);
         }
 
-        @media (max-width: 968px) {
-            .main-panels {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        /* Menu Display Panel */
-        .menu-panel {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 16px;
-            padding: 1.5rem;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            min-height: 500px;
-            max-height: 700px;
-            display: flex;
-            flex-direction: column;
-            color: #333;
-        }
-
-        .order-panel {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 16px;
-            padding: 1.5rem;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            min-height: 500px;
-            max-height: 700px;
-            display: flex;
-            flex-direction: column;
-            color: #333;
-        }
-
-        .panel-header {
-            font-size: 0.9rem;
-            color: #ee3124;
-            text-transform: uppercase;
+        .panel-title {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.35rem;
             letter-spacing: 1.5px;
-            margin-bottom: 1rem;
-            font-weight: 700;
+            color: var(--maroon);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--cream-dark);
+            margin-bottom: 16px;
+        }
+        .panel-title svg { width: 20px; height: 20px; color: var(--red); }
+
+        /* ── Left: Agent panel ── */
+        .agent-panel {
+            padding: 20px 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            position: sticky;
+            top: 16px;
+            max-height: calc(100vh - 84px);
         }
 
-        .menu-content {
+        .agent-panel .panel-title {
+            width: 100%;
+            border-bottom: none;
+            justify-content: center;
+            padding-bottom: 0;
+            margin-bottom: 4px;
+            font-size: 1.2rem;
+        }
+
+        .chicken-container {
+            width: 230px;
+            height: 250px;
+            border-radius: 12px;
+            background:
+                linear-gradient(135deg, var(--cream) 0%, var(--cream-dark) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            border: 2px solid var(--cream-dark);
+            position: relative;
+            overflow: hidden;
+        }
+        .chicken-container::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 10px;
+            background: radial-gradient(ellipse at 50% 80%, rgba(229,22,54,0.06) 0%, transparent 60%);
+            pointer-events: none;
+        }
+        .chicken-container img {
+            width: 210px;
+            height: auto;
+            object-fit: contain;
+            filter: drop-shadow(0 4px 8px rgba(61,43,31,0.15));
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Waveform */
+        .waveform {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            height: 28px;
+            justify-content: center;
+            padding: 0 8px;
+        }
+        .waveform .bar {
+            width: 3px;
+            background: var(--red);
+            border-radius: 3px;
+            transition: height 0.06s ease-out;
+            height: 3px;
+            opacity: 0.7;
+        }
+
+        /* Transcript */
+        .transcript-area {
             flex: 1;
+            width: 100%;
             overflow-y: auto;
-            min-height: 0;
+            min-height: 60px;
+            max-height: 180px;
+            font-size: 0.88rem;
+            color: var(--text-light);
+            line-height: 1.5;
+            padding: 4px 0;
+        }
+        .transcript-area .placeholder {
+            text-align: center;
+            padding: 20px 8px;
+            color: var(--brown-light);
+            font-size: 0.85rem;
+        }
+        .transcript-area .msg {
+            margin-bottom: 6px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            text-align: left;
+        }
+        .transcript-area .msg.user {
+            background: #EFF6FF;
+            color: #1D4ED8;
+            margin-left: 20px;
+            border: 1px solid #DBEAFE;
+        }
+        .transcript-area .msg.agent {
+            background: var(--cream);
+            color: var(--text);
+            margin-right: 20px;
+            border: 1px solid var(--cream-dark);
+        }
+        .transcript-area .msg .label {
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0.5;
+            margin-bottom: 2px;
+        }
+
+        /* Mic button */
+        .mic-btn {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            border: 3px solid var(--red);
+            background: var(--white);
+            color: var(--red);
+            cursor: pointer;
+            box-shadow: 0 2px 12px rgba(229,22,54,0.2);
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .mic-btn:hover {
+            background: var(--red);
+            color: var(--white);
+            transform: scale(1.05);
+            box-shadow: 0 4px 20px rgba(229,22,54,0.35);
+        }
+        .mic-btn:disabled { border-color: var(--brown-light); color: var(--brown-light); box-shadow: none; cursor: not-allowed; background: var(--cream); }
+        .mic-btn.active {
+            background: var(--red);
+            color: var(--white);
+            border-color: var(--red);
+            box-shadow: 0 0 0 4px rgba(229,22,54,0.15), 0 4px 16px rgba(229,22,54,0.3);
+            animation: pulse-ring 2s ease-out infinite;
+        }
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 4px rgba(229,22,54,0.15), 0 4px 16px rgba(229,22,54,0.3); }
+            50% { box-shadow: 0 0 0 8px rgba(229,22,54,0.08), 0 4px 16px rgba(229,22,54,0.3); }
+            100% { box-shadow: 0 0 0 4px rgba(229,22,54,0.15), 0 4px 16px rgba(229,22,54,0.3); }
+        }
+
+        .status-text {
+            font-size: 0.75rem;
+            color: var(--brown);
+            letter-spacing: 0.5px;
+        }
+
+        /* ── Center: Menu panel ── */
+        .menu-panel {
+            padding: 24px;
+            overflow-y: auto;
+            max-height: calc(100vh - 84px);
+        }
+
+        .menu-empty {
+            color: var(--brown-light);
+            text-align: center;
+            padding: 60px 20px;
+            font-size: 0.95rem;
+        }
+
+        .menu-category { margin-bottom: 28px; }
+
+        .category-title {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.3rem;
+            letter-spacing: 1px;
+            color: var(--maroon);
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 3px solid var(--red);
+            display: inline-block;
+        }
+
+        .menu-item {
+            padding: 14px 12px;
+            margin-bottom: 4px;
+            border-radius: 8px;
+            transition: background 0.15s ease;
+        }
+        .menu-item:hover { background: var(--cream); }
+
+        .item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 4px;
+        }
+        .item-name { font-weight: 700; color: var(--text); font-size: 0.95rem; }
+        .item-price {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.15rem;
+            color: var(--red);
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+            margin-left: 16px;
+        }
+        .item-description { color: var(--text-light); font-size: 0.82rem; line-height: 1.4; margin-bottom: 4px; }
+        .item-options { font-size: 0.78rem; color: var(--brown); font-style: italic; }
+
+        /* ── Right: Order panel ── */
+        .order-panel {
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            position: sticky;
+            top: 16px;
+            max-height: calc(100vh - 84px);
         }
 
         .order-content {
             flex: 1;
             overflow-y: auto;
             min-height: 0;
-            margin-bottom: 1rem;
-        }
-
-        .menu-empty {
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #999;
-            font-style: italic;
-            text-align: center;
-            padding: 2rem;
         }
 
         .order-empty {
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #999;
-            font-style: italic;
+            color: var(--brown-light);
             text-align: center;
-            padding: 2rem;
-        }
-
-        /* Menu category */
-        .menu-category {
-            margin-bottom: 2rem;
-        }
-
-        .category-title {
-            font-size: 1.3rem;
-            font-weight: 700;
-            color: #ee3124;
-            margin-bottom: 0.75rem;
-            padding-bottom: 0.5rem;
-            border-bottom: 2px solid #ee3124;
-        }
-
-        .menu-item {
-            background: #f8f8f8;
-            border-radius: 10px;
-            padding: 1rem;
-            margin-bottom: 0.75rem;
-            border: 1px solid #e0e0e0;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .menu-item:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-        }
-
-        .item-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: start;
-            margin-bottom: 0.5rem;
-        }
-
-        .item-name {
-            font-size: 1.05rem;
-            font-weight: 600;
-            color: #333;
-        }
-
-        .item-price {
-            font-size: 1.1rem;
-            font-weight: 700;
-            color: #ee3124;
-        }
-
-        .item-description {
-            color: #666;
+            padding: 40px 16px;
             font-size: 0.9rem;
-            margin-bottom: 0.5rem;
         }
 
-        .item-options {
-            font-size: 0.85rem;
-            color: #888;
-            font-style: italic;
-        }
-
-        /* Order items */
         .order-item {
-            background: #f8f8f8;
-            border-radius: 8px;
-            padding: 0.75rem;
-            margin-bottom: 0.5rem;
-            border-left: 3px solid #ee3124;
+            padding: 12px 0;
+            border-bottom: 1px dashed var(--cream-dark);
         }
+        .order-item:last-child { border-bottom: none; }
 
         .order-item-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 0.25rem;
         }
-
-        .order-item-name {
-            font-weight: 600;
-            color: #333;
-        }
-
+        .order-item-name { font-weight: 700; color: var(--text); font-size: 0.9rem; }
+        .order-item-qty { color: var(--brown); font-size: 0.8rem; margin-left: 6px; }
         .order-item-price {
-            font-weight: 700;
-            color: #ee3124;
-        }
-
-        .order-item-custom {
-            font-size: 0.85rem;
-            color: #666;
-            margin-top: 0.25rem;
-        }
-
-        .order-total {
-            background: linear-gradient(135deg, #ee3124, #dd2419);
-            color: white;
-            padding: 1rem;
-            border-radius: 10px;
-            text-align: center;
-            font-size: 1.3rem;
-            font-weight: 700;
-            margin-top: auto;
-        }
-
-        .order-placed {
-            background: linear-gradient(135deg, #4ade80, #22c55e);
-            color: white;
-            padding: 1.5rem;
-            border-radius: 10px;
-            text-align: center;
-            margin-top: 1rem;
-        }
-
-        .order-placed h3 {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .order-placed p {
-            font-size: 1rem;
-            opacity: 0.95;
-        }
-
-        /* Transcript Panel */
-        .transcript-panel {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 16px;
-            padding: 1.5rem;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            max-height: 350px;
-            display: flex;
-            flex-direction: column;
-            color: #333;
-        }
-
-        .transcript-content {
-            flex: 1;
-            overflow-y: auto;
-            min-height: 0;
-        }
-
-        .transcript-message {
-            margin-bottom: 0.75rem;
-            padding: 0.75rem;
-            border-radius: 8px;
-            font-size: 0.95rem;
-        }
-
-        .transcript-message.user {
-            background: #e8f4fd;
-            color: #0066cc;
-            margin-left: 2rem;
-        }
-
-        .transcript-message.agent {
-            background: #fee;
-            color: #333;
-            margin-right: 2rem;
-        }
-
-        .transcript-label {
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 0.25rem;
-            opacity: 0.7;
-        }
-
-        /* Start button */
-        .start-button {
-            background: linear-gradient(135deg, #ee3124, #dd2419);
-            color: white;
-            border: none;
-            padding: 0.9rem 2rem;
+            font-family: 'Bebas Neue', sans-serif;
             font-size: 1.1rem;
-            font-weight: 700;
-            border-radius: 50px;
-            cursor: pointer;
-            transition: all 0.3s;
-            box-shadow: 0 4px 12px rgba(238, 49, 36, 0.4);
-            text-transform: uppercase;
-            letter-spacing: 1px;
+            color: var(--text);
+            letter-spacing: 0.5px;
+        }
+        .order-item-custom {
+            font-size: 0.78rem;
+            color: var(--text-light);
+            margin-top: 4px;
+            padding-left: 14px;
+        }
+        .order-item-custom li { margin-bottom: 1px; }
+
+        /* Order totals */
+        .order-totals {
+            border-top: 2px solid var(--cream-dark);
+            padding-top: 12px;
+            margin-top: 8px;
+        }
+        .order-totals .row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+            font-size: 0.88rem;
+            color: var(--text-light);
+        }
+        .order-totals .row.total {
+            font-weight: 900;
+            font-size: 1rem;
+            color: var(--text);
+            margin-top: 4px;
+            padding-top: 6px;
+            border-top: 1px solid var(--cream-dark);
         }
 
-        .start-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(238, 49, 36, 0.5);
-        }
-
-        .start-button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            box-shadow: none;
-        }
-
-        .controls {
+        .checkout-btn {
+            margin-top: 16px;
+            width: 100%;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 10px;
+            background: var(--red);
+            color: var(--white);
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.3rem;
+            letter-spacing: 1.5px;
             text-align: center;
-            margin-top: 1rem;
+            box-shadow: 0 4px 16px rgba(229,22,54,0.3);
         }
+        .checkout-btn .sub { font-family: 'Lato', sans-serif; font-size: 0.7rem; letter-spacing: 0; opacity: 0.8; }
 
-        /* Custom scrollbar */
-        .menu-content::-webkit-scrollbar,
+        /* Order placed */
+        .order-placed-msg {
+            margin-top: 16px;
+            background: linear-gradient(135deg, #F0FDF4, #DCFCE7);
+            border: 2px solid #86EFAC;
+            border-radius: 12px;
+            padding: 20px 16px;
+            text-align: center;
+        }
+        .order-placed-msg h3 {
+            font-family: 'Bebas Neue', sans-serif;
+            color: var(--red);
+            font-size: 1.6rem;
+            letter-spacing: 2px;
+        }
+        .order-placed-msg .name { color: var(--maroon); font-weight: 700; font-size: 1.05rem; margin-top: 4px; }
+        .order-placed-msg .details { color: var(--text-light); font-size: 0.85rem; margin-top: 8px; line-height: 1.5; }
+
+        /* Scrollbars */
+        .menu-panel::-webkit-scrollbar,
         .order-content::-webkit-scrollbar,
-        .transcript-content::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        .menu-content::-webkit-scrollbar-track,
+        .transcript-area::-webkit-scrollbar { width: 5px; }
+        .menu-panel::-webkit-scrollbar-track,
         .order-content::-webkit-scrollbar-track,
-        .transcript-content::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 4px;
-        }
-
-        .menu-content::-webkit-scrollbar-thumb,
+        .transcript-area::-webkit-scrollbar-track { background: transparent; }
+        .menu-panel::-webkit-scrollbar-thumb,
         .order-content::-webkit-scrollbar-thumb,
-        .transcript-content::-webkit-scrollbar-thumb {
-            background: #ee3124;
-            border-radius: 4px;
-        }
-
-        .menu-content::-webkit-scrollbar-thumb:hover,
+        .transcript-area::-webkit-scrollbar-thumb { background: var(--brown-light); border-radius: 3px; }
+        .menu-panel::-webkit-scrollbar-thumb:hover,
         .order-content::-webkit-scrollbar-thumb:hover,
-        .transcript-content::-webkit-scrollbar-thumb:hover {
-            background: #dd2419;
-        }
+        .transcript-area::-webkit-scrollbar-thumb:hover { background: var(--brown); }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🍗 Chick-fil-A Voice Ordering</h1>
-        <p class="subtitle">Order your favorite Chick-fil-A items with your voice!</p>
+    <!-- Top bar -->
+    <div class="top-bar">
+        <h1>FRIENDLY FRIED CHICKEN JOINT</h1>
+    </div>
 
-        <!-- Agent Card -->
-        <div class="agent-card">
-            <div class="agent-avatar">🎙️</div>
-            <div class="agent-info">
-                <h2>Chick-fil-A Team Member</h2>
-                <p class="role">Voice Ordering Assistant</p>
+    <div class="layout">
+        <!-- Left: Agent -->
+        <div class="agent-panel panel">
+            <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+                MR CHICKCHIK
             </div>
-            <div class="recording-indicator" id="recordingIndicator">
-                <div class="recording-dot"></div>
-                <span>Listening...</span>
+            <div class="chicken-container">
+                <img id="chickenImg" src="/static/visemes/sil.png" alt="Chicken assistant">
+            </div>
+            <div class="waveform" id="waveform"></div>
+            <div class="transcript-area" id="transcriptArea">
+                <div class="placeholder">Tap the mic to start ordering</div>
+            </div>
+            <button class="mic-btn" id="micBtn" title="Start ordering">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            </button>
+            <div class="status-text" id="statusText">Tap to start</div>
+        </div>
+
+        <!-- Center: Menu -->
+        <div class="menu-panel panel">
+            <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                MENU
+            </div>
+            <div id="menuContent">
+                <div class="menu-empty">Ask to see the menu to get started!</div>
             </div>
         </div>
 
-        <!-- Main Panels -->
-        <div class="main-panels">
-            <!-- Menu Display -->
-            <div class="menu-panel">
-                <div class="panel-header">📋 Menu</div>
-                <div class="menu-content" id="menuContent">
-                    <div class="menu-empty">
-                        Ask to see the menu to get started!
-                    </div>
-                </div>
+        <!-- Right: Order -->
+        <div class="order-panel panel">
+            <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                YOUR ORDER
             </div>
-
-            <!-- Order Display -->
-            <div class="order-panel">
-                <div class="panel-header">🛒 Your Order</div>
-                <div class="order-content" id="orderContent">
-                    <div class="order-empty">
-                        Your order is empty
-                    </div>
-                </div>
-                <div class="order-total" id="orderTotal" style="display: none;">
-                    Total: $0.00
-                </div>
-                <div id="orderPlaced"></div>
+            <div class="order-content" id="orderContent">
+                <div class="order-empty">Your order is empty</div>
             </div>
-        </div>
-
-        <!-- Transcript -->
-        <div class="transcript-panel">
-            <div class="panel-header">💬 Conversation</div>
-            <div class="transcript-content" id="transcriptContent">
-                <div class="menu-empty">
-                    Start a conversation to see the transcript...
-                </div>
+            <div class="order-totals" id="orderTotals" style="display:none">
+                <div class="row"><span>Subtotal</span><span id="subtotalVal">$0.00</span></div>
+                <div class="row"><span>Tax</span><span id="taxVal">$0.00</span></div>
+                <div class="row total"><span>Total</span><span id="totalVal">$0.00</span></div>
             </div>
-        </div>
-
-        <!-- Controls -->
-        <div class="controls">
-            <button class="start-button" id="startButton">Start Ordering</button>
+            <div class="checkout-btn" id="checkoutBtn" style="display:none">
+                <span id="checkoutTotal">Total: $0.00</span><br>
+                <span class="sub">Tap to Add Items</span>
+            </div>
+            <div id="orderPlacedArea"></div>
         </div>
     </div>
 
@@ -478,320 +481,436 @@
     <script src="/static/js/synced-audio-player.js"></script>
     <script>fetch("/api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
     <script>
-        const startButton = document.getElementById('startButton');
-        const recordingIndicator = document.getElementById('recordingIndicator');
-        const menuContent = document.getElementById('menuContent');
-        const orderContent = document.getElementById('orderContent');
-        const orderTotal = document.getElementById('orderTotal');
-        const orderPlaced = document.getElementById('orderPlaced');
-        const transcriptContent = document.getElementById('transcriptContent');
-
-        let ws = null;
-        let player = null;
-        let isRunning = false;
-
-        // Turn tracking for transcript grouping
-        let turnBubbles = {};
-        let userBubble = null;
-        let hadAssistantBubble = false;
-
-        async function startSession() {
-            if (isRunning) {
-                stopSession();
-                return;
-            }
-
-            startButton.disabled = true;
-            startButton.textContent = 'Connecting...';
-
-            try {
-                // Create audio player
-                player = new SyncedAudioPlayer({
-                    basePath: '/static/js',
-                    sampleRate: 24000,
-                    pcmOutput: window.__pcmOutput || false,
-                    echoCancellation: true,
-                    onEncodedAudio: (opusData) => {
-                        if (isRunning && ws && ws.readyState === WebSocket.OPEN) {
-                            ws.send(opusData);
-                        }
-                    },
-                    onText: handleText,
-                    onEvent: (eventType, msg) => {
-                        handleMessage(msg);
-                    },
-                    onError: (error) => {
-                        console.error('Player error:', error);
-                    }
-                });
-
-                await player.start();
-
-                // Connect WebSocket
-                const wsUrl = `ws://${window.location.host}/ws/order`;
-                ws = new WebSocket(wsUrl);
-
-                ws.onopen = () => {
-                    console.log('Connected to ordering agent');
-                    transcriptContent.innerHTML = '';  // Clear stale transcript
-                    isRunning = true;  // Set BEFORE messages arrive
-                    ws.send(JSON.stringify({ type: 'start' }));
-                    startButton.disabled = false;
-                    startButton.textContent = 'Stop Ordering';
-                    recordingIndicator.classList.add('active');
-                };
-
-                ws.onmessage = (event) => {
-                    player.handleMessage(event.data);
-                };
-
-                ws.onclose = () => {
-                    console.log('Disconnected from ordering agent');
-                    stopSession();
-                };
-
-                ws.onerror = (error) => {
-                    console.error('WebSocket error:', error);
-                    stopSession();
-                };
-
-            } catch (error) {
-                console.error('Failed to start session:', error);
-                startButton.disabled = false;
-                startButton.textContent = 'Start Ordering';
-                alert('Failed to start session: ' + error.message);
-            }
+    // ── Viseme lipsync engine (ported from wawa-lipsync) ──
+    class ChickenLipsync {
+        constructor(analyser) {
+            this.analyser = analyser;
+            this.dataArray = new Uint8Array(analyser.frequencyBinCount);
+            this.sampleRate = 48000;
+            this.binWidth = this.sampleRate / (analyser.fftSize || 2048);
+            this.bands = [
+                {start:50,end:200},{start:200,end:400},{start:400,end:800},
+                {start:800,end:1500},{start:1500,end:2500},{start:2500,end:4000},{start:4000,end:8000}
+            ];
+            this.history = [];
+            this.historySize = 10;
+            this.viseme = 'sil';
+            this.visemeStartTime = 0;
         }
 
-        function stopSession() {
-            isRunning = false;
-            startButton.textContent = 'Start Ordering';
-            startButton.disabled = false;
-            recordingIndicator.classList.remove('active');
+        _avg(arr) { return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0; }
 
-            if (ws) {
-                if (ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'stop' }));
+        _extractBands() {
+            this.analyser.getByteFrequencyData(this.dataArray);
+            return this.bands.map(({start,end}) => {
+                const lo = Math.round(start/this.binWidth);
+                const hi = Math.min(Math.round(end/this.binWidth), this.dataArray.length-1);
+                return this._avg(Array.from(this.dataArray.slice(lo,hi))) / 255;
+            });
+        }
+
+        process() {
+            const bands = this._extractBands();
+            const volume = this._avg(bands);
+
+            let sumW=0, sumWF=0;
+            for (let i=0; i<this.dataArray.length; i++) {
+                const v = this.dataArray[i]/255;
+                sumW += v;
+                sumWF += i * this.binWidth * v;
+            }
+            const centroid = sumW > 0 ? sumWF/sumW : 0;
+
+            const feat = { bands, volume, centroid };
+            this.history.push(feat);
+            if (this.history.length > this.historySize) this.history.shift();
+
+            const avg = this._getAvg();
+            const scores = this._score(feat, avg);
+            const adjusted = this._adjust(scores);
+
+            let best = 'sil', bestVal = -Infinity;
+            for (const [k,v] of Object.entries(adjusted)) {
+                if (v > bestVal) { bestVal = v; best = k; }
+            }
+            if (best !== this.viseme) this.visemeStartTime = performance.now();
+            this.viseme = best;
+            return best;
+        }
+
+        _getAvg() {
+            const n = this.history.length;
+            const avg = { volume:0, centroid:0, bands: Array(7).fill(0) };
+            for (const f of this.history) {
+                avg.volume += f.volume; avg.centroid += f.centroid;
+                f.bands.forEach((b,i) => avg.bands[i] += b);
+            }
+            avg.volume /= n; avg.centroid /= n;
+            avg.bands = avg.bands.map(b => b/n);
+            return avg;
+        }
+
+        _score(feat, avg) {
+            const s = {sil:0,PP:0,FF:0,TH:0,DD:0,kk:0,CH:0,SS:0,nn:0,RR:0,aa:0,E:0,I:0,O:0,U:0};
+            const [b0,b1,b2,b3,b4,b5,b6] = feat.bands;
+            const dv = feat.volume - avg.volume;
+            const dc = feat.centroid - avg.centroid;
+
+            if (avg.volume < 0.2 && feat.volume < 0.2) s.sil = 1;
+
+            const plosives = ['PP','DD','kk','nn'];
+            for (const p of plosives) {
+                if (dv < 0.01) s[p] -= 0.5;
+                if (avg.volume < 0.2) s[p] += 0.2;
+                if (dc > 1000) s[p] += 0.2;
+            }
+
+            if (feat.centroid > 1000 && feat.centroid < 8000) {
+                if (feat.centroid > 7000) s.DD += 0.6;
+                else if (feat.centroid > 5000) s.kk += 0.6;
+                else if (feat.centroid > 4000) { s.PP += 1; if (b6>0.25 && feat.centroid<6000) s.DD += 1.4; }
+                else s.nn += 0.6;
+            }
+
+            if (dc > 1000 && feat.centroid > 6000 && avg.centroid > 5000 && feat.bands[6] > 0.4 && avg.bands[6] > 0.3)
+                s.FF = 0.7;
+
+            if (avg.volume > 0.1 && avg.centroid < 6000 && feat.centroid < 6000) {
+                const [,ab1,ab2,ab3,,ab4] = avg.bands;
+                const d12 = Math.abs(ab1-ab2);
+                const spread = Math.max(Math.abs(ab2-ab3), Math.abs(ab2-ab3), Math.abs(ab2-ab3));
+                if (ab2 > 0.1 || ab3 > 0.1) {
+                    if (ab3 > ab2) { s.aa = 0.8; if (ab2 > ab1) s.aa += 0.2; }
+                    if (ab2 > ab1 && ab2 > ab3) s.I = 0.7;
+                    if (d12 < 0.25) s.U = 0.7;
+                    if (spread < 0.25) s.O = 0.9;
+                    if (ab1 > ab2 && ab2 > ab3) s.E = 1;
+                    if (ab2 < 0.2 && ab3 > 0.3) s.I = 0.7;
+                    if (ab2 > 0.25 && ab4 > 0.25) s.O = 0.7;
+                    if (ab2 < 0.15 && ab4 < 0.15) s.U = 0.7;
                 }
-                ws.close();
-                ws = null;
             }
-
-            if (player) {
-                player.stop();
-                player = null;
-            }
-
-            // Reset turn tracking
-            turnBubbles = {};
-            userBubble = null;
-            hadAssistantBubble = false;
+            return s;
         }
 
-        function handleMessage(data) {
-            if (data.type === 'menu_display') {
-                displayMenu(data);
-            } else if (data.type === 'order_updated') {
-                displayOrder(data);
-            } else if (data.type === 'order_placed') {
-                displayOrderPlaced(data);
-            } else if (data.type === 'event') {
-                // Handle events but don't add to transcript
-                console.log('Event:', data.event);
-            } else if (data.type === 'error') {
-                console.error('Server error:', data.message);
+        _adjust(scores) {
+            const out = {...scores};
+            if (this.viseme) {
+                const elapsed = performance.now() - this.visemeStartTime;
+                let mult = 1;
+                if (elapsed <= 100) mult = 1.3;
+                else if (elapsed <= 200) mult = 1.3 - 0.3 * ((elapsed-100)/100);
+                else mult = Math.max(0.5, 1 - (elapsed-200)/1000);
+                if (out[this.viseme] !== undefined) out[this.viseme] *= mult;
             }
-            // All other message types are silently ignored
+            return out;
+        }
+    }
+
+    // ── Viseme image map ──
+    const VISEME_IMAGES = {};
+    ['sil','PP','FF','TH','DD','kk','CH','SS','nn','RR','aa','E','I','O','U'].forEach(v => {
+        VISEME_IMAGES[v] = `/static/visemes/${v}.png`;
+        const img = new Image();
+        img.src = VISEME_IMAGES[v];
+    });
+
+    // ── DOM refs ──
+    const chickenImg = document.getElementById('chickenImg');
+    const micBtn = document.getElementById('micBtn');
+    const statusText = document.getElementById('statusText');
+    const menuContent = document.getElementById('menuContent');
+    const orderContent = document.getElementById('orderContent');
+    const orderTotals = document.getElementById('orderTotals');
+    const subtotalVal = document.getElementById('subtotalVal');
+    const taxVal = document.getElementById('taxVal');
+    const totalVal = document.getElementById('totalVal');
+    const checkoutBtn = document.getElementById('checkoutBtn');
+    const checkoutTotal = document.getElementById('checkoutTotal');
+    const orderPlacedArea = document.getElementById('orderPlacedArea');
+    const transcriptArea = document.getElementById('transcriptArea');
+    const waveformEl = document.getElementById('waveform');
+
+    // Create waveform bars
+    const NUM_BARS = 32;
+    const bars = [];
+    for (let i = 0; i < NUM_BARS; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+        waveformEl.appendChild(bar);
+        bars.push(bar);
+    }
+
+    // ── State ──
+    let ws = null;
+    let player = null;
+    let isRunning = false;
+    let lipsync = null;
+    let rafId = null;
+    let turnBubbles = {};
+    let userBubble = null;
+    let hadAssistantBubble = false;
+
+    // ── Animation loop ──
+    function animationLoop() {
+        if (!lipsync) { rafId = requestAnimationFrame(animationLoop); return; }
+
+        const viseme = lipsync.process();
+        const src = VISEME_IMAGES[viseme];
+        if (chickenImg.src !== src) chickenImg.src = src;
+
+        const analyser = lipsync.analyser;
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(data);
+        const step = Math.floor(data.length / NUM_BARS);
+        for (let i = 0; i < NUM_BARS; i++) {
+            const val = data[i * step] / 255;
+            bars[i].style.height = Math.max(3, val * 24) + 'px';
         }
 
-        function displayMenu(data) {
-            menuContent.innerHTML = '';
+        rafId = requestAnimationFrame(animationLoop);
+    }
 
-            for (const menuSection of data.menu) {
-                const categoryDiv = document.createElement('div');
-                categoryDiv.className = 'menu-category';
+    // ── Session ──
+    async function toggleSession() {
+        if (isRunning) { stopSession(); return; }
 
-                const titleDiv = document.createElement('div');
-                titleDiv.className = 'category-title';
-                titleDiv.textContent = menuSection.category;
-                categoryDiv.appendChild(titleDiv);
+        micBtn.disabled = true;
+        statusText.textContent = 'Connecting...';
 
-                for (const item of menuSection.items) {
-                    const itemDiv = document.createElement('div');
-                    itemDiv.className = 'menu-item';
+        try {
+            player = new SyncedAudioPlayer({
+                basePath: '/static/js',
+                sampleRate: 24000,
+                pcmOutput: window.__pcmOutput || false,
+                echoCancellation: true,
+                onEncodedAudio: (opusData) => {
+                    if (isRunning && ws && ws.readyState === WebSocket.OPEN) ws.send(opusData);
+                },
+                onText: handleText,
+                onEvent: (eventType, msg) => handleMessage(msg),
+                onError: (err) => console.error('Player error:', err),
+            });
+            await player.start();
 
-                    const headerDiv = document.createElement('div');
-                    headerDiv.className = 'item-header';
+            const analyser = player.audioProcessor && player.audioProcessor.outputAnalyser;
+            if (analyser) {
+                lipsync = new ChickenLipsync(analyser);
+                rafId = requestAnimationFrame(animationLoop);
+            }
 
-                    const nameDiv = document.createElement('div');
-                    nameDiv.className = 'item-name';
-                    nameDiv.textContent = item.name;
+            const wsUrl = `ws://${window.location.host}/ws/order`;
+            ws = new WebSocket(wsUrl);
 
-                    const priceDiv = document.createElement('div');
-                    priceDiv.className = 'item-price';
-                    priceDiv.textContent = `$${item.price.toFixed(2)}`;
+            ws.onopen = () => {
+                transcriptArea.innerHTML = '';
+                isRunning = true;
+                ws.send(JSON.stringify({ type: 'start' }));
+                micBtn.disabled = false;
+                micBtn.classList.add('active');
+                statusText.textContent = 'Listening...';
+            };
+            ws.onmessage = (ev) => player.handleMessage(ev.data);
+            ws.onclose = () => stopSession();
+            ws.onerror = () => stopSession();
+        } catch (err) {
+            console.error('Failed to start:', err);
+            micBtn.disabled = false;
+            statusText.textContent = 'Failed — tap to retry';
+        }
+    }
 
-                    headerDiv.appendChild(nameDiv);
-                    headerDiv.appendChild(priceDiv);
+    function stopSession() {
+        isRunning = false;
+        micBtn.classList.remove('active');
+        micBtn.disabled = false;
+        statusText.textContent = 'Tap to start';
 
-                    const descDiv = document.createElement('div');
-                    descDiv.className = 'item-description';
-                    descDiv.textContent = item.description;
+        if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+        lipsync = null;
+        chickenImg.src = VISEME_IMAGES['sil'];
+        bars.forEach(b => b.style.height = '3px');
 
-                    itemDiv.appendChild(headerDiv);
-                    itemDiv.appendChild(descDiv);
+        if (ws) {
+            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }));
+            ws.close(); ws = null;
+        }
+        if (player) { player.stop(); player = null; }
+        turnBubbles = {}; userBubble = null; hadAssistantBubble = false;
+    }
 
-                    if (item.options && Object.keys(item.options).length > 0) {
-                        const optionsDiv = document.createElement('div');
-                        optionsDiv.className = 'item-options';
-                        const optionsList = Object.entries(item.options)
-                            .map(([key, values]) => `${key}: ${values.join(', ')}`)
-                            .join(' | ');
-                        optionsDiv.textContent = `Options: ${optionsList}`;
-                        itemDiv.appendChild(optionsDiv);
-                    }
+    micBtn.addEventListener('click', toggleSession);
 
-                    categoryDiv.appendChild(itemDiv);
+    // ── Message handlers ──
+    function handleMessage(data) {
+        if (data.type === 'menu_display') displayMenu(data);
+        else if (data.type === 'order_updated') displayOrder(data);
+        else if (data.type === 'order_placed') displayOrderPlaced(data);
+    }
+
+    function displayMenu(data) {
+        menuContent.innerHTML = '';
+        for (const section of data.menu) {
+            const cat = document.createElement('div');
+            cat.className = 'menu-category';
+
+            const title = document.createElement('div');
+            title.className = 'category-title';
+            title.textContent = section.category;
+            cat.appendChild(title);
+
+            for (const item of section.items) {
+                const el = document.createElement('div');
+                el.className = 'menu-item';
+
+                const hdr = document.createElement('div');
+                hdr.className = 'item-header';
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'item-name';
+                nameSpan.textContent = item.name;
+                const priceSpan = document.createElement('span');
+                priceSpan.className = 'item-price';
+                priceSpan.textContent = `$${item.price.toFixed(2)}`;
+                hdr.appendChild(nameSpan);
+                hdr.appendChild(priceSpan);
+                el.appendChild(hdr);
+
+                if (item.description) {
+                    const desc = document.createElement('div');
+                    desc.className = 'item-description';
+                    desc.textContent = item.description;
+                    el.appendChild(desc);
                 }
 
-                menuContent.appendChild(categoryDiv);
-            }
-        }
-
-        function displayOrder(data) {
-            if (!data.items || data.items.length === 0) {
-                orderContent.innerHTML = '<div class="order-empty">Your order is empty</div>';
-                orderTotal.style.display = 'none';
-                return;
-            }
-
-            orderContent.innerHTML = '';
-            orderTotal.style.display = 'block';
-
-            for (const item of data.items) {
-                const itemDiv = document.createElement('div');
-                itemDiv.className = 'order-item';
-
-                const headerDiv = document.createElement('div');
-                headerDiv.className = 'order-item-header';
-
-                const nameDiv = document.createElement('div');
-                nameDiv.className = 'order-item-name';
-                nameDiv.textContent = item.name;
-
-                const priceDiv = document.createElement('div');
-                priceDiv.className = 'order-item-price';
-                priceDiv.textContent = `$${item.price.toFixed(2)}`;
-
-                headerDiv.appendChild(nameDiv);
-                headerDiv.appendChild(priceDiv);
-                itemDiv.appendChild(headerDiv);
-
-                if (item.customizations && Object.keys(item.customizations).length > 0) {
-                    const customDiv = document.createElement('div');
-                    customDiv.className = 'order-item-custom';
-                    const customList = Object.entries(item.customizations)
-                        .map(([key, value]) => {
-                            if (Array.isArray(value)) {
-                                return `${key}: ${value.join(', ')}`;
-                            }
-                            return `${key}: ${value}`;
-                        })
+                if (item.options && Object.keys(item.options).length) {
+                    const opts = document.createElement('div');
+                    opts.className = 'item-options';
+                    opts.textContent = 'Options: ' + Object.entries(item.options)
+                        .map(([k,v]) => `${k}: ${v.join(', ')}`)
                         .join(' | ');
-                    customDiv.textContent = customList;
-                    itemDiv.appendChild(customDiv);
+                    el.appendChild(opts);
                 }
-
-                orderContent.appendChild(itemDiv);
+                cat.appendChild(el);
             }
+            menuContent.appendChild(cat);
+        }
+    }
 
-            orderTotal.textContent = `Total: $${data.total.toFixed(2)}`;
+    function displayOrder(data) {
+        if (!data.items || !data.items.length) {
+            orderContent.innerHTML = '<div class="order-empty">Your order is empty</div>';
+            orderTotals.style.display = 'none';
+            checkoutBtn.style.display = 'none';
+            return;
         }
 
-        function displayOrderPlaced(data) {
-            orderPlaced.innerHTML = `
-                <div class="order-placed">
-                    <h3>✅ Order Placed!</h3>
-                    <p>Thank you, ${data.customer_name}!</p>
-                    <p>Total: $${data.total.toFixed(2)}</p>
-                    <p>Your order will be ready soon!</p>
-                </div>
-            `;
-        }
+        orderContent.innerHTML = '';
+        for (const item of data.items) {
+            const el = document.createElement('div');
+            el.className = 'order-item';
 
-        function getBubbleForTurn(turnIdx, isUser) {
-            if (isUser) {
-                // Reuse current user bubble if no assistant spoke since
-                if (userBubble && !hadAssistantBubble) {
-                    return userBubble;
-                }
-                // New user turn - create bubble
-                hadAssistantBubble = false;
-                userBubble = document.createElement('div');
-                userBubble.className = 'transcript-message user';
+            const hdr = document.createElement('div');
+            hdr.className = 'order-item-header';
+            const leftSpan = document.createElement('span');
+            const oName = document.createElement('span');
+            oName.className = 'order-item-name';
+            oName.textContent = item.name;
+            const oQty = document.createElement('span');
+            oQty.className = 'order-item-qty';
+            oQty.textContent = 'x1';
+            leftSpan.appendChild(oName);
+            leftSpan.appendChild(oQty);
+            const oPrice = document.createElement('span');
+            oPrice.className = 'order-item-price';
+            oPrice.textContent = `$${item.price.toFixed(2)}`;
+            hdr.appendChild(leftSpan);
+            hdr.appendChild(oPrice);
+            el.appendChild(hdr);
 
-                const labelDiv = document.createElement('div');
-                labelDiv.className = 'transcript-label';
-                labelDiv.textContent = 'You';
-
-                const textDiv = document.createElement('div');
-                textDiv.className = 'transcript-text';
-
-                userBubble.appendChild(labelDiv);
-                userBubble.appendChild(textDiv);
-
-                transcriptContent.appendChild(userBubble);
-                return userBubble;
-            }
-
-            // Assistant message - use turnIdx
-            let bubble = turnBubbles[turnIdx];
-            if (!bubble) {
-                hadAssistantBubble = true;
-                bubble = document.createElement('div');
-                bubble.className = 'transcript-message agent';
-
-                const labelDiv = document.createElement('div');
-                labelDiv.className = 'transcript-label';
-                labelDiv.textContent = 'Agent';
-
-                const textDiv = document.createElement('div');
-                textDiv.className = 'transcript-text';
-
-                bubble.appendChild(labelDiv);
-                bubble.appendChild(textDiv);
-
-                transcriptContent.appendChild(bubble);
-                turnBubbles[turnIdx] = bubble;
-
-                // Aggressive cleanup to prevent memory leak (matches hotel demo)
-                while (transcriptContent.children.length > 80) {
-                    const removed = transcriptContent.removeChild(transcriptContent.firstChild);
-                    // Sync object references
-                    for (const k in turnBubbles) {
-                        if (turnBubbles[k] === removed) delete turnBubbles[k];
+            if (item.customizations && Object.keys(item.customizations).length) {
+                const cust = document.createElement('ul');
+                cust.className = 'order-item-custom';
+                for (const [k,v] of Object.entries(item.customizations)) {
+                    const vals = Array.isArray(v) ? v : [v];
+                    for (const val of vals) {
+                        const li = document.createElement('li');
+                        li.textContent = val;
+                        cust.appendChild(li);
                     }
-                    if (userBubble === removed) userBubble = null;
                 }
+                el.appendChild(cust);
             }
-            return bubble;
+            orderContent.appendChild(el);
         }
 
-        function handleText({ text, turnIdx, isUser }) {
-            // Clear empty state message if present
-            if (transcriptContent.querySelector('.menu-empty')) {
-                transcriptContent.innerHTML = '';
-            }
+        const subtotal = data.total;
+        const tax = Math.round(subtotal * 0.07 * 100) / 100;
+        const total = subtotal + tax;
 
-            const bubble = getBubbleForTurn(turnIdx, isUser);
-            const textEl = bubble.querySelector('.transcript-text') || bubble.querySelector('div:last-child');
-            if (textEl) {
-                textEl.textContent += text + ' ';
-            }
-            transcriptContent.scrollTop = transcriptContent.scrollHeight;
+        subtotalVal.textContent = `$${subtotal.toFixed(2)}`;
+        taxVal.textContent = `$${tax.toFixed(2)}`;
+        totalVal.textContent = `$${total.toFixed(2)}`;
+        orderTotals.style.display = 'block';
+
+        checkoutTotal.textContent = `Total: $${total.toFixed(2)}`;
+        checkoutBtn.style.display = 'block';
+    }
+
+    function displayOrderPlaced(data) {
+        const total = (data.total + Math.round(data.total * 0.07 * 100) / 100).toFixed(2);
+        orderPlacedArea.innerHTML = '';
+        const msg = document.createElement('div');
+        msg.className = 'order-placed-msg';
+        const h3 = document.createElement('h3');
+        h3.textContent = 'ORDER PLACED!';
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'name';
+        nameDiv.textContent = `Thank you, ${data.customer_name}!`;
+        const detailsDiv = document.createElement('div');
+        detailsDiv.className = 'details';
+        detailsDiv.textContent = `Your order will be ready soon! Total: $${total}`;
+        msg.appendChild(h3);
+        msg.appendChild(nameDiv);
+        msg.appendChild(detailsDiv);
+        orderPlacedArea.appendChild(msg);
+    }
+
+    // ── Transcript ──
+    function getBubble(turnIdx, isUser) {
+        if (isUser) {
+            if (userBubble && !hadAssistantBubble) return userBubble;
+            hadAssistantBubble = false;
+            userBubble = document.createElement('div');
+            userBubble.className = 'msg user';
+            userBubble.innerHTML = '<div class="label">You</div><div class="text"></div>';
+            transcriptArea.appendChild(userBubble);
+            return userBubble;
         }
+        let bubble = turnBubbles[turnIdx];
+        if (!bubble) {
+            hadAssistantBubble = true;
+            bubble = document.createElement('div');
+            bubble.className = 'msg agent';
+            bubble.innerHTML = '<div class="label">Agent</div><div class="text"></div>';
+            transcriptArea.appendChild(bubble);
+            turnBubbles[turnIdx] = bubble;
 
-        startButton.addEventListener('click', startSession);
+            while (transcriptArea.children.length > 60) {
+                const removed = transcriptArea.removeChild(transcriptArea.firstChild);
+                for (const k in turnBubbles) { if (turnBubbles[k] === removed) delete turnBubbles[k]; }
+                if (userBubble === removed) userBubble = null;
+            }
+        }
+        return bubble;
+    }
+
+    function handleText({ text, turnIdx, isUser }) {
+        if (transcriptArea.querySelector('.placeholder')) transcriptArea.innerHTML = '';
+        const bubble = getBubble(turnIdx, isUser);
+        const textEl = bubble.querySelector('.text');
+        if (textEl) textEl.textContent += text + ' ';
+        transcriptArea.scrollTop = transcriptArea.scrollHeight;
+    }
     </script>
 </body>
 </html>
