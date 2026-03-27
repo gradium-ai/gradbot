@@ -40,13 +40,27 @@ export class PlayerAnimator {
     this._typingSfx.loop = true;
     this._typingSfx.volume = 0.3;
 
+    // Grab the idle clip's first-frame Hips position as the reference.
+    // The Armature has a 90° X rotation so bone Z is actually world height.
+    const idleClip = animations.get('Idle');
+    this._hipsRestPos = [0, 0, 0];
+    if (idleClip) {
+      for (const t of idleClip.tracks) {
+        if ((/hips/i.test(t.name) || /root/i.test(t.name)) && t.name.endsWith('.position')) {
+          this._hipsRestPos = [t.values[0], t.values[1], t.values[2]];
+          console.log('[PlayerAnimator] Hips rest pos (from idle):', this._hipsRestPos, 'track:', t.name);
+          break;
+        }
+      }
+    }
+
     for (const [glbName, semanticName] of Object.entries(CLIP_MAP)) {
       let clip = animations.get(glbName);
       if (!clip) continue;
 
-      if (LOCO_NAMES.includes(semanticName) || semanticName === 'look_around') {
-        clip = this._stripRootMotion(clip);
-      }
+      // Strip root motion from all clips — pin Hips Y to idle rest height
+      // so blending between clips doesn't cause vertical drift
+      clip = this._stripRootMotion(clip);
 
       this._clips.set(semanticName, clip);
       const action = mixer.clipAction(clip);
@@ -80,8 +94,13 @@ export class PlayerAnimator {
       const isPosition = t.name.endsWith('.position');
       if (isRoot && isPosition) {
         const values = t.values.slice();
+        // Pin all Hips position components to idle rest pose so clips
+        // blend without any drift (bone Z is world height due to Armature rotation)
+        const [rx, ry, rz] = this._hipsRestPos;
         for (let i = 0; i < values.length; i += 3) {
-          values[i] = 0; // Zero X (lateral drift) only — keep Y (vertical height)
+          values[i] = rx;
+          values[i + 1] = ry;
+          values[i + 2] = rz;
         }
         return new THREE.VectorKeyframeTrack(t.name, Array.from(t.times), Array.from(values));
       }
@@ -178,25 +197,7 @@ export class PlayerAnimator {
       return;
     }
 
-    // Trigger look-around
-    if (movementState === 'idle' && nearClue &&
-        idleTime >= CONFIG.LOOK_AROUND_IDLE_THRESHOLD && !this._lookAroundPlayed) {
-      this._lookAroundPlayed = true;
-      for (const name of ['idle', ...LOCO_NAMES]) {
-        const a = this._actions.get(name);
-        if (a) a.fadeOut(0.4);
-      }
-      const la = this._actions.get('look_around');
-      if (la) {
-        la.reset();
-        la.setLoop(THREE.LoopOnce);
-        la.clampWhenFinished = true;
-        la.setEffectiveWeight(1);
-        la.fadeIn(0.4).play();
-        this._state = 'look_around';
-      }
-      return;
-    }
+    // Look-around disabled — the animation's root motion sinks Mark into the ground
 
     // ── Weight-blending locomotion ──────────────────────────────
     // Sprint uses the walking clip (just played faster), so map sprinting → walking

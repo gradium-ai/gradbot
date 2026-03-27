@@ -536,7 +536,7 @@ Promise.all([
     window.__test = { playerModel: model, milchick, milchickAI, suspicionSystem };
 
     // Debug: ?win=1 to trigger dance victory (dev builds only)
-    if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('win') === '1') {
+    if (import.meta.env?.DEV && new URLSearchParams(window.location.search).get('win') === '1') {
       setTimeout(() => triggerMusicDanceExperience(), 1000);
     }
   });

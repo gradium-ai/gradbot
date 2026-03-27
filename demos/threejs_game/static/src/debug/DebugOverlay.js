@@ -54,7 +54,7 @@ export class DebugOverlay {
     this._setupInput();
 
     // Auto-show if ?debug=1 (dev builds only)
-    const autoShow = import.meta.env.DEV && new URLSearchParams(window.location.search).get('debug') === '1';
+    const autoShow = !!(import.meta.env?.DEV && new URLSearchParams(window.location.search).get('debug') === '1');
     this.setVisible(autoShow);
   }
 
