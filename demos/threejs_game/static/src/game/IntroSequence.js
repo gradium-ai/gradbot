@@ -34,8 +34,8 @@ export class IntroSequence {
    * @returns {Promise<void>}  Resolves when player should regain control
    */
   async play() {
-    const INTRO_TEXT = 'You have suddenly woken up in an office called Gradium. Find the hidden clues without Milchick noticing.';
-    const MILCHICK_LINE = 'Welcome back, Mark. Your outie has agreed to this arrangement. Please begin your work.';
+    const INTRO_TEXT = 'You have suddenly woken up in an office called Gradium. Find the hidden clues without Neil noticing.';
+    const MILCHICK_LINE = 'Welcome back, Laurent. Your outie has agreed to this arrangement. Please begin your work.';
 
     // Position Mark at the desk chair and start typing
     if (this._model) {
@@ -70,7 +70,7 @@ export class IntroSequence {
 
     // 3. Milchick greeting — show subtitle immediately, TTS enhances
     this._milchick.startTalking();
-    this._ui.showSubtitle('Milchick', `"${MILCHICK_LINE}"`, 0);
+    this._ui.showSubtitle('Neil', `"${MILCHICK_LINE}"`, 0);
     let greetingAudioPlayed = false;
 
     if (this._tts) {

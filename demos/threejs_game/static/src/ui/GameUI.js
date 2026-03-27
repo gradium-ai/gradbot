@@ -482,7 +482,7 @@ export class GameUI {
         letter-spacing: 2px;
         opacity: 0;
         transition: opacity 1.5s ease 1s;
-      " id="gameover-sub">Milchick has reported your behavior to the Board.</div>
+      " id="gameover-sub">Neil has reported your behavior to the Board.</div>
       <div style="
         color: #666;
         font-size: 13px;

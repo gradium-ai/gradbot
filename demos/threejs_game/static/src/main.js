@@ -123,7 +123,7 @@ clueSystem.addClue({
   name: "Ricken's Book",
   question: 'This forbidden book changed everything. Who is the author of "The You You Are"?',
   options: [
-    'Mark Scout',
+    'Laurent Scout',
     'Ricken Hale',
     'Burt Goodman',
     'Harmony Cobel',
@@ -525,7 +525,7 @@ Promise.all([
       try { await sceneManager.renderer.domElement.requestPointerLock(); } catch (_) {}
     }
 
-    gameUI.setObjective('Find hidden clues without Milchick noticing.');
+    gameUI.setObjective('Find hidden clues without Neil noticing.');
     gameUI.updateClueCounter(clueSystem.solved, clueSystem.total);
     gameUI.showControlsHint();
 

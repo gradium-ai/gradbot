@@ -18,11 +18,11 @@ import { CONFIG } from '../config.js';
 const AI = () => CONFIG.MILCHICK_AI;
 
 const CHECKIN_LINES = [
-  "How's the work coming along, Mark?",
-  "Everything alright at your station, Mark?",
-  "Mark, I noticed you've been away from your desk.",
+  "How's the work coming along, Laurent?",
+  "Everything alright at your station, Laurent?",
+  "Laurent, I noticed you've been away from your desk.",
   "Just checking in. Gradium cares about your wellbeing.",
-  "Mark, are you finding everything you need?",
+  "Laurent, are you finding everything you need?",
   "Your department chief asked me to check on you.",
 ];
 
@@ -217,7 +217,7 @@ export class MilchickAI {
 
     // Show subtitle immediately so the player always sees the line,
     // then try TTS. If TTS plays audio, wait for it; otherwise hold subtitle.
-    this._ui.showSubtitle('Milchick', `"${line}"`, 0);
+    this._ui.showSubtitle('Neil', `"${line}"`, 0);
     let audioPlayed = false;
 
     if (this._tts) {
@@ -290,7 +290,7 @@ export class MilchickAI {
    */
   async _runVoiceCheckin(riskMod) {
     // Show voice panel for player to respond
-    const panelPromise = this._ui.showVoicePanel('Milchick is watching you. Respond naturally.');
+    const panelPromise = this._ui.showVoicePanel('Neil is watching you. Respond naturally.');
 
     // Listen for classification via VoiceClient's onCheckinResult callback
     const classificationPromise = new Promise((resolve) => {
@@ -361,9 +361,9 @@ export class MilchickAI {
 
     if (classification === 'suspicious' || (classification === 'nervous' && riskMod >= 2)) {
       const lines = [
-        "That's... not very convincing, Mark.",
+        "That's... not very convincing, Laurent.",
         "I'm going to have to note this.",
-        "Mark, you seem distracted from your work.",
+        "Laurent, you seem distracted from your work.",
       ];
       line = lines[Math.floor(Math.random() * lines.length)];
       animFn = () => this._milchick.playSuspicious();
@@ -371,7 +371,7 @@ export class MilchickAI {
       const lines = [
         "Hmm. Try to stay focused.",
         "Alright. Back to work then.",
-        "Your department needs you, Mark.",
+        "Your department needs you, Laurent.",
       ];
       line = lines[Math.floor(Math.random() * lines.length)];
       animFn = () => this._milchick.playSuspicious();
@@ -387,7 +387,7 @@ export class MilchickAI {
 
     animFn();
 
-    this._ui.showSubtitle('Milchick', `"${line}"`, 0);
+    this._ui.showSubtitle('Neil', `"${line}"`, 0);
     let audioPlayed = false;
 
     if (this._tts) {

@@ -4,7 +4,7 @@
   "characters": {
     "mark": {
       "id": "mark",
-      "displayName": "Mark Scout",
+      "displayName": "Laurent Scout",
       "skeleton": {
         "url": "assets/glb/severance/mark.glb",
         "bindPose": {
@@ -171,7 +171,7 @@
     },
     "milchick": {
       "id": "milchick",
-      "displayName": "Seth Milchick",
+      "displayName": "Neil",
       "skeleton": {
         "url": "assets/glb/severance/milchick.glb",
         "bindPose": {
