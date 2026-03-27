@@ -18,13 +18,20 @@
     }
     #ui * { pointer-events: auto; }
   </style>
-  <script type="module" crossorigin src="./assets/main-M9-NBVsa.js"></script>
-  <link rel="modulepreload" crossorigin href="./assets/GLTFLoader-fMsyvoDq.js">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
   <div id="ui"></div>
   <!-- Gradbot audio processor (Opus encode/decode for voice sessions) -->
   <script src="js/audio/opus-encoder.js"></script>
   <script src="js/audio/audio-processor.js"></script>
+  <script type="module" src="./src/main.js"></script>
 </body>
 </html>
