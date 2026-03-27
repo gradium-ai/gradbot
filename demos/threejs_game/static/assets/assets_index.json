@@ -6,7 +6,7 @@
       "id": "mark",
       "displayName": "Mark Scout",
       "skeleton": {
-        "url": "/assets/glb/severance/mark.glb",
+        "url": "assets/glb/severance/mark.glb",
         "bindPose": {
           "id": "bind_pose",
           "displayName": "Bind Pose",
@@ -17,7 +17,7 @@
         }
       },
       "animationSource": {
-        "url": "/assets/glb/severance/mark.glb",
+        "url": "assets/glb/severance/mark.glb",
         "notes": "Single GLB contains both skeleton+mesh and all animations."
       },
       "animations": [
@@ -173,7 +173,7 @@
       "id": "milchick",
       "displayName": "Seth Milchick",
       "skeleton": {
-        "url": "/assets/glb/severance/milchick.glb",
+        "url": "assets/glb/severance/milchick.glb",
         "bindPose": {
           "id": "bind_pose",
           "displayName": "Bind Pose",
@@ -184,7 +184,7 @@
         }
       },
       "animationSource": {
-        "url": "/assets/glb/severance/milchick.glb",
+        "url": "assets/glb/severance/milchick.glb",
         "notes": "Single GLB contains both skeleton+mesh and all animations."
       },
       "animations": [

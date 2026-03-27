@@ -374,8 +374,11 @@ if STATIC_DIR.is_dir():
     # Mount asset directories — these take priority over the SPA catch-all
     if (STATIC_DIR / "assets").is_dir():
         app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
-    if (STATIC_DIR / "js").is_dir():
-        app.mount("/js", StaticFiles(directory=STATIC_DIR / "js"), name="js")
+
+    # Serve audio JS (encoder/decoder workers, audio-processor, etc.) from the
+    # gradbot package instead of shipping duplicate copies in static/.
+    _bundled_js = Path(gradbot.__file__).parent / "js_audio_processor"
+    app.mount("/js/audio", StaticFiles(directory=_bundled_js), name="bundled_js")
 
     @app.get("/")
     async def index():
