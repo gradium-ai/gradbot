@@ -11,6 +11,7 @@ import {
   createWallClock,
   createCoreValuesPoster,
   createPainting,
+  createKeyboard,
 } from './Furniture.js';
 
 export class LumonOffice {
@@ -286,6 +287,10 @@ export class LumonOffice {
     this.scene.add(deskIsland);
     // Collision: desk tops span ±1.65 X, chairs extend to ±2.3 Z
     this._addCollisionBox(0, 0, 4.0, 5.0);
+
+    // Keyboard on Laurent's desk (back-left quadrant)
+    const keyboard = createKeyboard(-0.9, 0.63, 1.0, 0);
+    this.scene.add(keyboard);
 
     // Filing cabinets along left wall — one merged box covering all 3
     const cab1 = createFilingCabinet(-7.2, -1.5, Math.PI / 2);

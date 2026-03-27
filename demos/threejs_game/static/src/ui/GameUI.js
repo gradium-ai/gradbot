@@ -19,6 +19,7 @@ export class GameUI {
     this._buildSubtitleBox();
     this._buildObjective();
     this._buildClueCounter();
+    this._buildTimer();
     this._buildPuzzlePrompt();
     this._buildVoicePanel();
     this._buildSuspicionIndicator();
@@ -144,7 +145,7 @@ export class GameUI {
     this._objective = document.createElement('div');
     this._objective.style.cssText = `
       position: fixed; top: 24px; left: 24px;
-      color: rgba(255,255,255,0.6);
+      color: #000;
       font-size: 13px;
       letter-spacing: 1px;
       display: none;
@@ -180,6 +181,44 @@ export class GameUI {
   updateClueCounter(found, total) {
     this._clueCounter.textContent = `CLUES: ${found} / ${total}`;
     this._clueCounter.style.display = 'block';
+  }
+
+  // ── Timer ──────────────────────────────────────────────────
+
+  _buildTimer() {
+    this._timer = document.createElement('div');
+    this._timer.style.cssText = `
+      position: fixed; top: 24px; left: 50%;
+      transform: translateX(-50%);
+      color: #ff3333;
+      font-size: 22px;
+      font-weight: bold;
+      letter-spacing: 3px;
+      display: none;
+      z-index: 70;
+      text-shadow: 0 0 8px rgba(255, 51, 51, 0.5);
+    `;
+    this._container.appendChild(this._timer);
+  }
+
+  updateTimer(secondsLeft) {
+    const min = Math.floor(secondsLeft / 60);
+    const sec = secondsLeft % 60;
+    this._timer.textContent = `${min}:${sec.toString().padStart(2, '0')}`;
+    this._timer.style.display = 'block';
+
+    // Pulse when under 30 seconds
+    if (secondsLeft <= 30) {
+      this._timer.style.animation = 'none';
+      this._timer.offsetHeight; // reflow
+      this._timer.animate([
+        { opacity: 1 }, { opacity: 0.4 }, { opacity: 1 },
+      ], { duration: 600 });
+    }
+  }
+
+  hideTimer() {
+    this._timer.style.display = 'none';
   }
 
   // ── Puzzle prompt ───────────────────────────────────────────
@@ -494,8 +533,10 @@ export class GameUI {
     this._container.appendChild(this._gameOver);
   }
 
-  showGameOver() {
+  showGameOver(title, subtitle) {
     document.exitPointerLock();
+    if (title) this._gameOver.querySelector('#gameover-title').textContent = title;
+    if (subtitle) this._gameOver.querySelector('#gameover-sub').textContent = subtitle;
     this._gameOver.style.display = 'flex';
 
     // Trigger transitions

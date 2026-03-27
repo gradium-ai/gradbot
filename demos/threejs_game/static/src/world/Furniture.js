@@ -457,6 +457,57 @@ export function createPainting(x, y, z, rotY = 0) {
   return group;
 }
 
+/**
+ * Creates a retro keyboard (flat rectangular body with rows of raised keys).
+ * Matches the Severance-era beige office aesthetic.
+ */
+export function createKeyboard(x, y, z, rotY = 0) {
+  const group = new THREE.Group();
+  group.position.set(x, y, z);
+  group.rotation.y = rotY;
+
+  // Keyboard body — slightly angled beige slab
+  const bodyW = 0.40;
+  const bodyD = 0.15;
+  const bodyH = 0.018;
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(bodyW, bodyH, bodyD),
+    new THREE.MeshStandardMaterial({ color: 0xd8d0c0, roughness: 0.8 })
+  );
+  group.add(body);
+
+  // Slight upward tilt (back higher than front, like a real keyboard)
+  group.rotation.x = -0.08;
+
+  // Key grid — 5 rows of keys
+  const keyMat = new THREE.MeshStandardMaterial({ color: 0xc8c0b0, roughness: 0.7 });
+  const keyH = 0.01;
+  const keyGap = 0.004;
+
+  const rows = [
+    { count: 12, keyW: 0.028, z: -0.055 },   // top row (number keys)
+    { count: 11, keyW: 0.028, z: -0.025 },   // QWERTY row
+    { count: 10, keyW: 0.028, z: 0.005 },    // home row
+    { count: 9,  keyW: 0.028, z: 0.035 },    // bottom row
+    { count: 1,  keyW: 0.18,  z: 0.06 },     // spacebar
+  ];
+
+  for (const row of rows) {
+    const totalW = row.count * row.keyW + (row.count - 1) * keyGap;
+    const startX = -totalW / 2 + row.keyW / 2;
+    for (let i = 0; i < row.count; i++) {
+      const key = new THREE.Mesh(
+        new THREE.BoxGeometry(row.keyW, keyH, 0.022),
+        keyMat
+      );
+      key.position.set(startX + i * (row.keyW + keyGap), bodyH / 2 + keyH / 2, row.z);
+      group.add(key);
+    }
+  }
+
+  return group;
+}
+
 export function createCoreValuesPoster(x, y, z, rotY = 0) {
   const group = new THREE.Group();
   group.position.set(x, y, z);

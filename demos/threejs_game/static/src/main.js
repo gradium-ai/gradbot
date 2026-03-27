@@ -373,6 +373,8 @@ Promise.all([
 
   function triggerMusicDanceExperience() {
     // Stop all game systems
+    clearInterval(window.__timerInterval);
+    gameUI.hideTimer();
     milchickAI.stop();
     playerController.enabled = false;
     interactionSystem.enabled = false;
@@ -404,6 +406,8 @@ Promise.all([
 
   // Wire up game over on caught
   suspicionSystem.onCaught = () => {
+    clearInterval(window.__timerInterval);
+    gameUI.hideTimer();
     milchickAI.stop();
     playerController.enabled = false;
     interactionSystem.enabled = false;
@@ -528,6 +532,29 @@ Promise.all([
     gameUI.setObjective('Find hidden clues without Neil noticing.');
     gameUI.updateClueCounter(clueSystem.solved, clueSystem.total);
     gameUI.showControlsHint();
+
+    // Start 3-minute countdown timer
+    let timeLeft = 180;
+    gameUI.updateTimer(timeLeft);
+    const timerInterval = setInterval(() => {
+      timeLeft--;
+      gameUI.updateTimer(timeLeft);
+      if (timeLeft <= 0) {
+        clearInterval(timerInterval);
+        gameUI.hideTimer();
+        // Time's up — trigger game over
+        milchickAI.stop();
+        playerController.enabled = false;
+        interactionSystem.enabled = false;
+        sfx.stopFootsteps();
+        sfx.stopOfficeHum();
+        music.playGameOver();
+        gameUI.showGameOver('TIME\'S UP', 'You ran out of time. The Board is disappointed.');
+      }
+    }, 1000);
+
+    // Store interval so victory can clear it
+    window.__timerInterval = timerInterval;
 
     // Start Milchick's check-in loop
     milchickAI.start();
