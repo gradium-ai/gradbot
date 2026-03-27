@@ -58,9 +58,12 @@ export class PlayerAnimator {
       let clip = animations.get(glbName);
       if (!clip) continue;
 
-      // Strip root motion from all clips — pin Hips Y to idle rest height
-      // so blending between clips doesn't cause vertical drift
-      clip = this._stripRootMotion(clip);
+      // Strip root motion from gameplay clips only — intro clips (seated, typing,
+      // sit_to_stand) need their own Hips position for correct chair height
+      const GAMEPLAY_CLIPS = ['idle', 'walking', 'sneaking', 'look_around', 'dancing'];
+      if (GAMEPLAY_CLIPS.includes(semanticName)) {
+        clip = this._stripRootMotion(clip);
+      }
 
       this._clips.set(semanticName, clip);
       const action = mixer.clipAction(clip);
