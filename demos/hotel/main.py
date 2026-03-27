@@ -101,9 +101,10 @@ LANG_CONFIG = {
     "fr": (gradbot.flagship_voice("Elise").voice_id, gradbot.Lang.Fr, "fr"),
     "es": (gradbot.flagship_voice("Valentina").voice_id, gradbot.Lang.Es, "es"),
     "de": (gradbot.flagship_voice("Mia").voice_id, gradbot.Lang.De, "de"),
+    "pt": (gradbot.flagship_voice("Alice").voice_id, gradbot.Lang.Pt, "pt"),
 }
 
-LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish", "de": "German"}
+LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish", "de": "German", "pt": "Portuguese"}
 
 # ---------------------------------------------------------------------------
 # Prompts
@@ -146,7 +147,19 @@ def get_phase1_prompt(agent_name: str, filters: dict | None = None) -> str:
                 prompt += f"Since they already chose {filters['destination']}, you may call search_hotels right after your greeting (this counts as the caller choosing a destination).\n"
 
         if filters.get("language") and filters["language"] != "English":
-            prompt += f"\nIMPORTANT: The caller selected {filters['language']}. You MUST speak and respond ONLY in {filters['language']}.\n"
+            prompt += f"""
+IMPORTANT: The caller selected {filters['language']}. You MUST speak and respond ONLY in {filters['language']}.
+
+CRITICAL LANGUAGE QUALITY RULES:
+- DO NOT translate from English in your head. THINK directly in {filters['language']}.
+- Use natural idioms, colloquialisms, and sentence structures native to {filters['language']}
+- For French: use casual spoken French ("on" instead of "nous", contractions like "j'ai", "c'est", natural fillers like "alors", "bon", "du coup"). Avoid overly formal or textbook French.
+- For Spanish: use natural conversational Spanish with appropriate regional neutral forms
+- For German: use natural spoken German, not stiff formal German
+- For Portuguese: use natural Brazilian Portuguese with casual spoken forms ("você", "a gente", natural fillers like "então", "olha", "tipo"). Avoid overly formal European Portuguese unless requested.
+- Every sentence you produce MUST be grammatically correct. Double-check grammar before responding.
+- NEVER produce garbled or half-translated sentences — if unsure, keep it simple and short
+"""
 
     return prompt
 
@@ -259,13 +272,17 @@ async def websocket_chat(websocket: WebSocket):
 
     # These will be set from the start message
     agent_name = "Sophie"
-    padding_bonus = 0.0
+    voice_speed = 1.0
     voice = None
     lang = "en"
 
     def make_config(instructions: str) -> gradbot.SessionConfig:
         lang_voice_id, lang_enum, rewrite = LANG_CONFIG.get(lang, LANG_CONFIG["en"])
         vid = lang_voice_id or voice.voice_id  # Use lang voice if set, else agent voice
+        # Map voice_speed (0.5x–2.0x) to padding_bonus (-4 to +4).
+        # speed 1.0 → bonus 0, speed 2.0 → bonus -4, speed 0.5 → bonus +4
+        padding = -4.0 * (voice_speed - 1.0)
+        padding = max(-4.0, min(4.0, padding))
         return gradbot.SessionConfig(
             voice_id=vid,
             instructions=instructions,
@@ -273,7 +290,7 @@ async def websocket_chat(websocket: WebSocket):
             tools=tools,
             **merge_overrides(_OVERRIDES,
                 flush_duration_s=FLUSH_FOR_S,
-                padding_bonus=padding_bonus,
+                padding_bonus=padding,
                 rewrite_rules=rewrite,
             ),
         )
@@ -404,9 +421,11 @@ async def websocket_chat(websocket: WebSocket):
             await tool_handle.send_error(f"Unknown tool: {tool_name}")
 
     def on_start(msg: dict) -> gradbot.SessionConfig:
-        nonlocal agent_name, padding_bonus, voice, lang
+        nonlocal agent_name, voice_speed, voice, lang
         agent_name = msg.get("agent", "Sophie")
-        padding_bonus = float(msg.get("padding_bonus", 0.0))
+        speed = msg.get("speed")
+        if speed is not None:
+            voice_speed = max(0.5, min(2.0, float(speed)))
         lang = msg.get("language", "en")
         if lang not in LANG_CONFIG:
             lang = "en"
@@ -421,28 +440,26 @@ async def websocket_chat(websocket: WebSocket):
             "budget": msg.get("budget", 5000),
             "language": LANG_NAMES.get(lang, "English"),
         }
-        logger.info("Starting hotel reservation chat with %s (lang=%s, filters: %s)",
-                     agent_name, lang, filters)
+        logger.info("Starting hotel reservation chat with %s (lang=%s, speed=%.1f, filters: %s)",
+                     agent_name, lang, voice_speed, filters)
 
-        lang_voice_id, lang_enum, rewrite = LANG_CONFIG[lang]
-        vid = lang_voice_id or voice.voice_id
+        phase1 = get_phase1_prompt(agent_name, filters)
+        config = make_config(phase1)
+        config.assistant_speaks_first = True
+        return config
 
-        return gradbot.SessionConfig(
-            voice_id=vid,
-            instructions=get_phase1_prompt(agent_name, filters),
-            language=lang_enum,
-            tools=tools,
-            **merge_overrides(_OVERRIDES,
-                flush_duration_s=FLUSH_FOR_S,
-                padding_bonus=padding_bonus,
-                rewrite_rules=rewrite,
-                assistant_speaks_first=True,
-            ),
-        )
+    def on_config(msg: dict) -> gradbot.SessionConfig:
+        nonlocal voice_speed
+        speed = msg.get("speed")
+        if speed is not None:
+            voice_speed = max(0.5, min(2.0, float(speed)))
+            logger.info("Voice speed changed to %.1f", voice_speed)
+        return make_config(get_phase1_prompt(agent_name, {}))
 
     await websocket_chat_handler(
         websocket,
         on_start=on_start,
+        on_config=on_config,
         on_tool_call=handle_tool_call,
         run_kwargs=_CLIENT_CONFIG,
         output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,

@@ -64,12 +64,14 @@ def translate_menu_items(items: list[dict], lang: str) -> list[dict]:
             new_item["name"] = t["name"]
         if t.get("description"):
             new_item["description"] = t["description"]
-        # Translate options
+        # Translate options (both keys and values)
         if item.get("options"):
             new_opts = {}
+            key_tr = MENU_TRANSLATIONS.get("option_keys", {})
             for opt_key, opt_vals in item["options"].items():
                 tr_map = opt_tr.get(opt_key, {}).get(lang, {})
-                new_opts[opt_key] = [tr_map.get(v, v) for v in opt_vals]
+                translated_key = key_tr.get(opt_key, {}).get(lang, opt_key)
+                new_opts[translated_key] = [tr_map.get(v, v) for v in opt_vals]
             new_item["options"] = new_opts
         translated.append(new_item)
     return translated
@@ -102,6 +104,7 @@ class OrderState:
     items: list[OrderItem] = field(default_factory=list)
     order_placed: bool = False
     lang: str = "en"
+    voice_speed: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +180,16 @@ MULTILINGUAL SUPPORT:
 - Language codes: "en" (English), "fr" (French), "es" (Spanish), "de" (German), "pt" (Portuguese)
 - Current language: {state.lang}
 - When switching languages, maintain the same casual, friendly tone — just in the new language
-- Use natural idioms and expressions for that language, not stiff translations
+
+CRITICAL LANGUAGE QUALITY RULES:
+- DO NOT translate from English in your head. THINK directly in the target language.
+- Use natural idioms, colloquialisms, and sentence structures native to that language
+- For French: use casual spoken French ("on" instead of "nous", contractions like "j'ai", "c'est", natural fillers like "alors", "bon", "du coup"). Avoid overly formal or textbook French.
+- For Spanish: use natural conversational Spanish with appropriate regional neutral forms
+- For German: use natural spoken German, not stiff formal German
+- For Portuguese: use natural Brazilian Portuguese with casual spoken forms ("você", "a gente", natural fillers like "então", "olha", "tipo"). Avoid overly formal European Portuguese unless requested.
+- Every sentence you produce MUST be grammatically correct in the target language. Double-check grammar before responding.
+- NEVER produce garbled or half-translated sentences — if unsure, keep it simple and short
 
 YOUR PERSONALITY:
 - Friendly and laid-back, like a real fast food cashier
@@ -396,6 +408,10 @@ async def websocket_order(websocket: WebSocket):
     def make_config() -> gradbot.SessionConfig:
         """Build a SessionConfig from current state."""
         vid, l_enum, rw = LANG_CONFIG[state.lang]
+        # Map voice_speed (0.5x–2.0x) to padding_bonus (-4 to +4).
+        # speed 1.0 → bonus 0, speed 2.0 → bonus -4, speed 0.5 → bonus +4
+        padding = -4.0 * (state.voice_speed - 1.0)
+        padding = max(-4.0, min(4.0, padding))
         return gradbot.SessionConfig(
             voice_id=vid,
             instructions=get_system_prompt(state),
@@ -403,7 +419,7 @@ async def websocket_order(websocket: WebSocket):
             tools=tools,
             **merge_overrides(_OVERRIDES,
                 flush_duration_s=FLUSH_FOR_S,
-                padding_bonus=0.0,
+                padding_bonus=padding,
                 rewrite_rules=rw,
                 assistant_speaks_first=True,
             ),
@@ -413,7 +429,10 @@ async def websocket_order(websocket: WebSocket):
         lang = msg.get("language", "en")
         if lang in LANG_CONFIG:
             state.lang = lang
-        logger.info("Starting Chick-fil-A ordering session (lang=%s)", state.lang)
+        speed = msg.get("speed")
+        if speed is not None:
+            state.voice_speed = max(0.5, min(2.0, float(speed)))
+        logger.info("Starting Chick-fil-A ordering session (lang=%s, speed=%.1f)", state.lang, state.voice_speed)
         return make_config()
 
     async def handle_tool_call(tool_call, tool_handle, input_handle, websocket):
@@ -637,9 +656,17 @@ async def websocket_order(websocket: WebSocket):
         else:
             await tool_handle.send_error(f"Unknown tool: {tool_name}")
 
+    def on_config(msg: dict) -> gradbot.SessionConfig:
+        speed = msg.get("speed")
+        if speed is not None:
+            state.voice_speed = max(0.5, min(2.0, float(speed)))
+            logger.info("Voice speed changed to %.1f", state.voice_speed)
+        return make_config()
+
     await websocket_chat_handler(
         websocket,
         on_start=on_start,
+        on_config=on_config,
         on_tool_call=handle_tool_call,
         run_kwargs=_CLIENT_CONFIG,
         output_format=gradbot.AudioFormat.Pcm if USE_PCM else gradbot.AudioFormat.OggOpus,

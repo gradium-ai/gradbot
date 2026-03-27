@@ -280,6 +280,48 @@
             font-weight: 700;
         }
 
+        /* ── Speed slider ── */
+        .speed-control {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 0 8px;
+        }
+        .speed-slider {
+            width: 100%;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            border-radius: 2px;
+            background: var(--cream-dark);
+            outline: none;
+            cursor: pointer;
+        }
+        .speed-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--red);
+            cursor: pointer;
+            box-shadow: 0 1px 4px rgba(229,22,54,0.3);
+        }
+        .speed-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--red);
+            cursor: pointer;
+            border: none;
+        }
+        .speed-value {
+            font-size: 0.75rem;
+            color: var(--text-light);
+            font-weight: 700;
+        }
+
         /* ── Center: Menu panel ── */
         .menu-panel {
             padding: 24px;
@@ -480,6 +522,12 @@
                 <button class="lang-btn" data-lang="fr">FR</button>
                 <button class="lang-btn" data-lang="de">DE</button>
                 <button class="lang-btn" data-lang="es">ES</button>
+                <button class="lang-btn" data-lang="pt">PT</button>
+            </div>
+            <div class="speed-control">
+                <div class="lang-label">Voice Speed</div>
+                <input type="range" class="speed-slider" id="speedSlider" min="0.5" max="2.0" step="0.1" value="1.0">
+                <div class="speed-value" id="speedValue">1.0x</div>
             </div>
             <button class="mic-btn" id="micBtn" title="Start ordering">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
@@ -494,7 +542,7 @@
                 MENU
             </div>
             <div id="menuContent">
-                <div class="menu-empty">Ask to see the menu to get started!</div>
+                <div class="menu-empty" id="menuEmpty">Ask to see the menu to get started!</div>
             </div>
         </div>
 
@@ -689,12 +737,23 @@
     let selectedLang = 'en';
     const langSelector = document.getElementById('langSelector');
     const UI_STRINGS = {
-        en: { orderPlaced: 'ORDER PLACED!', thankYou: 'Thank you, {name}!', readySoon: 'Your order will be ready soon! Total: ${total}', subtotal: 'Subtotal', tax: 'Tax', total: 'Total' },
-        fr: { orderPlaced: 'COMMANDE PASSÉE !', thankYou: 'Merci, {name} !', readySoon: 'Votre commande sera prête bientôt ! Total : ${total}', subtotal: 'Sous-total', tax: 'Taxe', total: 'Total' },
-        de: { orderPlaced: 'BESTELLUNG AUFGEGEBEN!', thankYou: 'Danke, {name}!', readySoon: 'Ihre Bestellung ist bald fertig! Gesamt: ${total}', subtotal: 'Zwischensumme', tax: 'Steuer', total: 'Gesamt' },
-        es: { orderPlaced: '¡PEDIDO REALIZADO!', thankYou: '¡Gracias, {name}!', readySoon: '¡Su pedido estará listo pronto! Total: ${total}', subtotal: 'Subtotal', tax: 'Impuesto', total: 'Total' },
+        en: { orderPlaced: 'ORDER PLACED!', thankYou: 'Thank you, {name}!', readySoon: 'Your order will be ready soon! Total: ${total}', subtotal: 'Subtotal', tax: 'Tax', total: 'Total', orderEmpty: 'Your order is empty', menuEmpty: 'Ask to see the menu to get started!', tapToStart: 'Tap to start', connecting: 'Connecting...', listening: 'Listening...', failed: 'Failed — tap to retry', options: 'Options', qty: 'x1' },
+        fr: { orderPlaced: 'COMMANDE PASSÉE !', thankYou: 'Merci, {name} !', readySoon: 'Votre commande sera prête bientôt ! Total : ${total}', subtotal: 'Sous-total', tax: 'Taxe', total: 'Total', orderEmpty: 'Votre commande est vide', menuEmpty: 'Demandez à voir le menu pour commencer !', tapToStart: 'Appuyez pour commencer', connecting: 'Connexion...', listening: 'Écoute en cours...', failed: 'Échec — réessayez', options: 'Options', qty: 'x1' },
+        de: { orderPlaced: 'BESTELLUNG AUFGEGEBEN!', thankYou: 'Danke, {name}!', readySoon: 'Ihre Bestellung ist bald fertig! Gesamt: ${total}', subtotal: 'Zwischensumme', tax: 'Steuer', total: 'Gesamt', orderEmpty: 'Ihre Bestellung ist leer', menuEmpty: 'Fragen Sie nach der Speisekarte!', tapToStart: 'Tippen zum Starten', connecting: 'Verbindung wird hergestellt...', listening: 'Zuhören...', failed: 'Fehlgeschlagen — erneut versuchen', options: 'Optionen', qty: 'x1' },
+        es: { orderPlaced: '¡PEDIDO REALIZADO!', thankYou: '¡Gracias, {name}!', readySoon: '¡Su pedido estará listo pronto! Total: ${total}', subtotal: 'Subtotal', tax: 'Impuesto', total: 'Total', orderEmpty: 'Su pedido está vacío', menuEmpty: '¡Pida ver el menú para empezar!', tapToStart: 'Toque para comenzar', connecting: 'Conectando...', listening: 'Escuchando...', failed: 'Error — toque para reintentar', options: 'Opciones', qty: 'x1' },
+        pt: { orderPlaced: 'PEDIDO FEITO!', thankYou: 'Obrigado, {name}!', readySoon: 'Seu pedido ficará pronto em breve! Total: ${total}', subtotal: 'Subtotal', tax: 'Imposto', total: 'Total', orderEmpty: 'Seu pedido está vazio', menuEmpty: 'Peça para ver o cardápio para começar!', tapToStart: 'Toque para começar', connecting: 'Conectando...', listening: 'Ouvindo...', failed: 'Erro — toque para tentar novamente', options: 'Opções', qty: 'x1' },
     };
     function t(key) { return (UI_STRINGS[selectedLang] || UI_STRINGS.en)[key] || UI_STRINGS.en[key]; }
+
+    function updateUILanguage() {
+        // Update static UI text to match selected language
+        const menuEmpty = document.getElementById('menuEmpty');
+        if (menuEmpty) menuEmpty.textContent = t('menuEmpty');
+        if (!isRunning) statusText.textContent = t('tapToStart');
+        // Update order empty state if visible
+        const orderEmpty = orderContent.querySelector('.order-empty');
+        if (orderEmpty) orderEmpty.textContent = t('orderEmpty');
+    }
 
     langSelector.addEventListener('click', (e) => {
         const btn = e.target.closest('.lang-btn');
@@ -702,6 +761,26 @@
         langSelector.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
         selectedLang = btn.dataset.lang;
+        updateUILanguage();
+    });
+
+    // ── Speed slider ──
+    let voiceSpeed = 1.0;
+    const speedSlider = document.getElementById('speedSlider');
+    const speedValue = document.getElementById('speedValue');
+
+    speedSlider.addEventListener('input', () => {
+        voiceSpeed = parseFloat(speedSlider.value);
+        speedValue.textContent = voiceSpeed.toFixed(1) + 'x';
+    });
+
+    speedSlider.addEventListener('change', () => {
+        voiceSpeed = parseFloat(speedSlider.value);
+        speedValue.textContent = voiceSpeed.toFixed(1) + 'x';
+        // Send config update mid-session if connected
+        if (isRunning && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'config', speed: voiceSpeed }));
+        }
     });
 
     // ── State ──
@@ -739,7 +818,7 @@
         if (isRunning) { stopSession(); return; }
 
         micBtn.disabled = true;
-        statusText.textContent = 'Connecting...';
+        statusText.textContent = t('connecting');
 
         try {
             player = new SyncedAudioPlayer({
@@ -768,10 +847,10 @@
             ws.onopen = () => {
                 transcriptArea.innerHTML = '';
                 isRunning = true;
-                ws.send(JSON.stringify({ type: 'start', language: selectedLang }));
+                ws.send(JSON.stringify({ type: 'start', language: selectedLang, speed: voiceSpeed }));
                 micBtn.disabled = false;
                 micBtn.classList.add('active');
-                statusText.textContent = 'Listening...';
+                statusText.textContent = t('listening');
             };
             ws.onmessage = (ev) => player.handleMessage(ev.data);
             ws.onclose = () => stopSession();
@@ -779,7 +858,7 @@
         } catch (err) {
             console.error('Failed to start:', err);
             micBtn.disabled = false;
-            statusText.textContent = 'Failed — tap to retry';
+            statusText.textContent = t('failed');
         }
     }
 
@@ -787,7 +866,7 @@
         isRunning = false;
         micBtn.classList.remove('active');
         micBtn.disabled = false;
-        statusText.textContent = 'Tap to start';
+        statusText.textContent = t('tapToStart');
 
         if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
         lipsync = null;
@@ -848,7 +927,7 @@
                 if (item.options && Object.keys(item.options).length) {
                     const opts = document.createElement('div');
                     opts.className = 'item-options';
-                    opts.textContent = 'Options: ' + Object.entries(item.options)
+                    opts.textContent = t('options') + ': ' + Object.entries(item.options)
                         .map(([k,v]) => `${k}: ${v.join(', ')}`)
                         .join(' | ');
                     el.appendChild(opts);
@@ -861,7 +940,7 @@
 
     function displayOrder(data) {
         if (!data.items || !data.items.length) {
-            orderContent.innerHTML = '<div class="order-empty">Your order is empty</div>';
+            orderContent.innerHTML = '<div class="order-empty">' + t('orderEmpty') + '</div>';
             orderTotals.style.display = 'none';
             checkoutBtn.style.display = 'none';
             return;
