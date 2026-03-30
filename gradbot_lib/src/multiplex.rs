@@ -517,7 +517,11 @@ impl Session {
                                     // output tool calls as plain text instead of structured
                                     // tool_calls. Skip these to avoid sending them to TTS.
                                     if chunk.contains("<tool_call>")
+                                        || chunk.contains("</tool_call>")
                                         || chunk.contains("<function=")
+                                        || chunk.contains("</function>")
+                                        || chunk.contains("<parameter=")
+                                        || chunk.contains("</parameter>")
                                         || chunk.contains("\"tool_calls\"")
                                     {
                                         tracing::warn!(

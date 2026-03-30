@@ -189,8 +189,9 @@ CRITICAL RULES:
 - Do NOT reveal the correct answer. Do NOT repeat the question.
 - Stay in character. Keep responses under 10 words."""
 
+    emma = gradbot.flagship_voice("Emma")
     return gradbot.SessionConfig(
-        voice_id="m86j6D7UZpGzHsNu",
+        voice_id=emma.voice_id,
         instructions=instructions,
         language=gradbot.Lang.En,
         assistant_speaks_first=False,
@@ -291,8 +292,9 @@ def make_checkin_session_config() -> "gradbot.SessionConfig":
         ),
     ]
 
+    jack = gradbot.flagship_voice("Jack")
     return gradbot.SessionConfig(
-        voice_id="RhI-l8fGE2DtXgXV",
+        voice_id=jack.voice_id,
         instructions=CHECKIN_SYSTEM_PROMPT,
         language=gradbot.Lang.En,
         assistant_speaks_first=False,

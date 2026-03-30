@@ -110,6 +110,14 @@ export class MilchickAI {
         this._updateIdle(dt);
         break;
       case 'approaching':
+        // If player started a clue while Milchick was approaching, abort and go home
+        if (this._suspicion.playerInClueInteraction) {
+          console.log('[MilchickAI] Player in clue interaction — aborting approach, going home');
+          this._moveTarget.copy(this._homePos);
+          this._milchick.playWalk();
+          this._setState('leaving');
+          break;
+        }
         this._updateMoving(dt, () => this._beginCheckin(), true);
         break;
       case 'leaving':
@@ -123,6 +131,11 @@ export class MilchickAI {
 
   _updateIdle() {
     if (this._timer >= this._nextCheckinAt) {
+      // Don't interrupt an active clue session — defer the check-in
+      if (this._suspicion.playerInClueInteraction) {
+        this._nextCheckinAt = this._timer + 5; // retry in 5s
+        return;
+      }
       this._beginApproach();
     }
   }
@@ -199,6 +212,14 @@ export class MilchickAI {
 
   async _beginCheckin() {
     if (this._inCheckin) return; // prevent double-fire
+    // Safety: don't check in if player is in a clue session
+    if (this._suspicion.playerInClueInteraction) {
+      console.log('[MilchickAI] Player in clue interaction — skipping check-in, going home');
+      this._moveTarget.copy(this._homePos);
+      this._milchick.playWalk();
+      this._setState('leaving');
+      return;
+    }
     this._inCheckin = true;
     this._setState('checking_in');
     this._milchick.startTalking();
@@ -292,27 +313,16 @@ export class MilchickAI {
     // Show voice panel for player to respond
     const panelPromise = this._ui.showVoicePanel('Neil is watching you. Respond naturally.');
 
-    // Listen for classification via VoiceClient's onCheckinResult callback
-    const classificationPromise = new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        // Silence is suspicious — refusing to answer Milchick is never innocent
-        console.log('[MilchickAI] Check-in timeout (silence), classifying as nervous');
-        resolve('nervous');
-      }, AI().VOICE_TIMEOUT);
-
-      this._voice._onCheckinResult = (classification) => {
-        clearTimeout(timer);
-        resolve(classification || 'nervous');
-      };
-    });
-
     try {
       // Connect to /ws/checkin via VoiceClient (uses gradbot AudioProcessor)
       await this._voice.connectCheckin();
 
       // Race: classification from backend vs panel close vs timeout
       return await Promise.race([
-        classificationPromise,
+        this._voice.waitForCheckinResult(AI().VOICE_TIMEOUT).catch(() => {
+          console.log('[MilchickAI] Check-in timeout (silence), classifying as nervous');
+          return 'nervous';
+        }),
         panelPromise.then(() => 'nervous'),
       ]);
     } catch (e) {

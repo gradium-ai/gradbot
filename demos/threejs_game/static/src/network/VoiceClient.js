@@ -70,10 +70,14 @@ export class VoiceClient {
   /**
    * Connect to a gradbot voice WebSocket at the given path.
    * Sets up AudioProcessor for mic capture and OggOpus playback.
+   * If already connected, disconnects the current session first.
    * @param {string} wsPath
    */
   async _connectToPath(wsPath) {
-    if (this._connected) return;
+    if (this._connected) {
+      console.warn(LOG, 'Already connected — disconnecting before new session');
+      this.disconnect();
+    }
 
     if (typeof AudioProcessor === 'undefined') {
       throw new Error('AudioProcessor not loaded. Check script tags in index.html.');
@@ -161,6 +165,9 @@ export class VoiceClient {
         this._onClueResult(msg.correct, msg.fragment);
         break;
       case 'checkin_result':
+        if (this._onCheckinResultOnce) {
+          this._onCheckinResultOnce(msg.classification);
+        }
         this._onCheckinResult(msg.classification, msg.reason);
         break;
       case 'error':
@@ -170,6 +177,27 @@ export class VoiceClient {
         console.log(LOG, 'Event:', msg.event);
         break;
     }
+  }
+
+  /**
+   * Returns a Promise that resolves with the check-in classification.
+   * Rejects on timeout.
+   * @param {number} timeoutMs
+   * @returns {Promise<string>}
+   */
+  waitForCheckinResult(timeoutMs = 15000) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this._onCheckinResultOnce = null;
+        reject(new Error('Check-in timeout'));
+      }, timeoutMs);
+
+      this._onCheckinResultOnce = (classification) => {
+        clearTimeout(timer);
+        this._onCheckinResultOnce = null;
+        resolve(classification || 'nervous');
+      };
+    });
   }
 
   /**
