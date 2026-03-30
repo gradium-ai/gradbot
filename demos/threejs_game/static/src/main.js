@@ -173,6 +173,7 @@ const interactableDefs = {
       interactionSystem.enabled = false;
       suspicionSystem.playerInClueInteraction = true;
       const correct = await clueSystem.attemptSolveVoice('painting', voiceClient, ttsClient);
+      console.log('[CLUE] painting attemptSolveVoice returned:', correct);
       suspicionSystem.playerInClueInteraction = false;
       interactionSystem.enabled = true;
       if (correct) {
@@ -203,6 +204,7 @@ interactionSystem.registerProximity(
       interactionSystem.enabled = false;
       suspicionSystem.playerInClueInteraction = true;
       const correct = await clueSystem.attemptSolveVoice('book', voiceClient, ttsClient);
+      console.log('[CLUE] book attemptSolveVoice returned:', correct);
       suspicionSystem.playerInClueInteraction = false;
       interactionSystem.enabled = true;
       if (correct) {
@@ -228,6 +230,7 @@ interactionSystem.registerProximity(
       interactionSystem.enabled = false;
       suspicionSystem.playerInClueInteraction = true;
       const correct = await clueSystem.attemptSolveVoice('note', voiceClient, ttsClient);
+      console.log('[CLUE] note attemptSolveVoice returned:', correct);
       suspicionSystem.playerInClueInteraction = false;
       interactionSystem.enabled = true;
       if (correct) {
@@ -399,7 +402,9 @@ Promise.all([
 
   /** Check if all clues solved and trigger win */
   function checkWinCondition() {
+    console.log('[WIN] checkWinCondition:', clueSystem.solved, '/', clueSystem.total);
     if (clueSystem.solved === clueSystem.total) {
+      console.log('[WIN] ALL CLUES SOLVED — triggering MDE!');
       triggerMusicDanceExperience();
     }
   }

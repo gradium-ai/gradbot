@@ -465,6 +465,7 @@ impl Session {
         let tts_out_tx = self.tts_out_tx.clone();
         let msg_out_tx = self.msg_out_tx.clone();
         let start_time = self.audio_time_s().await;
+        let llm_request_start = std::time::Instant::now();
         let _ = self.send_event(Event::LlmStarted).await;
         let stt_sender = self.stt_sender.clone();
         let session_config = self.session_config.clone();
@@ -542,6 +543,11 @@ impl Session {
                                         continue;
                                     }
                                     if first_word {
+                                        let ttft_ms = llm_request_start.elapsed().as_millis();
+                                        tracing::info!(
+                                            ttft_ms,
+                                            "LLM time-to-first-token"
+                                        );
                                         let time_s = stt_sender.current_time_s().await;
                                         msg_out_tx
                                             .send(MsgOut::Event { time_s, event: Event::FirstWord })
@@ -609,6 +615,11 @@ impl Session {
                         if !buffer.is_empty() {
                             tts_tx.send_text(&buffer).await?;
                         }
+                        let llm_total_ms = llm_request_start.elapsed().as_millis();
+                        tracing::info!(
+                            llm_total_ms,
+                            "LLM stream complete"
+                        );
                         tts_tx.send_end_of_stream().await?;
                         Ok::<(), anyhow::Error>(())
                     }
