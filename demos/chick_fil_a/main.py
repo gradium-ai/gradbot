@@ -153,19 +153,22 @@ def get_system_prompt(state: OrderState) -> str:
         for item in cat_data["items"]:
             menu_overview += f"  - {item['name']} (id: {item['id']})\n"
 
+    # Currency symbol based on language
+    currency_sym = "€" if state.lang in ("fr", "de") else "$"
+
     # Current order summary
     order_summary = ""
     total_price = 0.0
     if state.items:
         order_summary = "\n\nCURRENT ORDER:\n"
         for idx, item in enumerate(state.items, 1):
-            order_summary += f"{idx}. {item.item_name} - ${item.price:.2f}"
+            order_summary += f"{idx}. {item.item_name} - {currency_sym}{item.price:.2f}"
             if item.customizations:
                 custom_str = ", ".join(f"{k}: {v}" for k, v in item.customizations.items())
                 order_summary += f" ({custom_str})"
             order_summary += "\n"
             total_price += item.price
-        order_summary += f"\nCurrent Total: ${total_price:.2f}"
+        order_summary += f"\nCurrent Total: {currency_sym}{total_price:.2f}"
     else:
         order_summary = "\n\nCURRENT ORDER: Empty"
 
@@ -201,7 +204,7 @@ SPEAKING STYLE (BE REALISTIC):
 - Use natural filler words and slight hesitations appropriate for the current language
 - Keep it conversational and vary your responses - don't sound robotic or repetitive
 - Keep responses SHORT - 1-2 sentences max, like a real cashier would
-- When saying prices, drop .00 decimals (say "$8" not "$8.00", but "$8.45" is fine)
+- When saying prices, use the correct currency for the language: € (euros) for French and German, $ (dollars) for English/Spanish/Portuguese. Drop .00 decimals (say "8 euros" not "8.00 euros", but "8.45 euros" is fine)
 - NEVER say "My pleasure" - just use casual acknowledgments
 - NEVER use action annotations like *smiles* or *typing* - just speak naturally
 
@@ -436,6 +439,16 @@ async def websocket_order(websocket: WebSocket):
         return make_config()
 
     async def handle_tool_call(tool_call, tool_handle, input_handle, websocket):
+        try:
+            await _handle_tool_call_inner(tool_call, tool_handle, input_handle, websocket)
+        except Exception as exc:
+            logger.exception("Tool call %s failed", tool_call.tool_name)
+            try:
+                await tool_handle.send_error(f"Tool error: {exc}")
+            except Exception:
+                pass
+
+    async def _handle_tool_call_inner(tool_call, tool_handle, input_handle, websocket):
         tool_name = tool_call.tool_name
         args = json.loads(tool_call.args_json)
         logger.info("Tool call: %s - %s", tool_name, args)
