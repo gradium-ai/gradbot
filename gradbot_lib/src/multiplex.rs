@@ -509,13 +509,23 @@ impl Session {
                         // real boundary (sentence end / list comma). We stash the buffer
                         // and decide when the next chunk arrives.
                         let mut pending_numeric: Option<String> = None;
+                        let mut tool_call_as_text = false;
                         while let Some(item) = streaming_session.recv().await {
                             tracing::debug!(?item, "LLM stream item received");
                             match item {
                                 crate::llm::LlmResponseItem::Text(chunk) => {
                                     // Detect tool-call-as-text: some models (e.g. Qwen) may
                                     // output tool calls as plain text instead of structured
-                                    // tool_calls. Skip these to avoid sending them to TTS.
+                                    // tool_calls. Once detected, suppress ALL remaining text
+                                    // for this LLM turn (content between tags is clean text
+                                    // that would otherwise leak to TTS).
+                                    if tool_call_as_text {
+                                        tracing::debug!(
+                                            text = %chunk,
+                                            "Suppressing text (tool-call-as-text mode active)"
+                                        );
+                                        continue;
+                                    }
                                     if chunk.contains("<tool_call>")
                                         || chunk.contains("</tool_call>")
                                         || chunk.contains("<function=")
@@ -526,8 +536,9 @@ impl Session {
                                     {
                                         tracing::warn!(
                                             text = %chunk,
-                                            "LLM emitted tool call as plain text — suppressing from TTS"
+                                            "LLM emitted tool call as plain text — suppressing this and all remaining text"
                                         );
+                                        tool_call_as_text = true;
                                         continue;
                                     }
                                     if first_word {
