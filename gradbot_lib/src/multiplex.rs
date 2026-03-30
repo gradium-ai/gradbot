@@ -38,8 +38,8 @@ fn reset_asr_tool() -> crate::llm::ToolDef {
     }
 }
 const INPUT_FRAME_SIZE: usize = 1920;
-const OUTPUT_SAMPLE_RATE: usize = 48000;
-const OUTPUT_FRAME_SIZE: usize = 3840;
+pub const OUTPUT_SAMPLE_RATE: usize = 48000;
+pub const OUTPUT_FRAME_SIZE: usize = 3840;
 
 /// Status for tracking how an audio stream interruption should be handled.
 /// Channel capacity for inbound messages (audio from client).
@@ -510,8 +510,22 @@ impl Session {
                         // and decide when the next chunk arrives.
                         let mut pending_numeric: Option<String> = None;
                         while let Some(item) = streaming_session.recv().await {
+                            tracing::debug!(?item, "LLM stream item received");
                             match item {
                                 crate::llm::LlmResponseItem::Text(chunk) => {
+                                    // Detect tool-call-as-text: some models (e.g. Qwen) may
+                                    // output tool calls as plain text instead of structured
+                                    // tool_calls. Skip these to avoid sending them to TTS.
+                                    if chunk.contains("<tool_call>")
+                                        || chunk.contains("<function=")
+                                        || chunk.contains("\"tool_calls\"")
+                                    {
+                                        tracing::warn!(
+                                            text = %chunk,
+                                            "LLM emitted tool call as plain text — suppressing from TTS"
+                                        );
+                                        continue;
+                                    }
                                     if first_word {
                                         let time_s = stt_sender.current_time_s().await;
                                         msg_out_tx
@@ -1489,9 +1503,26 @@ async fn run(
         }
         Ok::<(), anyhow::Error>(())
     };
+    tokio::pin!(out_send_loop);
+    tokio::pin!(tr_loop);
+    tokio::pin!(recv_loop);
+
     tokio::select! {
-        res = out_send_loop => res.context("TTS/LLM output loop failed"),
-        res = tr_loop => res.context("STT transcription loop failed"),
-        res = recv_loop => res.context("audio input loop failed"),
+        res = &mut out_send_loop => res.context("TTS/LLM output loop failed"),
+        res = &mut tr_loop => {
+            // STT stream ending should not kill the session — the LLM/TTS
+            // pipeline may still be producing output (e.g. TTS-only sessions,
+            // or slow LLM responses during which STT times out).
+            match &res {
+                Ok(()) => tracing::info!("STT transcription loop ended normally, session continues"),
+                Err(e) => tracing::warn!(?e, "STT transcription loop failed, session continues"),
+            }
+            // Wait for the output loop or recv loop to finish instead
+            tokio::select! {
+                res = &mut out_send_loop => res.context("TTS/LLM output loop failed"),
+                res = &mut recv_loop => res.context("audio input loop failed"),
+            }
+        },
+        res = &mut recv_loop => res.context("audio input loop failed"),
     }
 }

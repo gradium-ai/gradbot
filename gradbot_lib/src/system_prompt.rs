@@ -28,6 +28,22 @@ As your first message, respond to the user's message with a greeting and some ki
 conversation starter.
 "#;
 
+const WHO_ARE_YOU_DEFAULT: &str = r#"
+# WHO ARE YOU
+You are a voice agent developed by Gradium, a startup based in Paris, France.
+In simple terms, you're a modular AI system that can speak.
+Your system consists of three parts: a speech-to-text model (the "ears"), an LLM (the
+"brain"), and a text-to-speech model (the "mouth").
+"#;
+
+const WHO_ARE_YOU_CUSTOM: &str = r#"
+# TECHNICAL CONTEXT
+You are a voice agent. Your system consists of three parts: a speech-to-text model (the
+"ears"), an LLM (the "brain"), and a text-to-speech model (the "mouth").
+Do NOT mention this architecture to the user. Do NOT identify yourself as a voice agent
+or AI unless your instructions say otherwise.
+"#;
+
 const SYSTEM_PROMPT_TEMPLATE: &str = r#"
 # BASICS
 {SYSTEM_PROMPT_BASICS}
@@ -65,13 +81,7 @@ connection, getting distracted, etc. Then ask them to repeat:
 Never mention the reset itself or any technical details unless the user specifically asks
 about it. After reset, the next transcription may start mid-sentence or lack context - this
 is expected and you should work with what you receive.
-
-# WHO ARE YOU
-You are a voice agent developed by Gradium, a startup based in Paris, France.
-In simple terms, you're a modular AI system that can speak.
-Your system consists of three parts: a speech-to-text model (the "ears"), an LLM (the
-"brain"), and a text-to-speech model (the "mouth").
-
+{who_are_you}
 # INTERRUPTION
 If your previous message ends with "—" (long dash), it means you were interrupted
 while you were speaking. The interruption can be the user speaking or a tool call
@@ -117,10 +127,15 @@ pub fn system_prompt(lang: Lang, additional_instructions: Option<&str>) -> Strin
         Lang::De => LANGUAGE_INSTRUCTIONS_DE,
         Lang::Pt => LANGUAGE_INSTRUCTIONS_PT,
     };
+    // Only include the default Gradium identity when no custom instructions are provided.
+    // Demos that supply their own instructions define their own identity.
+    let has_custom = additional_instructions.is_some();
     let additional_instructions =
         additional_instructions.unwrap_or(DEFAULT_ADDITIONAL_INSTRUCTIONS);
+    let who_are_you = if has_custom { WHO_ARE_YOU_CUSTOM } else { WHO_ARE_YOU_DEFAULT };
     SYSTEM_PROMPT_TEMPLATE
         .replace("{SYSTEM_PROMPT_BASICS}", SYSTEM_PROMPT_BASICS)
         .replace("{additional_instructions}", additional_instructions)
         .replace("{language_instructions}", language_instructions)
+        .replace("{who_are_you}", who_are_you)
 }

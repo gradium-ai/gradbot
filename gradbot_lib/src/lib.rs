@@ -88,7 +88,7 @@ pub mod mock;
 mod multiplex;
 mod speech_to_text;
 mod system_prompt;
-mod text_to_speech;
+pub mod text_to_speech;
 pub mod utils;
 mod wav;
 
@@ -98,8 +98,8 @@ use std::sync::Arc;
 // Re-export public API
 pub use llm::{Llm, LlmConfig, ToolCall, ToolCallHandle, ToolDef, ToolResult};
 pub use multiplex::{
-    DEFAULT_FLUSH_FOR_S, Event, MsgIn, MsgOut, SessionConfig, SessionInputHandle,
-    SessionOutputHandle, start_session,
+    DEFAULT_FLUSH_FOR_S, Event, MsgIn, MsgOut, OUTPUT_FRAME_SIZE, OUTPUT_SAMPLE_RATE,
+    SessionConfig, SessionInputHandle, SessionOutputHandle, start_session,
 };
 pub use speech_to_text::SttClient;
 pub use system_prompt::Lang;
@@ -485,6 +485,11 @@ impl GradbotClients {
             stt_client,
             llm,
         })
+    }
+
+    /// Get a reference to the TTS client for direct text-to-speech synthesis.
+    pub fn tts_client(&self) -> &TtsClient {
+        &self.tts_client
     }
 
     /// Start a new voice AI session.

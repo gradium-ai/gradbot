@@ -257,6 +257,14 @@ To rebuild after Rust changes:
 uv sync --reinstall-package gradbot
 ```
 
+Or use the Makefile:
+
+```bash
+make build DEMO=simple_chat   # build + install into one demo's venv
+make build-all                # build + install into all demo venvs
+make run DEMO=simple_chat     # run with uvicorn (auto-reload, excludes .venv)
+```
+
 ### Docker
 
 ```bash

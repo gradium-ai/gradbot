@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import gradbot
-from gradbot.demo_config import load_config, client_config
+from gradbot.demo_config import load_config, client_config, session_config_overrides, merge_overrides
 
 from clue_data import CLUES, validate_answer
 
@@ -39,6 +39,7 @@ gradbot.init_logging()
 
 _YAML_CFG = load_config(Path(__file__).parent)
 CLIENT_KWARGS = client_config(_YAML_CFG)
+_OVERRIDES = session_config_overrides(_YAML_CFG)
 
 # Allow direct env var overrides (for standalone use / Docker)
 def _env_override(kwargs: dict) -> dict:
@@ -58,11 +59,15 @@ CLIENT_KWARGS = _env_override(CLIENT_KWARGS)
 log.info("Client kwargs keys: %s", list(CLIENT_KWARGS.keys()))
 
 
+_CLIENTS = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _CLIENTS
     log.info("Three.js Game Backend starting...")
     voices = gradbot.flagship_voices()
     log.info("Available voices: %s", [v.name for v in voices])
+    _CLIENTS = await gradbot.create_clients(**CLIENT_KWARGS)
     yield
     log.info("Shutting down...")
 
@@ -93,7 +98,7 @@ async def list_clues():
 @app.websocket("/ws/tts")
 async def websocket_tts(websocket: WebSocket):
     """
-    One-shot TTS: send text, receive OggOpus audio.
+    One-shot TTS: send text, receive OggOpus audio directly (no LLM).
 
     Protocol:
       Client -> JSON: {"type": "speak", "text": "...", "voice_name": "Emma"}
@@ -116,50 +121,22 @@ async def websocket_tts(websocket: WebSocket):
 
         voice = gradbot.flagship_voice(voice_name)
 
-        config = gradbot.SessionConfig(
+        log.info("[TTS] Synthesizing directly (no LLM)...")
+        results = await _CLIENTS.tts_synthesize(
+            text,
             voice_id=voice.voice_id,
-            instructions=(
-                f"Your ONLY job is to say the following text verbatim. "
-                f"Output ONLY these exact words, nothing else:\n\n{text}"
-            ),
-            language=voice.language,
-            assistant_speaks_first=True,
             rewrite_rules=voice.language.rewrite_rules,
         )
 
-        log.info("[TTS] Creating gradbot session...")
-        input_handle, output_handle = await gradbot.run(
-            **CLIENT_KWARGS,
-            session_config=config,
-            input_format=gradbot.AudioFormat.OggOpus,
-            output_format=gradbot.AudioFormat.OggOpus,
-        )
-        log.info("[TTS] Session created, reading output...")
-
-        while True:
-            out = await output_handle.receive()
-            if out is None:
-                log.info("[TTS] Output stream ended")
-                break
-
-            if out.msg_type == "audio":
-                log.debug("[TTS] OggOpus audio chunk: %.2fs-%.2fs (%d bytes)",
-                          out.start_s or 0, out.stop_s or 0, len(out.data))
-                await websocket.send_bytes(out.data)
-
-            elif out.msg_type == "tts_text":
-                log.info("[TTS] Text: %r", out.text)
+        for audio_bytes, tts_text, start_s, stop_s in results:
+            if len(audio_bytes) > 0:
+                await websocket.send_bytes(audio_bytes)
+            if tts_text:
+                log.info("[TTS] Text: %r", tts_text)
                 await websocket.send_json({
                     "type": "tts_text",
-                    "text": out.text,
+                    "text": tts_text,
                 })
-
-            elif out.msg_type == "event":
-                log.debug("[TTS] Event: %s", out.event.event_type)
-                if out.event.event_type == "end_tts_audio":
-                    log.info("[TTS] Speech finished, closing session")
-                    await input_handle.close()
-                    break
 
         await websocket.send_json({"type": "done"})
         log.info("[TTS] Done")
@@ -218,8 +195,10 @@ CRITICAL RULES:
         language=gradbot.Lang.En,
         assistant_speaks_first=False,
         tools=tools,
-        flush_duration_s=0.5,
-        rewrite_rules=gradbot.Lang.En.rewrite_rules,
+        **merge_overrides(_OVERRIDES,
+            flush_duration_s=0.5,
+            rewrite_rules=gradbot.Lang.En.rewrite_rules,
+        ),
     )
 
 
@@ -318,8 +297,10 @@ def make_checkin_session_config() -> "gradbot.SessionConfig":
         language=gradbot.Lang.En,
         assistant_speaks_first=False,
         tools=tools,
-        flush_duration_s=0.5,
-        rewrite_rules=gradbot.Lang.En.rewrite_rules,
+        **merge_overrides(_OVERRIDES,
+            flush_duration_s=0.5,
+            rewrite_rules=gradbot.Lang.En.rewrite_rules,
+        ),
     )
 
 
