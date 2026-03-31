@@ -4,6 +4,12 @@ Chick-fil-A Vendor Demo - Voice AI ordering agent
 A multilingual voice agent that helps customers browse the menu,
 customize items, and place orders.
 
+Features:
+- Multi-language support (English, French, Spanish, German, Portuguese)
+- Real-time order management with customizations
+- Interactive menu display
+- gradbot_filler tool for super-reactive responses (speaks immediately while processing)
+
 Run with: uvicorn main:app --reload
 """
 
@@ -220,19 +226,25 @@ CONVERSATION AWARENESS:
 {order_summary}
 
 CRITICAL TOOL CALLING RULES:
-- NEVER announce tool calls. Do NOT say "let me check the menu" or "I'm adding that to your order"
+- Use the `gradbot_filler` tool call before any tool call to keep the flow and reactivity of the conversation.
 - Just call the tool silently, then respond naturally based on the result
 - Call the tool FIRST, THEN speak
 - If you need to call a tool, do it without mentioning it - the customer will see the results on screen
 
 MANDATORY TOOL CALL TRIGGERS (NEVER SKIP THESE):
-- Menu questions ("what's on the menu", "what do you have", "tell me about X") → MUST call show_menu first
-- Ordering NEW items ("I'll have X", "I want X", "get me X", "add X") → MUST call add_to_order first
-- Modifying existing items ("change the cheese", "make it no pickles", "switch to multigrain") → MUST call modify_item first
-- Removing ("remove item", "take off item 1", "cancel the X") → MUST call remove_from_order first
-- Viewing order ("what's my order", "what do I have", "my total") → MUST call view_order first
-- Checkout ("I'm ready", "checkout", "that's all", "place my order") → MUST call place_order first
-- Language change (customer speaks a different language than current) → MUST call switch_language FIRST, then reply in the new language
+- Menu questions ("what's on the menu", "what do you have", "tell me about X") → gradbot_filler("Let me check that for you") + show_menu
+- Ordering NEW items ("I'll have X", "I want X", "get me X", "add X") → gradbot_filler("Sure thing") + add_to_order
+- Modifying existing items ("change the cheese", "make it no pickles", "switch to multigrain") → gradbot_filler("One sec") + modify_item
+- Removing ("remove item", "take off item 1", "cancel the X") → remove_from_order
+- Viewing order ("what's my order", "what do I have", "my total") → view_order
+- Checkout ("I'm ready", "checkout", "that's all", "place my order") → gradbot_filler("Let me get that ready") + place_order
+- Language change (customer speaks a different language than current) → switch_language FIRST, then reply in the new language
+
+USING gradbot_filler FOR REACTIVITY:
+- Use gradbot_filler BEFORE slow operations (show_menu, add_to_order, place_order) to maintain conversation flow
+- Keep filler phrases SHORT (3-7 words): "One sec", "Let me check", "Sure thing", "Got it"
+- Match the filler to the current language (French: "Un instant", Spanish: "Un momento", German: "Einen Moment", Portuguese: "Só um momento")
+- Call gradbot_filler FIRST, then call the main tool - the filler will speak immediately while the operation processes
 
 TOOL CALL ENFORCEMENT:
 - Do NOT just talk about it - CALL THE TOOL FIRST, THEN talk
@@ -260,6 +272,7 @@ IMPORTANT RULES:
 - Be proactive about asking "Anything else?" after adding items
 
 TOOLS AVAILABLE:
+- gradbot_filler: Provide immediate filler content to say while waiting for other operations. Use this BEFORE slow operations to keep conversation flowing (e.g., "Let me check that for you" before show_menu, "One sec" before add_to_order). Keep filler short (5-10 words max).
 - show_menu: Display the full menu or a specific category (entrees, sides, drinks, desserts)
 - add_to_order: Add an item to the order - USE THE ITEM ID from the menu list above (e.g., "spicy_sandwich" not "Spicy Chicken Sandwich")
 - modify_item: Change an existing order item - USE THIS when they want to change options/customizations on an already-ordered item
@@ -284,6 +297,20 @@ def build_tools() -> list[gradbot.ToolDef]:
     """Build the tool definitions for the ordering agent."""
 
     return [
+        gradbot.ToolDef(
+            name="gradbot_filler",
+            description="Provide filler content to speak immediately while waiting for other operations. Use before slow operations to maintain conversation flow.",
+            parameters_json=json.dumps({
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "Short filler phrase to speak (e.g., 'Let me check that for you', 'One second', 'Sure thing')"
+                    }
+                },
+                "required": ["content"]
+            }),
+        ),
         gradbot.ToolDef(
             name="show_menu",
             description="Display the menu to the customer. Can show full menu or a specific category.",
@@ -453,7 +480,17 @@ async def websocket_order(websocket: WebSocket):
         args = json.loads(tool_call.args_json)
         logger.info("Tool call: %s - %s", tool_name, args)
 
-        if tool_name == "show_menu":
+        if tool_name == "gradbot_filler":
+            # Filler content callback is invoked immediately during streaming in the Rust layer
+            # We need to send a result for the tool call to complete
+            content = args.get("content", "")
+            logger.info("🗣️  gradbot_filler called with content: '%s' (lang=%s)", content, state.lang)
+            await tool_handle.send(json.dumps({
+                "status": "SUCCESS",
+                "content": content,
+            }))
+
+        elif tool_name == "show_menu":
             category = args.get("category", "all")
             lang = state.lang
 

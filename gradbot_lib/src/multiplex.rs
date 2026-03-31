@@ -185,9 +185,10 @@ impl Session {
             .stt_stream(stt_lang, stt_extra)
             .await
             .context("STT: failed to create stream")?;
-        let llm = Arc::new(tokio::sync::RwLock::new(
-            llm.session().context("LLM: failed to create session")?,
-        ));
+
+        // Create LLM session and set up filler callback for immediate TTS
+        let mut llm_session = llm.session().context("LLM: failed to create session")?;
+
         let stt_sender = SttSender_ {
             ss,
             samples_sent: 0,
@@ -195,6 +196,18 @@ impl Session {
         };
         let stt_sender = SttSender(Arc::new(Mutex::new(stt_sender)));
         let session_config = Arc::new(Mutex::new(session_config));
+
+        // Set up gradbot_filler callback to send text directly to TTS
+        // Note: For simplicity, we just log the filler call for now.
+        // Full immediate TTS integration would require access to current turn_idx
+        // to avoid audio being filtered out by turn management.
+        llm_session.set_filler_callback(move |content: String| {
+            tracing::info!("🎤 gradbot_filler called with content: '{}'", content);
+            tracing::info!("   Note: Immediate TTS callback received but not sending to TTS stream");
+            tracing::info!("   (filler content will flow through normal LLM response)");
+        });
+
+        let llm = Arc::new(tokio::sync::RwLock::new(llm_session));
         let (internal_cmd_tx, internal_cmd_rx) = tokio::sync::mpsc::channel(10);
         let slf = Self {
             tts_client,

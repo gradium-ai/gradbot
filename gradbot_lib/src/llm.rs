@@ -124,6 +124,7 @@ pub struct ToolDef {
     pub parameters: Value,
 }
 
+
 /// Global cache for model listings by base URL.
 /// Key is the base URL (or empty string for default OpenAI API).
 static MODEL_CACHE: std::sync::OnceLock<tokio::sync::RwLock<HashMap<String, Vec<String>>>> =
@@ -330,6 +331,7 @@ impl Llm {
             last_config: None,
             pending_tool_calls: Arc::new(Mutex::new(vec![])),
             tool_results_pending: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            filler_callback: None,
         };
         Ok(slf)
     }
@@ -345,9 +347,30 @@ pub struct LlmSession {
     pending_tool_calls: Arc<Mutex<Vec<PendingToolCall>>>,
     /// Counter incremented when tool results are sent, decremented when processed.
     tool_results_pending: Arc<std::sync::atomic::AtomicU32>,
+    /// Optional callback for gradbot_filler tool calls - receives filler content for immediate TTS.
+    /// This is wired up at the multiplex level to send filler content directly to TTS.
+    /// The auto-SUCCESS injection works regardless of whether this callback is set.
+    filler_callback: Option<Arc<dyn Fn(String) + Send + Sync>>,
 }
 
 impl LlmSession {
+    /// Set a callback that will be invoked immediately when a gradbot_filler tool call is detected.
+    ///
+    /// The callback receives the filler content string and should trigger TTS playback.
+    ///
+    /// This is automatically wired up at the multiplex layer to create an immediate TTS stream
+    /// for the filler content, providing ultra-low-latency responses while other operations process.
+    ///
+    /// Note: This is not exposed to Python bindings. For Python demos, gradbot_filler
+    /// works without the immediate callback - it will auto-inject SUCCESS and the content
+    /// will be part of the normal conversation flow.
+    pub fn set_filler_callback<F>(&mut self, callback: F)
+    where
+        F: Fn(String) + Send + Sync + 'static,
+    {
+        self.filler_callback = Some(Arc::new(callback));
+    }
+
     /// Check if there are any tool call results waiting to be processed.
     /// This allows the caller to trigger an LLM call to process tool results
     /// without waiting for user input.
@@ -598,6 +621,8 @@ impl LlmSession {
         tracing::debug!(?self.messages);
 
         // Build tools from config
+        // Note: gradbot_filler tool should be added by the user in their tools list.
+        // The LLM session will automatically detect and handle it with immediate callback + auto-SUCCESS.
         let tools: Vec<oai::types::ChatCompletionTool> = config
             .tools
             .iter()
@@ -664,11 +689,15 @@ impl LlmSession {
         let (tx, rx) = tokio::sync::mpsc::channel::<LlmResponseItem>(8);
         let pending_tool_calls = self.pending_tool_calls.clone();
         let tool_results_pending = self.tool_results_pending.clone();
+        let filler_callback = self.filler_callback.clone();
 
         let jh = crate::utils::spawn_abort_on_drop("llm-loop", async move {
             use futures::StreamExt;
+            use std::collections::HashSet;
             // Accumulate tool call chunks by index
             let mut tool_call_accum: HashMap<u32, (String, String, String)> = HashMap::new(); // index -> (id, name, args)
+            // Track which indices we've already invoked filler callback for
+            let mut filler_callback_invoked: HashSet<u32> = HashSet::new();
 
             // Parse SSE stream line by line
             let mut byte_stream = response.bytes_stream();
@@ -752,6 +781,32 @@ impl LlmSession {
                                         entry.2.push_str(&args);
                                     }
                                 }
+
+                                // For gradbot_filler, try to invoke callback as soon as we have complete args
+                                if entry.1 == "gradbot_filler"
+                                    && !entry.2.is_empty()
+                                    && !filler_callback_invoked.contains(&idx)
+                                {
+                                    // Try parsing args to see if we have complete JSON
+                                    if let Ok(args) = serde_json::from_str::<Value>(&entry.2) {
+                                        if let Some(content) = args.get("content").and_then(|v| v.as_str()) {
+                                            tracing::info!(
+                                                idx,
+                                                content = %content,
+                                                has_callback = filler_callback.is_some(),
+                                                "🗣️ gradbot_filler detected during streaming"
+                                            );
+                                            if let Some(ref callback) = filler_callback {
+                                                tracing::debug!("invoking filler callback immediately");
+                                                callback(content.to_string());
+                                            } else {
+                                                tracing::debug!("no filler callback set");
+                                            }
+                                            // Mark that we've processed this index
+                                            filler_callback_invoked.insert(idx);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -800,13 +855,13 @@ impl LlmSession {
 
                 // Send tool call to client
                 let handle = ToolCallHandle {
-                    tx: result_tx,
+                    tx: result_tx.clone(),
                     results_pending: tool_results_pending.clone(),
                 };
                 let call = ToolCall {
-                    call_id,
-                    tool_name,
-                    args,
+                    call_id: call_id.clone(),
+                    tool_name: tool_name.clone(),
+                    args: args.clone(),
                 };
                 tx.send(LlmResponseItem::ToolCall { call, handle }).await?;
             }

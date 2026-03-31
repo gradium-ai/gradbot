@@ -11,4 +11,4 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-gradbot = { path = "../../gradbot_py" }
+gradbot = { path = "../../gradbot_py", editable = true }
