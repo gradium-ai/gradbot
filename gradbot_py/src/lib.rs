@@ -917,7 +917,8 @@ impl GradbotClients {
                 gradbot::encoder::Format::OggOpus,
                 gradbot::OUTPUT_FRAME_SIZE,
                 gradbot::OUTPUT_SAMPLE_RATE,
-            ).map_err(to_py_err)?;
+            )
+            .map_err(to_py_err)?;
 
             // Send text and close
             tts_tx.send_text(&text).await.map_err(to_py_err)?;
@@ -934,13 +935,23 @@ impl GradbotClients {
 
             while let Some(msg) = tts_rx.next_message(0).await.map_err(to_py_err)? {
                 match msg {
-                    gradbot::text_to_speech::TtsOut::Audio { pcm, start_s, stop_s, .. } => {
+                    gradbot::text_to_speech::TtsOut::Audio {
+                        pcm,
+                        start_s,
+                        stop_s,
+                        ..
+                    } => {
                         let encoded = encoder.encode(&pcm).map_err(to_py_err)?;
                         if !encoded.data.is_empty() {
                             chunks.push((encoded.data, String::new(), start_s, stop_s));
                         }
                     }
-                    gradbot::text_to_speech::TtsOut::Text { text, start_s, stop_s, .. } => {
+                    gradbot::text_to_speech::TtsOut::Text {
+                        text,
+                        start_s,
+                        stop_s,
+                        ..
+                    } => {
                         chunks.push((Vec::new(), text, start_s, stop_s));
                     }
                     gradbot::text_to_speech::TtsOut::TurnComplete { .. } => break,

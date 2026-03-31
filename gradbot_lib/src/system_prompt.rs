@@ -132,7 +132,11 @@ pub fn system_prompt(lang: Lang, additional_instructions: Option<&str>) -> Strin
     let has_custom = additional_instructions.is_some();
     let additional_instructions =
         additional_instructions.unwrap_or(DEFAULT_ADDITIONAL_INSTRUCTIONS);
-    let who_are_you = if has_custom { WHO_ARE_YOU_CUSTOM } else { WHO_ARE_YOU_DEFAULT };
+    let who_are_you = if has_custom {
+        WHO_ARE_YOU_CUSTOM
+    } else {
+        WHO_ARE_YOU_DEFAULT
+    };
     SYSTEM_PROMPT_TEMPLATE
         .replace("{SYSTEM_PROMPT_BASICS}", SYSTEM_PROMPT_BASICS)
         .replace("{additional_instructions}", additional_instructions)

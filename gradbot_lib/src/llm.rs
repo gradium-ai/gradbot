@@ -692,7 +692,11 @@ impl LlmSession {
                 sse_chunk_count += 1;
                 let text = String::from_utf8_lossy(&chunk);
                 if sse_chunk_count <= 3 {
-                    tracing::debug!(sse_chunk_count, text_len = text.len(), "LLM SSE chunk received");
+                    tracing::debug!(
+                        sse_chunk_count,
+                        text_len = text.len(),
+                        "LLM SSE chunk received"
+                    );
                 }
                 line_buf.push_str(&text);
 
