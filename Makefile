@@ -14,7 +14,7 @@ ifndef DEMO
 endif
 	@rm -rf $(WHEEL_DIR)
 	$(MATURIN) build $(MANIFEST) -o $(WHEEL_DIR)
-	demos/$(DEMO)/.venv/bin/pip install $(WHEEL_DIR)/gradbot-*.whl --force-reinstall --no-deps
+	demos/$(DEMO)/.venv/bin/python3 -m pip install $(WHEEL_DIR)/gradbot-*.whl --force-reinstall --no-deps
 
 # Build and install into all demo venvs
 build-all:

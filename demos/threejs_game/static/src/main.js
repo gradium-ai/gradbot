@@ -565,7 +565,10 @@ Promise.all([
     milchickAI.start();
 
     // Expose for automated testing
-    window.__test = { playerModel: model, milchick, milchickAI, suspicionSystem };
+    window.__test = {
+      playerModel: model, milchick, milchickAI, suspicionSystem,
+      clueSystem, gameUI, checkWinCondition, triggerMusicDanceExperience,
+    };
 
     // Debug: ?win=1 to trigger dance victory (dev builds only)
     if (import.meta.env?.DEV && new URLSearchParams(window.location.search).get('win') === '1') {
