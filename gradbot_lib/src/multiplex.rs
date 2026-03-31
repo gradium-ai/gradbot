@@ -38,8 +38,8 @@ fn reset_asr_tool() -> crate::llm::ToolDef {
     }
 }
 const INPUT_FRAME_SIZE: usize = 1920;
-const OUTPUT_SAMPLE_RATE: usize = 48000;
-const OUTPUT_FRAME_SIZE: usize = 3840;
+pub const OUTPUT_SAMPLE_RATE: usize = 48000;
+pub const OUTPUT_FRAME_SIZE: usize = 3840;
 
 /// Status for tracking how an audio stream interruption should be handled.
 /// Channel capacity for inbound messages (audio from client).
@@ -465,6 +465,7 @@ impl Session {
         let tts_out_tx = self.tts_out_tx.clone();
         let msg_out_tx = self.msg_out_tx.clone();
         let start_time = self.audio_time_s().await;
+        let llm_request_start = std::time::Instant::now();
         let _ = self.send_event(Event::LlmStarted).await;
         let stt_sender = self.stt_sender.clone();
         let session_config = self.session_config.clone();
@@ -509,10 +510,44 @@ impl Session {
                         // real boundary (sentence end / list comma). We stash the buffer
                         // and decide when the next chunk arrives.
                         let mut pending_numeric: Option<String> = None;
+                        let mut tool_call_as_text = false;
                         while let Some(item) = streaming_session.recv().await {
+                            tracing::debug!(?item, "LLM stream item received");
                             match item {
                                 crate::llm::LlmResponseItem::Text(chunk) => {
+                                    // Detect tool-call-as-text: some models (e.g. Qwen) may
+                                    // output tool calls as plain text instead of structured
+                                    // tool_calls. Once detected, suppress ALL remaining text
+                                    // for this LLM turn (content between tags is clean text
+                                    // that would otherwise leak to TTS).
+                                    if tool_call_as_text {
+                                        tracing::debug!(
+                                            text = %chunk,
+                                            "Suppressing text (tool-call-as-text mode active)"
+                                        );
+                                        continue;
+                                    }
+                                    if chunk.contains("<tool_call>")
+                                        || chunk.contains("</tool_call>")
+                                        || chunk.contains("<function=")
+                                        || chunk.contains("</function>")
+                                        || chunk.contains("<parameter=")
+                                        || chunk.contains("</parameter>")
+                                        || chunk.contains("\"tool_calls\"")
+                                    {
+                                        tracing::warn!(
+                                            text = %chunk,
+                                            "LLM emitted tool call as plain text — suppressing this and all remaining text"
+                                        );
+                                        tool_call_as_text = true;
+                                        continue;
+                                    }
                                     if first_word {
+                                        let ttft_ms = llm_request_start.elapsed().as_millis();
+                                        tracing::info!(
+                                            ttft_ms,
+                                            "LLM time-to-first-token"
+                                        );
                                         let time_s = stt_sender.current_time_s().await;
                                         msg_out_tx
                                             .send(MsgOut::Event { time_s, event: Event::FirstWord })
@@ -580,6 +615,11 @@ impl Session {
                         if !buffer.is_empty() {
                             tts_tx.send_text(&buffer).await?;
                         }
+                        let llm_total_ms = llm_request_start.elapsed().as_millis();
+                        tracing::info!(
+                            llm_total_ms,
+                            "LLM stream complete"
+                        );
                         tts_tx.send_end_of_stream().await?;
                         Ok::<(), anyhow::Error>(())
                     }
@@ -1489,9 +1529,26 @@ async fn run(
         }
         Ok::<(), anyhow::Error>(())
     };
+    tokio::pin!(out_send_loop);
+    tokio::pin!(tr_loop);
+    tokio::pin!(recv_loop);
+
     tokio::select! {
-        res = out_send_loop => res.context("TTS/LLM output loop failed"),
-        res = tr_loop => res.context("STT transcription loop failed"),
-        res = recv_loop => res.context("audio input loop failed"),
+        res = &mut out_send_loop => res.context("TTS/LLM output loop failed"),
+        res = &mut tr_loop => {
+            // STT stream ending should not kill the session — the LLM/TTS
+            // pipeline may still be producing output (e.g. TTS-only sessions,
+            // or slow LLM responses during which STT times out).
+            match &res {
+                Ok(()) => tracing::info!("STT transcription loop ended normally, session continues"),
+                Err(e) => tracing::warn!(?e, "STT transcription loop failed, session continues"),
+            }
+            // Wait for the output loop or recv loop to finish instead
+            tokio::select! {
+                res = &mut out_send_loop => res.context("TTS/LLM output loop failed"),
+                res = &mut recv_loop => res.context("audio input loop failed"),
+            }
+        },
+        res = &mut recv_loop => res.context("audio input loop failed"),
     }
 }

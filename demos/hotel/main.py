@@ -400,6 +400,16 @@ async def websocket_chat(websocket: WebSocket):
         logger.info("Booking confirmed: %s", confirmation)
 
     async def handle_tool_call(tool_call, tool_handle, input_handle, websocket):
+        try:
+            await _handle_tool_call_inner(tool_call, tool_handle, input_handle, websocket)
+        except Exception as exc:
+            logger.exception("Tool call %s failed", tool_call.tool_name)
+            try:
+                await tool_handle.send_error(f"Tool error: {exc}")
+            except Exception:
+                pass
+
+    async def _handle_tool_call_inner(tool_call, tool_handle, input_handle, websocket):
         tool_name = tool_call.tool_name
         args = json.loads(tool_call.args_json)
         logger.info("Tool call: %s - %s", tool_name, args)

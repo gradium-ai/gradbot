@@ -892,6 +892,77 @@ fn create_clients<'py>(
 
 #[pymethods]
 impl GradbotClients {
+    /// Synthesize text to OggOpus audio without using an LLM.
+    ///
+    /// Returns a list of (audio_bytes, text, start_s, stop_s) tuples.
+    /// Audio chunks are OggOpus encoded. Text chunks contain the spoken words.
+    #[pyo3(signature = (text, voice_id=None, rewrite_rules=None))]
+    fn tts_synthesize<'py>(
+        &self,
+        py: Python<'py>,
+        text: String,
+        voice_id: Option<String>,
+        rewrite_rules: Option<String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let (mut tts_tx, mut tts_rx) = inner
+                .tts_client()
+                .tts_stream(voice_id, 0.0, rewrite_rules, None)
+                .await
+                .map_err(to_py_err)?;
+
+            // Create OggOpus encoder (format, frame_size, sample_rate)
+            let mut encoder = gradbot::encoder::Encoder::new(
+                gradbot::encoder::Format::OggOpus,
+                gradbot::OUTPUT_FRAME_SIZE,
+                gradbot::OUTPUT_SAMPLE_RATE,
+            )
+            .map_err(to_py_err)?;
+
+            // Send text and close
+            tts_tx.send_text(&text).await.map_err(to_py_err)?;
+            tts_tx.send_end_of_stream().await.map_err(to_py_err)?;
+
+            // Collect raw data in the async block (no Python GIL needed)
+            // Each entry: (audio_data, text, start_s, stop_s)
+            let mut chunks: Vec<(Vec<u8>, String, f64, f64)> = Vec::new();
+
+            // OggOpus header first
+            if let Some(header) = encoder.header() {
+                chunks.push((header.to_vec(), String::new(), 0.0, 0.0));
+            }
+
+            while let Some(msg) = tts_rx.next_message(0).await.map_err(to_py_err)? {
+                match msg {
+                    gradbot::text_to_speech::TtsOut::Audio {
+                        pcm,
+                        start_s,
+                        stop_s,
+                        ..
+                    } => {
+                        let encoded = encoder.encode(&pcm).map_err(to_py_err)?;
+                        if !encoded.data.is_empty() {
+                            chunks.push((encoded.data, String::new(), start_s, stop_s));
+                        }
+                    }
+                    gradbot::text_to_speech::TtsOut::Text {
+                        text,
+                        start_s,
+                        stop_s,
+                        ..
+                    } => {
+                        chunks.push((Vec::new(), text, start_s, stop_s));
+                    }
+                    gradbot::text_to_speech::TtsOut::TurnComplete { .. } => break,
+                }
+            }
+
+            // Convert to Python objects
+            Ok(chunks)
+        })
+    }
+
     /// Start a new voice AI session.
     ///
     /// # Arguments

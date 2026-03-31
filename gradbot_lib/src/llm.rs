@@ -674,8 +674,11 @@ impl LlmSession {
             let mut byte_stream = response.bytes_stream();
             let mut line_buf = String::new();
 
+            let mut sse_chunk_count: u64 = 0;
+            tracing::info!("LLM SSE: entering byte_stream loop");
             while let Some(chunk_result) = byte_stream.next().await {
                 if tx.is_closed() {
+                    tracing::debug!("LLM SSE: tx closed, stopping");
                     break;
                 }
                 let chunk = match chunk_result {
@@ -686,7 +689,15 @@ impl LlmSession {
                         break;
                     }
                 };
+                sse_chunk_count += 1;
                 let text = String::from_utf8_lossy(&chunk);
+                if sse_chunk_count <= 3 {
+                    tracing::debug!(
+                        sse_chunk_count,
+                        text_len = text.len(),
+                        "LLM SSE chunk received"
+                    );
+                }
                 line_buf.push_str(&text);
 
                 // Process complete lines
@@ -747,13 +758,32 @@ impl LlmSession {
                 }
             }
 
+            tracing::debug!(sse_chunk_count, "LLM SSE stream ended");
+
             // Stream ended - finalize any accumulated tool calls
-            for (_idx, (call_id, tool_name, args_str)) in tool_call_accum {
+            for (idx, (call_id, tool_name, args_str)) in tool_call_accum {
                 if call_id.is_empty() || tool_name.is_empty() {
-                    continue; // Incomplete tool call
+                    tracing::warn!(
+                        idx,
+                        call_id = %call_id,
+                        tool_name = %tool_name,
+                        args = %args_str,
+                        "Dropping incomplete tool call (missing id or name)"
+                    );
+                    continue;
                 }
-                let args: Value =
-                    serde_json::from_str(&args_str).unwrap_or(Value::Object(Default::default()));
+                let args: Value = match serde_json::from_str(&args_str) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!(
+                            tool_name = %tool_name,
+                            args = %args_str,
+                            error = %e,
+                            "Tool call has malformed JSON args, using empty object"
+                        );
+                        Value::Object(Default::default())
+                    }
+                };
 
                 // Create channel for results
                 let (result_tx, result_rx) = mpsc::channel::<ToolResult>(10);

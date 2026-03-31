@@ -385,16 +385,20 @@ export class GameUI {
    * @param {string} [fragment]
    */
   showVoiceResult(correct, fragment) {
+    console.log('[GameUI] showVoiceResult:', correct, fragment, 'hasResolve:', !!this._voiceResolve);
     const resultEl = this._voicePanel.querySelector('#voice-result');
     resultEl.textContent = correct ? 'CORRECT. Clue recorded.' : 'Incorrect. Try again.';
     resultEl.style.color = correct ? '#00cc66' : '#cc4444';
     resultEl.style.display = 'block';
 
     if (correct && this._voiceResolve) {
+      // Resolve immediately so the clue system registers the solve,
+      // then hide the panel after a short delay for visual feedback.
+      const resolve = this._voiceResolve;
+      this._voiceResolve = null;
+      resolve(true);
       setTimeout(() => {
         this._voicePanel.style.display = 'none';
-        this._voiceResolve(true);
-        this._voiceResolve = null;
       }, 2000);
     }
   }
