@@ -9,7 +9,7 @@ demos/
   app.py              # Entrypoint — discovers and mounts all demos
   config.example.yaml # Example config (copy to config.yaml)
   simple_chat/        # Demo: time-traveller voice chat
-  chick_fil_a/        # Demo: Chick-fil-A ordering agent
+  restaurant_ordering/ # Demo: fast-food restaurant ordering agent
   hotel/              # Demo: hotel concierge
   ...
 ```

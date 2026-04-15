@@ -1,6 +1,6 @@
-# Chick-fil-A Voice Ordering Demo
+# Restaurant Ordering Demo
 
-A voice AI ordering agent that helps customers browse the menu, customize items, and place orders at Chick-fil-A.
+A voice AI ordering agent that helps customers browse the menu, customize items, and place fast-food orders.
 
 ## Features
 
@@ -9,14 +9,15 @@ A voice AI ordering agent that helps customers browse the menu, customize items,
 - **Item Customization**: Choose bread types, sauces, toppings, and more
 - **Order Management**: View current order, modify items, and see the total
 - **Natural Conversation**: The agent asks clarifying questions and makes suggestions
+- **Multilingual**: English, French, German, Spanish, Portuguese
 
 ## Setup
 
 1. Set your API keys:
 ```bash
 export GRADIUM_API_KEY=your_gradium_key
-export OPENAI_API_KEY=your_llm_key  # Any OpenAI-compatible API
-export LLM_BASE_URL=...  # Optional, for custom endpoints
+export LLM_API_KEY=your_llm_key      # Any OpenAI-compatible API
+export LLM_BASE_URL=...              # Optional, for custom endpoints
 ```
 
 2. Install dependencies:

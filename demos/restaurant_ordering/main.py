@@ -1,4 +1,4 @@
-"""Chick-fil-A Vendor Demo — voice AI ordering agent.
+"""Restaurant ordering demo — voice AI fast-food ordering agent.
 
 Run with: uv run uvicorn main:app --reload
 """
@@ -326,7 +326,7 @@ def order_items_json(state: OrderState) -> list[dict]:
 
 
 def get_system_prompt(state: OrderState) -> str:
-    """System prompt for the Chick-fil-A ordering agent."""
+    """System prompt for the restaurant ordering agent."""
     currency_sym = "€" if state.lang in ("fr", "de") else "$"
     lang_guidance = LANGUAGE_STYLE_GUIDANCE.get(state.lang, "")
 
@@ -555,7 +555,7 @@ def build_tools() -> list[gradbot.ToolDef]:
 # FastAPI app
 # ---------------------------------------------------------------------------
 
-app = fastapi.FastAPI(title="Chick-fil-A Vendor Demo")
+app = fastapi.FastAPI(title="Restaurant Ordering Demo")
 
 
 @app.websocket("/ws/order")

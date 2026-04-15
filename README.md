@@ -98,7 +98,7 @@ Every demo is a standalone FastAPI + WebSocket app. Pick one, `uv sync`, and run
 | **[fantasy_shop](demos/fantasy_shop/)** | Haggling game: buy a sword from NPCs | Tool calling, multi-character, game state, deferred tools |
 | **[hotel](demos/hotel/)** | Hotel booking agent for Paris, Bali, Dubai | Deferred tool results with natural chit-chat using Web Search API |
 | **[business_bank](demos/business_bank/)** | Banking agent with PIN auth and loan applications | Security flows, multi-step business logic |
-| **[Fast food ordering assistant](demos/chick_fil_a/)** | Multilingual voice ordering agent | Menu browsing, order customization, multilingual support |
+| **[restaurant_ordering](demos/restaurant_ordering/)** | Multilingual voice ordering agent for a fast-food restaurant | Menu browsing, order customization, multilingual support |
 | **[Office NPC game](demos/threejs_game/)** | 3D office exploration: solve voice riddles, handle NPC check-ins | Three.js, multi-session (clue + check-in), response classification |
 
 ## Building a New Demo
