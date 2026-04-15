@@ -1,0 +1,9 @@
+[project]
+name = "business-bank-demo"
+version = "0.1.0"
+description = "Business bank voice agent with PIN auth, card replacement, and loans"
+requires-python = ">=3.12"
+dependencies = ["gradbot"]
+
+[tool.uv.sources]
+gradbot = { path = "../../gradbot_py" }

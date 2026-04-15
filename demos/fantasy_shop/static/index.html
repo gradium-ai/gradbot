@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="icon" type="image/png" href="static/favicon.png">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Sharp Edge - Fantasy Shop</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Georgia', serif;
+            background: url('static/background.png') no-repeat center center fixed;
+            background-size: cover;
+            min-height: 100vh;
+            color: #e8d5b7;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+
+        /* Header */
+        .game-header {
+            text-align: center;
+            padding: 1rem;
+            background: linear-gradient(180deg, rgba(139, 90, 43, 0.3) 0%, transparent 100%);
+            border-bottom: 2px solid #8b5a2b;
+            margin-bottom: 1rem;
+        }
+
+        .game-header h1 {
+            font-size: 2rem;
+            color: #ffd700;
+            text-shadow: 2px 2px 4px #000;
+            margin-bottom: 0.25rem;
+        }
+
+        .game-header .subtitle {
+            color: #c9a959;
+            font-style: italic;
+        }
+
+        /* Game panels layout */
+        .game-layout {
+            display: grid;
+            grid-template-columns: 200px 1fr;
+            gap: 1rem;
+        }
+
+        /* Side panel - inventory & stats */
+        .side-panel {
+            background: rgba(0, 0, 0, 0.4);
+            border: 2px solid #8b5a2b;
+            border-radius: 8px;
+            padding: 1rem;
+        }
+
+        .panel-title {
+            color: #ffd700;
+            font-size: 1rem;
+            border-bottom: 1px solid #8b5a2b;
+            padding-bottom: 0.5rem;
+            margin-bottom: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            padding: 0.25rem 0;
+        }
+
+        .stat-label {
+            color: #a89070;
+        }
+
+        .stat-value {
+            color: #ffd700;
+            font-weight: bold;
+        }
+
+        .stat-value.affordable {
+            color: #4ade80;
+        }
+
+        .stat-value.expensive {
+            color: #ef4444;
+        }
+
+        .inventory-item {
+            background: rgba(139, 90, 43, 0.2);
+            padding: 0.5rem;
+            margin-bottom: 0.5rem;
+            border-radius: 4px;
+            border-left: 3px solid #8b5a2b;
+            font-size: 0.9rem;
+        }
+
+        .inventory-item.highlight {
+            border-left-color: #ffd700;
+            background: rgba(255, 215, 0, 0.1);
+        }
+
+        /* Main panel */
+        .main-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        /* Character display */
+        .character-panel {
+            background: rgba(0, 0, 0, 0.4);
+            border: 2px solid #8b5a2b;
+            border-radius: 8px;
+            padding: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .character-avatar {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 3px solid #8b5a2b;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, #2d1b4e 0%, #1a0a2e 100%);
+            overflow: hidden;
+        }
+
+        .character-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .character-avatar.attendant {
+            border-color: #cd7f32;
+        }
+
+        .character-avatar.manager {
+            border-color: #ffd700;
+        }
+
+        .character-info h2 {
+            color: #ffd700;
+            margin-bottom: 0.25rem;
+        }
+
+        .character-info .role {
+            color: #a89070;
+            font-style: italic;
+        }
+
+        /* Transcript */
+        .transcript-panel {
+            background: rgba(0, 0, 0, 0.4);
+            border: 2px solid #8b5a2b;
+            border-radius: 8px;
+            padding: 1rem;
+            height: 300px;
+            overflow-y: auto;
+        }
+
+        .transcript-entry {
+            margin-bottom: 0.75rem;
+            padding: 0.75rem;
+            border-radius: 6px;
+            max-width: 85%;
+        }
+
+        .transcript-entry.user {
+            background: rgba(70, 130, 180, 0.3);
+            margin-left: auto;
+            border: 1px solid rgba(70, 130, 180, 0.5);
+        }
+
+        .transcript-entry.npc {
+            background: rgba(139, 90, 43, 0.3);
+            border: 1px solid rgba(139, 90, 43, 0.5);
+        }
+
+        .transcript-entry.system {
+            background: rgba(255, 215, 0, 0.2);
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            text-align: center;
+            max-width: 100%;
+            font-style: italic;
+            color: #ffd700;
+        }
+
+        .transcript-speaker {
+            font-size: 0.75rem;
+            color: #a89070;
+            margin-bottom: 0.25rem;
+        }
+
+        .transcript-text {
+            line-height: 1.4;
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+
+        .btn {
+            padding: 1rem 2rem;
+            font-size: 1.1rem;
+            font-family: 'Georgia', serif;
+            border: 2px solid;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(180deg, #8b5a2b 0%, #5c3d1e 100%);
+            border-color: #cd7f32;
+            color: #ffd700;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: linear-gradient(180deg, #a06830 0%, #704b25 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(139, 90, 43, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-danger {
+            background: linear-gradient(180deg, #8b2a2a 0%, #5c1e1e 100%);
+            border-color: #cd3232;
+            color: #ff6b6b;
+        }
+
+        .status {
+            text-align: center;
+            padding: 0.5rem;
+            color: #a89070;
+            font-style: italic;
+        }
+
+        .status.active {
+            color: #4ade80;
+        }
+
+        .status.error {
+            color: #f44336;
+        }
+
+        /* Overlays */
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        }
+
+        .overlay.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .overlay-content {
+            text-align: center;
+            padding: 3rem;
+        }
+
+        .overlay-content h2 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            text-shadow: 0 0 20px currentColor;
+        }
+
+        .overlay-content.win h2 {
+            color: #ffd700;
+        }
+
+        .overlay-content.lose h2 {
+            color: #ef4444;
+        }
+
+        .overlay-content p {
+            font-size: 1.25rem;
+            margin-bottom: 2rem;
+            color: #a89070;
+        }
+
+        .sword-icon {
+            font-size: 5rem;
+            margin-bottom: 1rem;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .overlay-content.win .sword-icon {
+            animation: float 2s ease-in-out infinite;
+            text-shadow: 0 0 30px #ffd700;
+        }
+
+        /* Recording indicator */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .recording-indicator {
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+            color: #4ade80;
+        }
+
+        .recording-indicator.active {
+            display: flex;
+        }
+
+        .recording-dot {
+            width: 12px;
+            height: 12px;
+            background: #4ade80;
+            border-radius: 50%;
+            animation: pulse 1s infinite;
+        }
+
+        .settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-top: 1px solid rgba(139, 90, 43, 0.3);
+            margin-top: 0.5rem;
+        }
+
+        .settings-label {
+            font-size: 0.85rem;
+            color: #a89070;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 40px;
+            height: 22px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(139, 90, 43, 0.4);
+            transition: 0.3s;
+            border-radius: 22px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: #e8d5b7;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: #8b5a2b;
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(18px);
+        }
+
+        .powered-by {
+            position: fixed;
+            top: 1rem;
+            right: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #7b8fa8;
+            font-size: 0.75rem;
+            opacity: 0.7;
+            z-index: 100;
+        }
+
+        .powered-by svg {
+            height: 38px;
+            width: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="powered-by">
+        <span>Powered by</span>
+        <svg viewBox="0 0 1201 262" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M60.7237 245.259C41.8152 234.104 26.9637 218.579 16.1814 198.682C5.39202 178.792 0 156.234 0 131C0 105.773 5.45416 83.2112 16.3625 63.3145C27.2708 43.4286 42.1792 27.8993 61.0877 16.7375C79.9944 5.58271 100.721 0 123.264 0C142.9 0 160.655 4.06533 176.534 12.1889C192.407 20.3195 205.497 31.0549 215.803 44.3952C226.104 57.7389 233.439 71.9285 237.801 86.9673H188.714C183.38 74.8424 174.773 64.8959 162.899 57.1313C151.017 49.3702 137.808 45.4861 123.264 45.4861C108.959 45.4861 96.0497 49.0042 84.5395 56.0367C73.024 63.0764 63.9337 73.0834 57.2687 86.0576C50.5983 99.0389 47.2694 114.021 47.2694 131C47.2694 147.983 50.5983 162.965 57.2687 175.939C63.9337 188.92 73.024 198.927 84.5395 205.96C96.0497 212.999 108.959 216.514 123.264 216.514C136.111 216.514 147.683 213.785 157.99 208.326C168.289 202.868 176.351 195.896 182.169 187.403C187.987 178.913 191.26 170.299 191.988 161.565L193.806 147.375L204.714 159.745H130.174V125.176H239.619V258.361H203.622L199.986 228.884H198.168C193.561 234.47 187.561 239.801 180.17 244.896C172.772 249.992 164.17 254.118 154.353 257.27C144.535 260.419 134.172 262 123.264 262C100.476 262 79.6304 256.421 60.7237 245.259Z" fill="currentColor"/><path d="M255.976 74.2312H294.156L297.792 89.8813H299.61C303.003 85.2758 307.427 81.509 312.881 78.5986C318.335 75.6882 325.062 74.2312 333.063 74.2312H366.878V116.078H335.971C324.336 116.078 315.484 119.174 309.428 125.36C303.365 131.544 300.338 140.584 300.338 152.467V258.361H255.976L255.976 74.2312Z" fill="currentColor"/><path d="M397.604 254.541C387.542 249.57 379.844 242.775 374.514 234.161C369.18 225.554 366.515 215.91 366.515 205.231C366.515 193.348 369.243 182.915 374.697 173.938C380.151 164.965 388.513 157.926 399.785 152.833C411.058 147.737 424.931 145.19 441.42 145.19H485.053V140.826C485.053 130.879 482.019 122.812 475.963 116.626C469.9 110.439 461.656 107.347 451.236 107.347C444.93 107.347 439.357 108.381 434.51 110.439C429.659 112.504 425.84 115.233 423.056 118.626C420.267 122.027 418.387 125.542 417.421 129.181H373.424C374.39 118.992 378.088 109.412 384.513 100.432C390.933 91.4591 399.842 84.2381 411.239 78.7798C422.63 73.3215 435.966 70.5923 451.236 70.5923C467.235 70.5923 481.11 73.5667 492.87 79.5083C504.625 85.4571 513.716 93.7618 520.141 104.437C526.561 115.112 529.776 127.24 529.776 140.826V258.361H491.233L487.597 240.167H485.779C481.655 245.749 474.871 250.781 465.417 255.266C455.964 259.754 445.056 262 432.692 262C419.358 262 407.66 259.509 397.604 254.541ZM464.326 220.696C471.11 217.186 476.263 212.146 479.78 205.597C483.292 199.048 485.053 191.529 485.053 183.035V177.577H445.782C434.147 177.577 425.476 179.759 419.784 184.126C414.085 188.494 411.239 194.442 411.239 201.958C411.239 209.236 413.723 215.057 418.694 219.424C423.658 223.792 430.874 225.974 440.328 225.974C449.537 225.974 457.537 224.218 464.326 220.696Z" fill="currentColor"/><path d="M585.587 249.808C572.616 241.684 562.374 230.341 554.862 215.785C547.346 201.23 543.591 184.734 543.591 166.298C543.591 147.62 547.346 131 554.862 116.444C562.374 101.889 572.616 90.6061 585.587 82.6035C598.552 74.5972 612.915 70.5923 628.676 70.5923C640.55 70.5923 651.037 72.7778 660.128 77.1451C669.218 81.509 676.309 86.9673 681.399 93.5201H683.217V3.63889H727.941V258.361H689.398L685.762 237.619H683.943C678.127 244.896 670.61 250.781 661.401 255.266C652.184 259.754 641.276 262 628.676 262C612.915 262 598.552 257.938 585.587 249.808ZM659.947 213.966C667.219 209.36 672.911 202.992 677.035 194.862C681.154 186.738 683.217 177.215 683.217 166.298C683.217 155.381 681.154 145.801 677.035 137.549C672.911 129.305 667.219 122.994 659.947 118.626C652.674 114.259 644.674 112.077 635.948 112.077C627.222 112.077 619.221 114.259 611.949 118.626C604.677 122.994 598.916 129.305 594.678 137.549C590.434 145.801 588.315 155.381 588.315 166.298C588.315 177.215 590.434 186.738 594.678 194.862C598.916 202.992 604.677 209.36 611.949 213.966C619.221 218.579 627.222 220.881 635.948 220.881C644.674 220.881 652.674 218.579 659.947 213.966Z" fill="currentColor"/><path d="M745.757 1.45342H793.391V42.9382H745.757V1.45342ZM747.211 74.2312H791.573V258.361H747.211V74.2312Z" fill="currentColor"/><path d="M978.106 258.361H978.467V143.862C978.24 145.598 978.106 147.371 978.106 149.194V258.361Z" fill="currentColor"/><path d="M933.747 74.2312V179.034C933.747 186.553 931.985 193.469 928.474 199.773C924.956 206.084 920.111 210.999 913.929 214.513C907.747 218.031 900.777 219.787 893.022 219.787C885.504 219.787 878.715 218.031 872.659 214.513C866.598 210.999 861.87 206.141 858.479 199.958C855.08 193.771 853.388 186.799 853.388 179.034V74.2312H809.027V184.855C809.027 200.139 812.118 213.664 818.3 225.43C824.48 237.199 833.083 246.233 844.115 252.537C855.144 258.844 867.688 262 881.749 262C893.385 262 903.868 259.871 913.201 255.632C922.092 251.589 928.923 246.817 933.748 241.338L933.747 74.2312Z" fill="currentColor"/><path d="M1192.09 106.256C1186.15 95.098 1178.03 86.3668 1167.73 80.0556C1157.42 73.7479 1145.97 70.5923 1133.37 70.5923C1120.28 70.5923 1108.64 73.3215 1098.46 78.7798C1088.28 84.2381 1080.77 90.6062 1075.92 97.884H1074.1C1070.22 91.0966 1063.79 84.8494 1054.83 79.1458C1045.86 73.4494 1035.19 70.5923 1022.83 70.5923C1013.13 70.5923 1004.16 72.7778 995.924 77.1451C988.326 81.1669 982.563 85.6276 978.468 90.4756L978.467 143.862C979.085 139.133 980.527 134.721 982.834 130.634C985.981 125.058 990.225 120.691 995.56 117.535C1000.89 114.387 1006.71 112.806 1013.01 112.806C1019.31 112.806 1024.89 114.259 1029.74 117.173C1034.59 120.083 1038.34 124.266 1041.01 129.724C1043.68 135.183 1045.01 141.679 1045.01 149.195V258.361H1089.73V149.195C1089.73 142.404 1091.25 136.22 1094.28 130.634C1097.31 125.058 1101.49 120.691 1106.83 117.535C1112.16 114.387 1117.97 112.806 1124.28 112.806C1130.82 112.806 1136.46 114.259 1141.19 117.173C1145.91 120.083 1149.61 124.266 1152.28 129.724C1154.94 135.183 1156.28 141.679 1156.28 149.195V258.361H1201V144.099C1201 130.034 1198.03 117.415 1192.09 106.256Z" fill="currentColor"/><path d="M977.382 91.7007H975.564L971.927 74.2312H933.747L933.748 241.338C933.986 241.067 934.245 240.804 934.473 240.529H936.291L939.927 258.361L978.106 258.361V149.194C978.106 147.371 978.24 145.598 978.467 143.862L978.468 90.4756C978.12 90.8869 977.704 91.2831 977.382 91.7007Z" fill="currentColor"/></svg>
+    </div>
+    <div class="container">
+        <header class="game-header">
+            <h1>The Sharp Edge</h1>
+            <p class="subtitle">Purveyors of Fine Weapons Since the Third Age</p>
+        </header>
+
+        <div class="game-layout">
+            <aside class="side-panel">
+                <h3 class="panel-title">Your Purse</h3>
+                <div class="stat-row">
+                    <span class="stat-label">Gold:</span>
+                    <span class="stat-value" id="goldDisplay">100</span>
+                </div>
+
+                <h3 class="panel-title" style="margin-top: 1rem;">Goal</h3>
+                <div class="stat-row">
+                    <span class="stat-label">Sword Price:</span>
+                    <span class="stat-value expensive" id="priceDisplay">150</span>
+                </div>
+
+                <h3 class="panel-title" style="margin-top: 1rem;">Inventory</h3>
+                <div id="inventory">
+                    <div class="inventory-item highlight">
+                        Fake Ruby
+                        <br><small style="color: #a89070;">(Looks convincing!)</small>
+                    </div>
+                </div>
+
+                <div class="settings-row">
+                    <span class="settings-label">Echo Cancel</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="echoCancellation" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </aside>
+
+            <main class="main-panel">
+                <div class="character-panel">
+                    <div class="character-avatar attendant" id="characterAvatar"><img src="static/grumbold.png" alt="Grumbold"></div>
+                    <div class="character-info">
+                        <h2 id="characterName">Grumbold</h2>
+                        <p class="role" id="characterRole">Shop Attendant</p>
+                    </div>
+                    <div class="recording-indicator" id="recordingIndicator">
+                        <span class="recording-dot"></span>
+                        <span>Listening...</span>
+                    </div>
+                </div>
+
+                <div class="transcript-panel" id="transcript">
+                    <div class="transcript-entry system">
+                        <span class="transcript-text">You enter The Sharp Edge weapon shop. A gruff man behind the counter eyes you suspiciously...</span>
+                    </div>
+                </div>
+
+                <div class="controls">
+                    <button class="btn btn-primary" id="startBtn">Enter Shop</button>
+                    <button class="btn btn-danger" id="stopBtn" style="display: none;">Leave Shop</button>
+                </div>
+
+                <p class="status" id="status">Click "Enter Shop" to begin your quest</p>
+            </main>
+        </div>
+    </div>
+
+    <!-- Win Overlay -->
+    <div class="overlay" id="winOverlay">
+        <div class="overlay-content win">
+            <div class="sword-icon">⚔️</div>
+            <h2>VICTORY!</h2>
+            <p id="winMessage">You acquired the legendary sword Dragonbane!</p>
+            <button class="btn btn-primary" onclick="location.reload()">Play Again</button>
+        </div>
+    </div>
+
+    <!-- Lose Overlay -->
+    <div class="overlay" id="loseOverlay">
+        <div class="overlay-content lose">
+            <div class="sword-icon">🚪</div>
+            <h2>GAME OVER</h2>
+            <p id="loseMessage">You were kicked out of the shop!</p>
+            <button class="btn btn-primary" onclick="location.reload()">Try Again</button>
+        </div>
+    </div>
+
+    <!-- Audio processor scripts -->
+    <script src="static/js/opus-encoder.js"></script>
+    <script src="static/js/audio-processor.js"></script>
+    <script src="static/js/synced-audio-player.js"></script>
+    <script>fetch("api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
+
+    <script>
+        // Game state
+        let gameState = {
+            gold: 100,
+            swordPrice: 150,
+            hasFakeRuby: true,
+            currentCharacter: 'attendant'
+        };
+
+        // WebSocket and audio
+        let ws = null;
+        let player = null; // SyncedAudioPlayer
+        let isRecording = false;
+        let turnBubbles = {}; // Map of turn_idx -> bubble element
+
+        // End game state - wait for buffer to drain before showing overlay
+        let pendingEndState = null; // { type: 'win'|'lose', message: string }
+        let endGameTurnIdx = null; // Turn index when game ended - wait for turn > this
+
+        // Transcript
+        let currentBubble = null;
+        let currentSpeaker = null;
+
+        // DOM elements
+        const goldDisplay = document.getElementById('goldDisplay');
+        const priceDisplay = document.getElementById('priceDisplay');
+        const characterAvatar = document.getElementById('characterAvatar');
+        const characterName = document.getElementById('characterName');
+        const characterRole = document.getElementById('characterRole');
+        const transcript = document.getElementById('transcript');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const status = document.getElementById('status');
+        const recordingIndicator = document.getElementById('recordingIndicator');
+        const winOverlay = document.getElementById('winOverlay');
+        const loseOverlay = document.getElementById('loseOverlay');
+        const winMessage = document.getElementById('winMessage');
+        const loseMessage = document.getElementById('loseMessage');
+        const echoCancellationToggle = document.getElementById('echoCancellation');
+
+        function updateGameDisplay() {
+            goldDisplay.textContent = gameState.gold;
+            priceDisplay.textContent = gameState.swordPrice;
+
+            if (gameState.gold >= gameState.swordPrice) {
+                priceDisplay.className = 'stat-value affordable';
+            } else {
+                priceDisplay.className = 'stat-value expensive';
+            }
+
+            // Update inventory
+            const inventory = document.getElementById('inventory');
+            if (gameState.hasFakeRuby) {
+                inventory.innerHTML = `
+                    <div class="inventory-item highlight">
+                        Fake Ruby
+                        <br><small style="color: #a89070;">(Looks convincing!)</small>
+                    </div>
+                `;
+            } else {
+                inventory.innerHTML = `
+                    <div class="inventory-item" style="color: #666; font-style: italic;">
+                        (Empty)
+                    </div>
+                `;
+            }
+        }
+
+        function updateCharacter(character, name) {
+            gameState.currentCharacter = character;
+            if (character === 'manager') {
+                characterAvatar.innerHTML = '<img src="static/princess.png" alt="Princess Celestia">';
+                characterAvatar.className = 'character-avatar manager';
+                characterName.textContent = name || 'Princess Celestia';
+                characterRole.textContent = 'Shop Manager';
+            } else {
+                characterAvatar.innerHTML = '<img src="static/grumbold.png" alt="Grumbold">';
+                characterAvatar.className = 'character-avatar attendant';
+                characterName.textContent = name || 'Grumbold';
+                characterRole.textContent = 'Shop Attendant';
+            }
+        }
+
+        function addTranscript(text, isUser, character) {
+            const speaker = isUser ? 'user' : 'npc';
+
+            if (speaker !== currentSpeaker) {
+                currentSpeaker = speaker;
+                currentBubble = document.createElement('div');
+                currentBubble.className = `transcript-entry ${speaker}`;
+
+                const speakerEl = document.createElement('div');
+                speakerEl.className = 'transcript-speaker';
+                speakerEl.textContent = isUser ? 'You' : (character === 'manager' ? 'Manager' : 'Grumbold');
+                currentBubble.appendChild(speakerEl);
+
+                const textEl = document.createElement('span');
+                textEl.className = 'transcript-text';
+                currentBubble.appendChild(textEl);
+
+                transcript.appendChild(currentBubble);
+            }
+
+            const textEl = currentBubble.querySelector('.transcript-text');
+            textEl.textContent += text + ' ';
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        function addSystemMessage(text) {
+            currentSpeaker = null;
+            currentBubble = null;
+
+            const entry = document.createElement('div');
+            entry.className = 'transcript-entry system';
+            const textEl = document.createElement('span');
+            textEl.className = 'transcript-text';
+            textEl.textContent = text;
+            entry.appendChild(textEl);
+            transcript.appendChild(entry);
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        function showWin(message) {
+            winMessage.textContent = message || 'You acquired the legendary sword Dragonbane!';
+            winOverlay.classList.add('visible');
+            // Play a simple victory fanfare using Web Audio
+            playVictorySound();
+        }
+
+        function showLose(reason) {
+            loseMessage.textContent = reason || 'You were kicked out of the shop!';
+            loseOverlay.classList.add('visible');
+        }
+
+        function playVictorySound() {
+            const ctx = new AudioContext();
+            const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+            notes.forEach((freq, i) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.frequency.value = freq;
+                osc.type = 'triangle';
+                gain.gain.setValueAtTime(0.3, ctx.currentTime + i * 0.15);
+                gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.01, ctx.currentTime + i * 0.15 + 0.4);
+                gain.gain.setValueAtTime(0.3, ctx.currentTime + i * 0.15);
+                gain.gain.linearRampToValueAtTime(0.01, ctx.currentTime + i * 0.15 + 0.4);
+                osc.start(ctx.currentTime + i * 0.15);
+                osc.stop(ctx.currentTime + i * 0.15 + 0.4);
+            });
+        }
+
+        // Get or create bubble for a turn
+        let userBubble = null; // Current user bubble
+        let hadAssistantBubble = false; // Track if assistant spoke since last user bubble
+        function getBubbleForTurn(turnIdx, isUser, character) {
+            if (isUser) {
+                // Reuse current user bubble if no assistant bubble was created since
+                if (userBubble && !hadAssistantBubble) {
+                    return userBubble;
+                }
+                // New user turn - create bubble
+                hadAssistantBubble = false;
+                currentSpeaker = 'user';
+                userBubble = document.createElement('div');
+                userBubble.className = 'transcript-entry user';
+                const speakerEl = document.createElement('div');
+                speakerEl.className = 'transcript-speaker';
+                speakerEl.textContent = 'You';
+                userBubble.appendChild(speakerEl);
+                const textEl = document.createElement('span');
+                textEl.className = 'transcript-text';
+                userBubble.appendChild(textEl);
+                transcript.appendChild(userBubble);
+                return userBubble;
+            }
+
+            // Assistant message
+            let bubble = turnBubbles[turnIdx];
+            if (!bubble) {
+                // New assistant bubble - mark that assistant spoke
+                hadAssistantBubble = true;
+                currentSpeaker = 'npc';
+                bubble = document.createElement('div');
+                bubble.className = 'transcript-entry npc';
+                const speakerEl = document.createElement('div');
+                speakerEl.className = 'transcript-speaker';
+                speakerEl.textContent = character === 'manager' ? 'Manager' : 'Grumbold';
+                bubble.appendChild(speakerEl);
+                const textEl = document.createElement('span');
+                textEl.className = 'transcript-text';
+                bubble.appendChild(textEl);
+                transcript.appendChild(bubble);
+                turnBubbles[turnIdx] = bubble;
+                currentBubble = bubble;
+            }
+            return bubble;
+        }
+
+        // Handle text from SyncedAudioPlayer
+        function handleText({ text, turnIdx, isUser, character }) {
+            const bubble = getBubbleForTurn(turnIdx, isUser, character);
+            const textEl = bubble.querySelector('.transcript-text');
+            textEl.textContent += text + ' ';
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'game_state':
+                    gameState.gold = msg.state.gold;
+                    gameState.swordPrice = msg.state.sword_price;
+                    gameState.hasFakeRuby = msg.state.has_fake_ruby;
+                    updateGameDisplay();
+                    if (msg.state.character_name) {
+                        updateCharacter(msg.state.current_character, msg.state.character_name);
+                    }
+                    break;
+
+                case 'character_change':
+                    updateCharacter(msg.character, msg.character_name);
+                    addSystemMessage(`${msg.character_name} approaches...`);
+                    currentSpeaker = null;
+                    currentBubble = null;
+                    break;
+
+                case 'game_event':
+                    addSystemMessage(msg.message);
+                    break;
+
+                case 'game_won':
+                    // Don't stop audio yet - let the LLM speak its farewell
+                    // Capture current turn so we wait for the farewell turn to complete
+                    pendingEndState = { type: 'win', message: msg.message };
+                    endGameTurnIdx = player.getTurnIdx();
+                    // Game won at turn
+                    recordingIndicator.classList.remove('active');
+                    status.textContent = 'Victory! Finishing narration...';
+                    break;
+
+                case 'game_over':
+                    // Don't stop audio yet - let the LLM speak its farewell
+                    // Capture current turn so we wait for the farewell turn to complete
+                    pendingEndState = { type: 'lose', message: msg.reason };
+                    endGameTurnIdx = player.getTurnIdx();
+                    // Game over at turn
+                    recordingIndicator.classList.remove('active');
+                    status.textContent = 'Game over! Finishing narration...';
+                    break;
+
+                case 'event':
+                    // Event received
+                    // When TTS finishes and game ended, stop audio and schedule the end callback
+                    if (msg.event === 'end_tts_audio' && pendingEndState) {
+                        isRecording = false;
+                        player.scheduleEndOfTurn();
+                    }
+                    break;
+            }
+        }
+
+        async function startGame() {
+            try {
+                // Reset state
+                turnBubbles = {};
+                currentBubble = null;
+                currentSpeaker = null;
+                pendingEndState = null;
+                endGameTurnIdx = null;
+
+                // Create SyncedAudioPlayer
+                player = new SyncedAudioPlayer({
+                    basePath: 'static/js',
+                    sampleRate: 24000,
+                    pcmOutput: window.__pcmOutput || false,
+                    echoCancellation: echoCancellationToggle.checked,
+                    onEncodedAudio: (opusData) => {
+                        if (isRecording && ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(opusData);
+                        }
+                    },
+                    onText: handleText,
+                    onEvent: (eventType, msg) => {
+                        // Event callback
+                        handleMessage(msg);
+                    },
+                    onError: (error) => {
+                        status.textContent = 'Error: ' + error.message;
+                        status.className = 'status error';
+                        stopGame();
+                    },
+                    onEndOfTurn: (turnIdx) => {
+                        // End of turn
+                        // If game ended, show the overlay only after the farewell turn completes
+                        if (pendingEndState && turnIdx > endGameTurnIdx) {
+                            if (pendingEndState.type === 'win') {
+                                showWin(pendingEndState.message);
+                            } else {
+                                showLose(pendingEndState.message);
+                            }
+                            pendingEndState = null;
+                            endGameTurnIdx = null;
+                            stopGame();
+                        }
+                    }
+                });
+
+                try {
+                    status.textContent = 'Setting up audio...';
+                    await player.start();
+                } catch (e) {
+                    console.error('Audio setup failed:', e);
+                    status.textContent = 'Microphone access denied';
+                    return;
+                }
+
+                // Set up WebSocket
+                const _bp = window.location.pathname.replace(/\/$/, ""); const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${_bp}/ws/game`;
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    status.textContent = 'Connected - Speak to the shopkeeper';
+                    status.className = 'status active';
+                    ws.send(JSON.stringify({ type: 'start' }));
+                    isRecording = true;
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = 'inline-block';
+                    recordingIndicator.classList.add('active');
+                };
+
+                ws.onmessage = (event) => {
+                    player.handleMessage(event.data);
+                };
+
+                ws.onclose = async () => {
+                    // Drain any queued messages (e.g. error sent just before close)
+                    if (player) await player.drain();
+                    // If game ended, don't stop yet - let onEndOfTurn handle showing the end screen
+                    if (pendingEndState) {
+                        status.textContent = 'Finishing narration...';
+                        // Don't call stopGame() - let buffer drain first
+                        // Set ws to null so stopGame() doesn't try to close it again
+                        ws = null;
+                    } else if (!status.textContent.startsWith('Error')) {
+                        status.textContent = 'Disconnected';
+                        status.className = 'status';
+                        stopGame();
+                    }
+                };
+
+                ws.onerror = () => {
+                    status.textContent = 'Connection error';
+                    status.className = 'status error';
+                };
+
+            } catch (e) {
+                status.textContent = 'Failed to connect';
+                status.className = 'status error';
+            }
+        }
+
+        function stopGame() {
+            isRecording = false;
+            startBtn.style.display = 'inline-block';
+            stopBtn.style.display = 'none';
+            recordingIndicator.classList.remove('active');
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'stop' }));
+                ws.close();
+            }
+            ws = null;
+
+            if (player) {
+                player.stop();
+                player = null;
+            }
+        }
+
+        startBtn.addEventListener('click', startGame);
+        stopBtn.addEventListener('click', stopGame);
+
+        updateGameDisplay();
+        // Preload decoder WASM so it's ready when user clicks start
+        AudioProcessor.preloadDecoder('static/js');
+    </script>
+</body>
+</html>

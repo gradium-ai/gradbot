@@ -1,0 +1,59 @@
+# Fantasy Shop Demo
+
+A voice-based haggling game set in a fantasy weapon shop. Use your wits (and a fake ruby) to acquire the legendary sword Dragonbane!
+
+## The Challenge
+
+- **Goal**: Buy the sword Dragonbane (costs 150 gold)
+- **You have**: 100 gold coins + a fake ruby
+- **The gap**: You need to haggle, charm, or trick your way to a discount!
+
+## Characters
+
+### Grumbold (Shop Attendant)
+- Can haggle but won't go below 140 gold
+- Will kick you out if you try to sell him the fake ruby
+- Can call the manager for bigger discounts
+
+### Princess Celestia (The Manager)
+- Secretly a princess checking on her kingdom's merchants
+- Can apply a 25 gold discount... but only for worthy causes (defending the village from dragons!)
+- Will kick you out if your intentions are selfish
+- Might be charmed by a generous gift...
+
+## Winning Strategies
+
+1. **The Hero's Path**: Convince the manager you need the sword to fight dragons
+2. **The Gentleman's Path**: Gift the ruby to the manager (she won't notice it's fake, and appreciates the gesture)
+3. **Combination**: Use both approaches for maximum discount!
+
+## Setup
+
+```bash
+cd gradbot/demos/fantasy_shop
+uv sync
+```
+
+> **After changing gradbot Rust code**, re-run with `uv sync --reinstall-package gradbot` to rebuild the package.
+
+## Run
+
+```bash
+export GRADIUM_API_KEY=your_key_here
+export LLM_API_KEY=your_llm_key
+export LLM_BASE_URL=your_llm_endpoint
+
+uv run uvicorn main:app --reload
+```
+
+Open http://localhost:8000
+
+## Game Tools
+
+The AI characters have access to these tools:
+
+- `get_sword_price` - Check current sword price
+- `kick_out_of_shop` - Game over!
+- `call_manager` - Summon the manager (attendant only)
+- `apply_discount` - Apply 25 gold discount (manager only, requires worthy cause)
+- `sell_sword` - Complete the purchase (victory!)

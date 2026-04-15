@@ -1,0 +1,86 @@
+[workspace]
+members = [
+    "gradbot_lib",
+    "gradbot_py",
+    "gradbot_server",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.6.5"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "gradbot voice AI"
+repository = "https://github.com/gradium-ai/gradbot"
+keywords = ["voice", "ai", "audio"]
+categories = ["multimedia::audio"]
+
+[workspace.dependencies]
+anyhow = "1"
+async-openai = { version = "0.29.3", default-features = false, features = ["rustls"] }
+axum = { version = "0.8.1", features = ["ws"] }
+base64 = "0.21.7"
+base64-serde = "0.8.0"
+byteorder = "1.5.0"
+clap = { version = "4.4.12", features = ["derive"] }
+futures = "0.3.28"
+futures-util = "0.3.30"
+gradbot = { path = "gradbot_lib", version = "0.6.4" }
+gradium = { version = "0.1.8", default-features = false, features = ["rustls"] }
+kaudio = "0.2.1"
+law-encoder = "0.1.0"
+log = "0.4.20"
+pyo3 = "0.25.0"
+rand = { version = "0.8.5", features = ["getrandom"] }
+regex = "1.10.3"
+reqwest = { version = "0.11", features = ["json", "multipart", "blocking", "rustls-tls"], default-features = false }
+rubato = "0.15.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.115"
+timens = "0.1.10"
+tokio = { version = "1.35.1", features = ["full", "tracing"] }
+tokio-tungstenite = { version = "0.21.0", features = ["rustls-tls-webpki-roots"] }
+toml = "0.8.19"
+tower = "0.4.13"
+tower-http = { version = "0.5", features = ["full"] }
+tracing = "0.1.40"
+tracing-appender = "0.2.3"
+tracing-subscriber = { version = "0.3.18", features = ["json", "env-filter"] }
+
+[package]
+name = "gradbot_bin"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+gradbot = { workspace = true }
+anyhow = { workspace = true }
+async-openai = { workspace = true }
+axum = { workspace = true }
+base64 = { workspace = true }
+base64-serde = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+futures-util = { workspace = true }
+gradium = { workspace = true }
+kaudio = { workspace = true }
+log = { workspace = true }
+rand = { workspace = true }
+regex = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+timens = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+toml = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }

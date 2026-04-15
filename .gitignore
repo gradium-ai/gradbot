@@ -1,0 +1,41 @@
+# Rust
+**/target/
+**/logs/
+Cargo.lock
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+*.so
+*.dylib
+*.dylib.dSYM/
+
+# Environment
+.env
+.env.*
+
+# Demo config (contains API keys)
+demos/config.yaml
+demos/*/config.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Evals
+evals/runs/
+
+# Misc
+.crush/
+env-vars*

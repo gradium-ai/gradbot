@@ -1,0 +1,9 @@
+[project]
+name = "fantasy-shop-demo"
+version = "0.1.0"
+description = "Fantasy shop haggling game with voice AI"
+requires-python = ">=3.12"
+dependencies = ["gradbot"]
+
+[tool.uv.sources]
+gradbot = { path = "../../gradbot_py" }

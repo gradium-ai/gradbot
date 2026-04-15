@@ -1,0 +1,56 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "gradbot"
+version = "0.1.3"
+description = "Python bindings for gradbot voice AI library"
+requires-python = ">=3.12"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+keywords = ["voice", "ai", "speech", "tts", "stt", "realtime"]
+authors = [
+    { name = "Laurent M", email = "laurent@gradium.ai" },
+    { name = "Pratim Bhosale", email = "pratimbhosale@gmail.com" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = [
+    "fastapi",
+    "gradium",
+    "pydantic-settings>=2.0",
+    "pyyaml>=6.0",
+    "uvicorn[standard]",
+]
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-asyncio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 80
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+force-single-line = true
+single-line-exclusions = ["typing"]
+
+[tool.maturin]
+features = ["extension"]
+module-name = "gradbot._gradbot"
+include = ["gradbot/js_audio/**"]

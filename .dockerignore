@@ -1,0 +1,10 @@
+target/
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/uv.lock
+.git/
+*.md
+!requirements*.md
+.github/
+tests/
