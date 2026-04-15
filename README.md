@@ -47,7 +47,7 @@ Install from PyPI:
 pip install gradbot
 ```
 
-Or run a demo directly (builds the native extension from source — requires a stable Rust toolchain via [rustup](https://rustup.rs)):
+Or run a demo directly (builds from source):
 
 ```bash
 cd demos/simple_chat
@@ -164,7 +164,7 @@ async def ws_chat(websocket: fastapi.WebSocket):
 
 - **Start from `simple_chat`** for basic conversations, or **`fantasy_shop`** for tool calling and game state.
 - **Deferred tool calls:** delay `tool_handle.send()` and the AI keeps talking while waiting. See `hotel` for an example.
-- **Voice selection:** `gradbot.flagship_voices()` lists the built-in flagship voices, `gradbot.flagship_voice("emma")` picks one by name. Any voice from the Gradium voice library can be used.
+- **Voice selection:** any voice from the Gradium voice library can be used by passing its `voice_id` to `SessionConfig`.
 - **Mid-conversation changes:** `input_handle.send_config(new_config)` switches voice, language, or prompt without restarting.
 
 ## Integrations
@@ -285,8 +285,8 @@ gradbot/
 ├── gradbot_lib/            # Core Rust library (STT/LLM/TTS multiplexing)
 ├── gradbot_py/             # Python bindings (PyO3 + maturin)
 │   └── gradbot/            # Python package (fastapi helpers, config, audio worklet)
-├── gradbot_server/         # Standalone remote-mode server (clients call over WebSocket; STT/LLM/TTS run server-side)
-├── src/                    # Single-process server binary speaking OpenAI Realtime + Twilio Media Streams protocols
+├── gradbot_server/         # Standalone WebSocket server (remote mode)
+├── src/                    # Server binary (OpenAI & Twilio WebSocket protocols)
 ├── demos/                  # Example applications
 │   ├── app.py              # Combined app mounting all demos (for Docker)
 │   └── config.example.yaml # Configuration template
