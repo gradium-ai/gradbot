@@ -1,5 +1,5 @@
 """
-Three.js Severance Game — Voice AI for clue interactions & Milchick check-ins.
+Three.js Severance Game — Voice AI for clue interactions & Neil check-ins.
 
 Uses gradbot for STT/TTS/LLM voice sessions.
 Runs standalone or mounted as a sub-app in the Gradbot demos container.
@@ -27,7 +27,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
 )
-log = logging.getLogger("threejs_game")
+log = logging.getLogger("npc_3d_game")
 
 gradbot.init_logging()
 
@@ -268,12 +268,12 @@ _checkin_index = 0
 
 
 def make_checkin_session_config() -> "gradbot.SessionConfig":
-    """Create a SessionConfig for a Milchick check-in session."""
+    """Create a SessionConfig for a Neil check-in session."""
     global _checkin_index
     line = CHECKIN_LINES[_checkin_index % len(CHECKIN_LINES)]
     _checkin_index += 1
 
-    instructions = f"""You are Neil (Milchick) from Gradium Industries, checking on employee Laurent during his shift.
+    instructions = f"""You are Neil (Neil) from Gradium Industries, checking on employee Laurent during his shift.
 
 When you begin, say exactly this: "{line}"
 
@@ -349,7 +349,7 @@ async def _handle_checkin_tool_call(handle, input_handle, websocket):
 
 @app.websocket("/ws/checkin")
 async def websocket_checkin(websocket: WebSocket):
-    """Voice session for Milchick check-in."""
+    """Voice session for Neil check-in."""
     await gradbot.websocket.handle_session(
         websocket,
         on_start=lambda msg: make_checkin_session_config(),

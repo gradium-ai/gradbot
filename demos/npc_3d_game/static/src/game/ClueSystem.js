@@ -120,7 +120,7 @@ export class ClueSystem {
   }
 
   /**
-   * Force-cancel an active voice session (e.g. when Milchick arrives).
+   * Force-cancel an active voice session (e.g. when Neil arrives).
    * The panel closes and attemptSolveVoice resolves with false.
    */
   cancelVoiceSession() {

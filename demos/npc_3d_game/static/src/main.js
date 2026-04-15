@@ -1,16 +1,16 @@
 import * as THREE from 'three';
 import { SceneManager } from './engine/SceneManager.js';
 import { GameLoop } from './engine/GameLoop.js';
-import { LumonOffice } from './world/LumonOffice.js';
+import { GradiumOffice } from './world/GradiumOffice.js';
 import { CharacterLoader } from './game/CharacterLoader.js';
 import { ThirdPersonController } from './game/ThirdPersonController.js';
 import { ThirdPersonCamera } from './game/ThirdPersonCamera.js';
 import { InteractionSystem } from './game/InteractionSystem.js';
-import { Milchick } from './game/Milchick.js';
+import { Neil } from './game/Neil.js';
 import { IntroSequence } from './game/IntroSequence.js';
 import { ClueSystem } from './game/ClueSystem.js';
 import { SuspicionSystem } from './game/SuspicionSystem.js';
-import { MilchickAI } from './game/MilchickAI.js';
+import { NeilAI } from './game/NeilAI.js';
 import { GameUI } from './ui/GameUI.js';
 import { VoiceClient } from './network/VoiceClient.js';
 import { TTSClient } from './network/TTSClient.js';
@@ -22,7 +22,7 @@ import { SFXManager } from './audio/SFXManager.js';
 
 // ── Engine & World ──────────────────────────────────────────
 const sceneManager = new SceneManager();
-const office = new LumonOffice(sceneManager.scene);
+const office = new GradiumOffice(sceneManager.scene);
 
 // ── UI ──────────────────────────────────────────────────────
 const gameUI = new GameUI();
@@ -245,7 +245,7 @@ interactionSystem.registerProximity(
 
 // ── Load characters and start ───────────────────────────────
 const loader = new CharacterLoader();
-const milchick = new Milchick();
+const neil = new Neil();
 
 Promise.all([
   loader.load('assets/glb/severance/mark.glb', {
@@ -253,7 +253,7 @@ Promise.all([
     castShadow: true,
     receiveShadow: true,
   }),
-  milchick.load(),
+  neil.load(),
 ]).then(([markData]) => {
   const { model, mixer, animations } = markData;
 
@@ -277,18 +277,18 @@ Promise.all([
   // ── Player animation system ────────────────────────────────
   const playerAnimator = new PlayerAnimator(mixer, animations);
 
-  // ── Milchick (NPC) ──────────────────────────────────────
-  milchick.placeAt(2.5, 4.5, Math.PI);
-  sceneManager.scene.add(milchick.model);
+  // ── Neil (NPC) ──────────────────────────────────────
+  neil.placeAt(2.5, 4.5, Math.PI);
+  sceneManager.scene.add(neil.model);
 
   office.collisionBoxes.push({
     min: new THREE.Vector3(2.5 - 0.35, 0, 4.5 - 0.35),
     max: new THREE.Vector3(2.5 + 0.35, 1.8, 4.5 + 0.35),
   });
 
-  // ── Milchick AI ───────────────────────────────────────────
-  const milchickAI = new MilchickAI({
-    milchick,
+  // ── Neil AI ───────────────────────────────────────────
+  const neilAI = new NeilAI({
+    neil,
     gameUI,
     suspicion: suspicionSystem,
     interactionSystem,
@@ -380,7 +380,7 @@ Promise.all([
     // Stop all game systems
     clearInterval(window.__timerInterval);
     gameUI.hideTimer();
-    milchickAI.stop();
+    neilAI.stop();
     playerController.enabled = false;
     interactionSystem.enabled = false;
     sfx.stopFootsteps();
@@ -397,7 +397,7 @@ Promise.all([
     // Phase 2: After lights dim, start dancing + music (2.5s)
     setTimeout(() => {
       playerAnimator.playDance();
-      milchick.playDance();
+      neil.playDance();
       music.playMDE();
     }, 2500);
 
@@ -420,7 +420,7 @@ Promise.all([
   suspicionSystem.onCaught = () => {
     clearInterval(window.__timerInterval);
     gameUI.hideTimer();
-    milchickAI.stop();
+    neilAI.stop();
     playerController.enabled = false;
     interactionSystem.enabled = false;
     sfx.stopFootsteps();
@@ -454,7 +454,7 @@ Promise.all([
   const gameLoop = new GameLoop((dt) => {
     mixer.update(dt);
     model.position.y = 0; // Clamp after mixer — prevent animation root motion from sinking Mark
-    milchick.update(dt);
+    neil.update(dt);
 
     // Track if player is near a clue location (risk signal) — compute before controller update
     let nearClue = false;
@@ -487,10 +487,10 @@ Promise.all([
     suspicionSystem.playerNearClue = nearClue;
     suspicionSystem.playerSneaking = playerController.isSneaking;
 
-    // Sprint near Milchick raises suspicion (with cooldown)
+    // Sprint near Neil raises suspicion (with cooldown)
     sprintSuspicionTimer = Math.max(0, sprintSuspicionTimer - dt);
     if (playerController.isSprinting && sprintSuspicionTimer <= 0) {
-      const milPos = milchick.model.position;
+      const milPos = neil.model.position;
       const dx = model.position.x - milPos.x;
       const dz = model.position.z - milPos.z;
       if (dx * dx + dz * dz < CONFIG.SPRINT_SUSPICION_RADIUS * CONFIG.SPRINT_SUSPICION_RADIUS) {
@@ -502,8 +502,8 @@ Promise.all([
     tpCamera.update(model.position, dt);
     interactionSystem.update(model.position);
 
-    // Update Milchick AI check-in scheduler
-    milchickAI.update(dt);
+    // Update Neil AI check-in scheduler
+    neilAI.update(dt);
 
     // Party lights color cycling
     updatePartyLights(performance.now() / 1000);
@@ -529,7 +529,7 @@ Promise.all([
     }
 
     // Run intro sequence (player controls stay disabled)
-    const intro = new IntroSequence(gameUI, milchick, ttsClient, playerAnimator, model);
+    const intro = new IntroSequence(gameUI, neil, ttsClient, playerAnimator, model);
     await intro.play();
 
     // Hand control to the player
@@ -557,7 +557,7 @@ Promise.all([
         clearInterval(timerInterval);
         gameUI.hideTimer();
         // Time's up — trigger game over
-        milchickAI.stop();
+        neilAI.stop();
         playerController.enabled = false;
         interactionSystem.enabled = false;
         sfx.stopFootsteps();
@@ -570,12 +570,12 @@ Promise.all([
     // Store interval so victory can clear it
     window.__timerInterval = timerInterval;
 
-    // Start Milchick's check-in loop
-    milchickAI.start();
+    // Start Neil's check-in loop
+    neilAI.start();
 
     // Expose for automated testing
     window.__test = {
-      playerModel: model, milchick, milchickAI, suspicionSystem,
+      playerModel: model, neil, neilAI, suspicionSystem,
       clueSystem, gameUI, checkWinCondition, triggerMusicDanceExperience,
     };
 

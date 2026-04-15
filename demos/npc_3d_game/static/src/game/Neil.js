@@ -4,7 +4,7 @@ import { NPCAnimator } from './NPCAnimator.js';
 import { CONFIG } from '../config.js';
 
 /**
- * GLB clip name → semantic name mapping for Milchick.
+ * GLB clip name → semantic name mapping for Neil.
  * Keys are the raw clip names from the GLB, values are the
  * internal names used by the game systems.
  */
@@ -19,20 +19,20 @@ const CLIP_NAME_MAP = {
 };
 
 /**
- * Milchick NPC — loads the combined GLB, places the model,
+ * Neil NPC — loads the combined GLB, places the model,
  * and exposes a high-level animation API for game systems.
  *
  * Usage:
- *   const milchick = new Milchick();
- *   const { model } = await milchick.load();
+ *   const neil = new Neil();
+ *   const { model } = await neil.load();
  *   scene.add(model);
  *   // in loop:
- *   milchick.update(dt);
+ *   neil.update(dt);
  *   // trigger animations:
- *   milchick.startTalking();
- *   milchick.setIdle();
+ *   neil.startTalking();
+ *   neil.setIdle();
  */
-export class Milchick {
+export class Neil {
   constructor() {
     /** @type {THREE.Group|null} */
     this.model = null;
@@ -42,14 +42,14 @@ export class Milchick {
   }
 
   /**
-   * Load and prepare the Milchick model.
+   * Load and prepare the Neil model.
    * @returns {Promise<{model: THREE.Group, animator: NPCAnimator}>}
    */
   async load() {
     const { model, mixer, animations } = await this._loader.load(
-      'assets/glb/severance/milchick.glb',
+      'assets/glb/severance/neil.glb',
       {
-        scale: CONFIG.MILCHICK_SCALE,
+        scale: CONFIG.NEIL_SCALE,
         castShadow: true,
         receiveShadow: true,
       }
@@ -64,7 +64,7 @@ export class Milchick {
       if (clip) {
         clipMap.set(semanticName, clip);
       } else {
-        console.warn(`[Milchick] Missing animation clip: "${rawName}" → "${semanticName}"`);
+        console.warn(`[Neil] Missing animation clip: "${rawName}" → "${semanticName}"`);
       }
     }
 
@@ -79,7 +79,7 @@ export class Milchick {
   }
 
   /**
-   * Place Milchick at a world position, facing a direction.
+   * Place Neil at a world position, facing a direction.
    * @param {number} x
    * @param {number} z
    * @param {number} [facingY=0]  Rotation around Y axis
@@ -105,7 +105,7 @@ export class Milchick {
 
   _safePlay(name, duration, opts) {
     if (!this.animator?.has(name)) {
-      console.warn(`[Milchick] Cannot play "${name}" — clip not loaded`);
+      console.warn(`[Neil] Cannot play "${name}" — clip not loaded`);
       return;
     }
     this.animator.crossFadeTo(name, duration, opts);

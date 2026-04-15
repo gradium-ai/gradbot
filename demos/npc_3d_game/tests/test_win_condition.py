@@ -1,12 +1,12 @@
 """
-Playwright E2E test for the threejs_game win condition.
+Playwright E2E test for the npc_3d_game win condition.
 
 Tests that solving all 3 clues triggers the victory sequence.
 Bypasses the 3D game by using the exposed window.__test hooks
 to directly manipulate the clue system.
 
 Run:
-  cd demos/threejs_game
+  cd demos/npc_3d_game
   .venv/bin/python -m pytest tests/test_win_condition.py -v
 """
 
@@ -28,7 +28,7 @@ def server():
             "--port", str(SERVER_PORT),
             "--log-level", "warning",
         ],
-        cwd="demos/threejs_game",
+        cwd="demos/npc_3d_game",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )

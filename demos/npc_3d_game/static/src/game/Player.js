@@ -17,7 +17,7 @@ export class Player {
     legR.castShadow = true;
     this.mesh.add(legR);
 
-    // Torso (Lumon blue shirt)
+    // Torso (Gradium blue shirt)
     const torso = new THREE.Mesh(
       new THREE.BoxGeometry(0.5, 0.55, 0.28),
       Materials.playerShirt

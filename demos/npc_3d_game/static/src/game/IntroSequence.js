@@ -2,7 +2,7 @@
  * Orchestrates the game start sequence:
  *  1. Fade in from black
  *  2. Show intro text card (+ optional TTS narration)
- *  3. Milchick greeting (talk animation + subtitle + optional TTS)
+ *  3. Neil greeting (talk animation + subtitle + optional TTS)
  *  4. Hand control back to the player
  *
  * Returns a promise that resolves when the intro is complete.
@@ -16,14 +16,14 @@ const STAND_POS = { x: -0.9, y: 0, z: 3.0 };
 export class IntroSequence {
   /**
    * @param {import('../ui/GameUI.js').GameUI} ui
-   * @param {import('./Milchick.js').Milchick} milchick
+   * @param {import('./Neil.js').Neil} neil
    * @param {import('../network/TTSClient.js').TTSClient} [ttsClient]
    * @param {import('./PlayerAnimator.js').PlayerAnimator} [playerAnimator]
    * @param {THREE.Object3D} [playerModel]
    */
-  constructor(ui, milchick, ttsClient = null, playerAnimator = null, playerModel = null) {
+  constructor(ui, neil, ttsClient = null, playerAnimator = null, playerModel = null) {
     this._ui = ui;
-    this._milchick = milchick;
+    this._neil = neil;
     this._tts = ttsClient;
     this._animator = playerAnimator;
     this._model = playerModel;
@@ -35,7 +35,7 @@ export class IntroSequence {
    */
   async play() {
     const INTRO_TEXT = 'You have suddenly woken up in an office called Gradium. Find the hidden clues without Neil noticing.';
-    const MILCHICK_LINE = 'Welcome back, Laurent. Your outie has agreed to this arrangement. Please begin your work.';
+    const NEIL_LINE = 'Welcome back, Laurent. Your outie has agreed to this arrangement. Please begin your work.';
 
     // Position Mark at the desk chair and start typing
     if (this._model) {
@@ -68,14 +68,14 @@ export class IntroSequence {
     }
     this._ui.hideIntroCard();
 
-    // 3. Milchick greeting — show subtitle immediately, TTS enhances
-    this._milchick.startTalking();
-    this._ui.showSubtitle('Neil', `"${MILCHICK_LINE}"`, 0);
+    // 3. Neil greeting — show subtitle immediately, TTS enhances
+    this._neil.startTalking();
+    this._ui.showSubtitle('Neil', `"${NEIL_LINE}"`, 0);
     let greetingAudioPlayed = false;
 
     if (this._tts) {
       try {
-        await this._tts.speak(MILCHICK_LINE, 'Jack', {
+        await this._tts.speak(NEIL_LINE, 'Jack', {
           onFirstAudio: () => { greetingAudioPlayed = true; },
         });
       } catch (e) {
@@ -88,7 +88,7 @@ export class IntroSequence {
     }
     this._ui.hideSubtitle();
 
-    this._milchick.stopTalking();
+    this._neil.stopTalking();
 
     // 4. Mark stands up from desk, then reposition outside collision box
     if (this._animator) {

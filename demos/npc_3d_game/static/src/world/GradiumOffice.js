@@ -14,7 +14,7 @@ import {
   createKeyboard,
 } from './Furniture.js';
 
-export class LumonOffice {
+export class GradiumOffice {
   constructor(scene) {
     this.scene = scene;
     this.collisionBoxes = [];

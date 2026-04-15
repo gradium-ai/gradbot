@@ -50,7 +50,7 @@ export const CONFIG = {
   // Sprint mode (Shift away from clues)
   SPRINT_SPEED: 5.5,
   SPRINT_ANIM_SPEED: 2.5,
-  SPRINT_SUSPICION_RADIUS: 5.0,  // Sprinting within this range of Milchick raises suspicion
+  SPRINT_SUSPICION_RADIUS: 5.0,  // Sprinting within this range of Neil raises suspicion
   SPRINT_SUSPICION_COOLDOWN: 5,  // Seconds between sprint-suspicion ticks
 
   // Look Around
@@ -72,7 +72,7 @@ export const CONFIG = {
 
   // Character
   CHAR_SCALE: 0.95,            // Uniform scale for Mark (Mixamo)
-  MILCHICK_SCALE: 0.995,       // Slightly larger to match Mark's height (1.821 * 0.995 ≈ 1.905 * 0.95)
+  NEIL_SCALE: 0.995,       // Slightly larger to match Mark's height (1.821 * 0.995 ≈ 1.905 * 0.95)
   CHAR_TURN_SPEED: 6,          // Rotation smoothing speed (rad/s factor, lower = smoother turns)
   PLAYER_ACCEL: 5,             // Movement acceleration (units/s², for smooth start/stop)
   PLAYER_DECEL: 8,             // Movement deceleration (units/s², for smooth stop)
@@ -83,24 +83,24 @@ export const CONFIG = {
   // Suspicion
   SUSPICION_MAX: 3,
 
-  // Milchick AI
-  MILCHICK_AI: {
+  // Neil AI
+  NEIL_AI: {
     FIRST_CHECKIN_DELAY: 20,       // seconds after game start before first check-in
     CHECKIN_INTERVAL_MIN: 35,      // minimum seconds between check-ins
     CHECKIN_INTERVAL_MAX: 45,      // maximum seconds between check-ins
     APPROACH_DURATION: 3,          // seconds for approach animation
     LEAVE_DURATION: 2.5,           // seconds for leaving animation
     WARNING_LEAD_TIME: 3,          // seconds of "footsteps" warning before arrival
-    APPROACH_DISTANCE: 2.5,        // how close Milchick gets to player
-    WALK_SPEED: 3.0,               // Milchick walk speed in units/sec
+    APPROACH_DISTANCE: 2.5,        // how close Neil gets to player
+    WALK_SPEED: 3.0,               // Neil walk speed in units/sec
     VOICE_TIMEOUT: 12000,          // ms to wait for voice classification
   },
 
   // Suspicion near-clue radius (matches proximity trigger radius)
   NEAR_CLUE_RADIUS: 3.0,
 
-  // Milchick home position
-  MILCHICK_HOME: { x: 2.5, z: 4.5 },
+  // Neil home position
+  NEIL_HOME: { x: 2.5, z: 4.5 },
 
   // Game loop
   MAX_DELTA: 0.1,

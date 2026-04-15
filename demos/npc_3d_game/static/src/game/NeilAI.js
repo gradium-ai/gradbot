@@ -2,20 +2,20 @@ import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 
 /**
- * Milchick check-in state machine.
+ * Neil check-in state machine.
  *
  * States:
  *   idle        — waiting at home position, timer ticking toward next check-in
- *   approaching — warning cue shown, walk anim plays, Milchick moves toward player
+ *   approaching — warning cue shown, walk anim plays, Neil moves toward player
  *   checking_in — clue interaction paused, voice session with player
- *   leaving     — Milchick walks back to home position
+ *   leaving     — Neil walks back to home position
  *   alert       — suspicion reached max, game over triggered
  *
  * Movement is now distance-based (constant speed) instead of time-based,
  * preventing the skating/gliding effect.
  */
 
-const AI = () => CONFIG.MILCHICK_AI;
+const AI = () => CONFIG.NEIL_AI;
 
 
 function _wait(ms) {
@@ -26,10 +26,10 @@ function _randomRange(min, max) {
   return min + Math.random() * (max - min);
 }
 
-export class MilchickAI {
+export class NeilAI {
   /**
    * @param {object} deps
-   * @param {import('./Milchick.js').Milchick} deps.milchick
+   * @param {import('./Neil.js').Neil} deps.neil
    * @param {import('../ui/GameUI.js').GameUI} deps.gameUI
    * @param {import('./SuspicionSystem.js').SuspicionSystem} deps.suspicion
    * @param {import('./InteractionSystem.js').InteractionSystem} deps.interactionSystem
@@ -39,7 +39,7 @@ export class MilchickAI {
    * @param {HTMLElement} deps.canvas  The renderer canvas (for re-acquiring pointer lock)
    */
   constructor(deps) {
-    this._milchick = deps.milchick;
+    this._neil = deps.neil;
     this._ui = deps.gameUI;
     this._suspicion = deps.suspicion;
     this._interaction = deps.interactionSystem;
@@ -61,7 +61,7 @@ export class MilchickAI {
 
     // Saved home position for returning
     this._homePos = new THREE.Vector3(
-      CONFIG.MILCHICK_HOME.x, 0, CONFIG.MILCHICK_HOME.z
+      CONFIG.NEIL_HOME.x, 0, CONFIG.NEIL_HOME.z
     );
     this._moveTarget = new THREE.Vector3();
     this._moveStart = new THREE.Vector3();
@@ -132,11 +132,11 @@ export class MilchickAI {
    * @param {boolean} trackPlayer  If true, continuously update target toward player
    */
   _updateMoving(dt, onArrive, trackPlayer = false) {
-    // If tracking player, update the target each frame so Milchick walks
+    // If tracking player, update the target each frame so Neil walks
     // toward where the player IS, not where they were when the approach started
     if (trackPlayer) {
       const playerPos = this._playerModel.position;
-      const milPos = this._milchick.model.position;
+      const milPos = this._neil.model.position;
       const dir = new THREE.Vector3().subVectors(playerPos, milPos);
       dir.y = 0;
       const distToPlayer = dir.length();
@@ -152,21 +152,21 @@ export class MilchickAI {
       }
 
       // Move toward player at constant speed
-      // (no collision — slide collision causes Milchick to get stuck on furniture)
+      // (no collision — slide collision causes Neil to get stuck on furniture)
       if (distToPlayer > AI().APPROACH_DISTANCE) {
         dir.normalize();
         const step = AI().WALK_SPEED * dt;
         milPos.x += dir.x * step;
         milPos.z += dir.z * step;
       }
-      this._milchick.model.rotation.y = Math.atan2(dir.x, dir.z);
+      this._neil.model.rotation.y = Math.atan2(dir.x, dir.z);
       return;
     }
 
-    // Fixed-target movement (for leaving) — no collision so Milchick
+    // Fixed-target movement (for leaving) — no collision so Neil
     // can always reach home (he walks through furniture on the way back,
     // which is fine since the player sees him walking away)
-    const pos = this._milchick.model.position;
+    const pos = this._neil.model.position;
     const dir = new THREE.Vector3().subVectors(this._moveTarget, pos);
     dir.y = 0;
     const dist = dir.length();
@@ -180,7 +180,7 @@ export class MilchickAI {
     const step = Math.min(AI().WALK_SPEED * dt, dist);
     pos.x += dir.x * step;
     pos.z += dir.z * step;
-    this._milchick.model.rotation.y = Math.atan2(dir.x, dir.z);
+    this._neil.model.rotation.y = Math.atan2(dir.x, dir.z);
   }
 
   // ── State transitions ─────────────────────────────────────────
@@ -192,7 +192,7 @@ export class MilchickAI {
     // Warning cue
     this._ui.showSubtitle('', 'You hear footsteps approaching...', AI().WARNING_LEAD_TIME * 1000);
 
-    this._milchick.playWalk();
+    this._neil.playWalk();
     this._setState('approaching');
   }
 
@@ -202,14 +202,14 @@ export class MilchickAI {
     // Safety: if player is still in a clue, go home instead
     if (this._suspicion.playerInClueInteraction) {
       this._moveTarget.copy(this._homePos);
-      this._milchick.playWalk();
+      this._neil.playWalk();
       this._setState('leaving');
       return;
     }
 
     this._inCheckin = true;
     this._setState('checking_in');
-    this._milchick.startTalking();
+    this._neil.startTalking();
     this._facePlayer();
 
     // Pause clue interaction
@@ -223,7 +223,7 @@ export class MilchickAI {
     try {
       classification = await this._runVoiceCheckin(riskMod);
     } catch (e) {
-      console.error('[MilchickAI] Voice check-in error:', e);
+      console.error('[NeilAI] Voice check-in error:', e);
       classification = riskMod > 0 ? 'nervous' : 'innocent';
     }
 
@@ -233,8 +233,8 @@ export class MilchickAI {
     // Apply suspicion based on classification + context
     this._applySuspicion(classification, riskMod);
 
-    // Milchick reacts
-    await this._milchickReact(classification, riskMod);
+    // Neil reacts
+    await this._neilReact(classification, riskMod);
 
     // Bail if game ended during reaction
     if (!this._started) { this._inCheckin = false; return; }
@@ -251,19 +251,19 @@ export class MilchickAI {
     try {
       await this._canvas.requestPointerLock();
     } catch (e) {
-      console.warn('[MilchickAI] Could not re-acquire pointer lock:', e);
+      console.warn('[NeilAI] Could not re-acquire pointer lock:', e);
     }
 
     // Begin leaving
     this._inCheckin = false;
     this._moveTarget.copy(this._homePos);
-    this._milchick.playWalk();
+    this._neil.playWalk();
     this._setState('leaving');
   }
 
   _arriveHome() {
-    this._milchick.placeAt(this._homePos.x, this._homePos.z, Math.PI);
-    this._milchick.setIdle();
+    this._neil.placeAt(this._homePos.x, this._homePos.z, Math.PI);
+    this._neil.setIdle();
     this._setState('idle');
     this._scheduleNextCheckin();
   }
@@ -285,13 +285,13 @@ export class MilchickAI {
       // Race: classification from backend vs panel close vs timeout
       return await Promise.race([
         this._voice.waitForCheckinResult(AI().VOICE_TIMEOUT).catch(() => {
-          console.log('[MilchickAI] Check-in timeout (silence), classifying as nervous');
+          console.log('[NeilAI] Check-in timeout (silence), classifying as nervous');
           return 'nervous';
         }),
         panelPromise.then(() => 'nervous'),
       ]);
     } catch (e) {
-      console.error('[MilchickAI] Check-in session error:', e);
+      console.error('[NeilAI] Check-in session error:', e);
       return 'nervous';
     } finally {
       this._voice.disconnect();
@@ -329,9 +329,9 @@ export class MilchickAI {
   }
 
   /**
-   * Milchick reacts to the check-in result with animation + subtitle.
+   * Neil reacts to the check-in result with animation + subtitle.
    */
-  async _milchickReact(classification, riskMod) {
+  async _neilReact(classification, riskMod) {
     let line, animFn;
 
     if (classification === 'suspicious' || (classification === 'nervous' && riskMod >= 2)) {
@@ -341,7 +341,7 @@ export class MilchickAI {
         "Laurent, you seem distracted from your work.",
       ];
       line = lines[Math.floor(Math.random() * lines.length)];
-      animFn = () => this._milchick.playSuspicious();
+      animFn = () => this._neil.playSuspicious();
     } else if (classification === 'nervous') {
       const lines = [
         "Hmm. Try to stay focused.",
@@ -349,7 +349,7 @@ export class MilchickAI {
         "Your department needs you, Laurent.",
       ];
       line = lines[Math.floor(Math.random() * lines.length)];
-      animFn = () => this._milchick.playSuspicious();
+      animFn = () => this._neil.playSuspicious();
     } else {
       const lines = [
         "Good. Keep up the excellent work.",
@@ -357,7 +357,7 @@ export class MilchickAI {
         "Wonderful. Gradium appreciates your dedication.",
       ];
       line = lines[Math.floor(Math.random() * lines.length)];
-      animFn = () => this._milchick.startTalking();
+      animFn = () => this._neil.startTalking();
     }
 
     animFn();
@@ -383,7 +383,7 @@ export class MilchickAI {
 
   _triggerAlert() {
     this._setState('alert');
-    this._milchick.playAngry();
+    this._neil.playAngry();
     this.stop();
     // onCaught callback in SuspicionSystem handles the game over UI
   }
@@ -405,12 +405,12 @@ export class MilchickAI {
   }
 
   _facePlayer() {
-    const milPos = this._milchick.model.position;
+    const milPos = this._neil.model.position;
     const playerPos = this._playerModel.position;
     const dir = new THREE.Vector3().subVectors(playerPos, milPos);
     dir.y = 0;
     if (dir.lengthSq() > 0.01) {
-      this._milchick.model.rotation.y = Math.atan2(dir.x, dir.z);
+      this._neil.model.rotation.y = Math.atan2(dir.x, dir.z);
     }
   }
 

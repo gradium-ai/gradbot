@@ -30,7 +30,7 @@ export class SceneManager {
   }
 
   _setupLights() {
-    // Bright ambient for clinical Lumon feel
+    // Bright ambient for clinical Gradium feel
     this.ambientLight = new THREE.AmbientLight(0xffffff, 2.0);
     this.scene.add(this.ambientLight);
 

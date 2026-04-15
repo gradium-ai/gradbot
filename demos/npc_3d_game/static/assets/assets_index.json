@@ -73,7 +73,7 @@
           "durationSec": 0.800,
           "loop": "repeat",
           "tags": ["locomotion", "stealth"],
-          "notes": "Looping crouch-walk for sneaking past Milchick."
+          "notes": "Looping crouch-walk for sneaking past Neil."
         },
         {
           "id": "sneaking_forward",
@@ -127,7 +127,7 @@
           "durationSec": 3.567,
           "loop": "repeat",
           "tags": ["npc", "patrol"],
-          "notes": "NPC scanning animation. Used by Milchick at waypoint pauses."
+          "notes": "NPC scanning animation. Used by Neil at waypoint pauses."
         },
         {
           "id": "angry_point",
@@ -136,7 +136,7 @@
           "durationSec": 1.933,
           "loop": "once",
           "tags": ["npc", "detection"],
-          "notes": "NPC points accusingly. Played when Milchick spots the player."
+          "notes": "NPC points accusingly. Played when Neil spots the player."
         },
         {
           "id": "angry_gesture",
@@ -169,11 +169,11 @@
         "animationCountInGLB": 15
       }
     },
-    "milchick": {
-      "id": "milchick",
+    "neil": {
+      "id": "neil",
       "displayName": "Neil",
       "skeleton": {
-        "url": "assets/glb/severance/milchick.glb",
+        "url": "assets/glb/severance/neil.glb",
         "bindPose": {
           "id": "bind_pose",
           "displayName": "Bind Pose",
@@ -184,7 +184,7 @@
         }
       },
       "animationSource": {
-        "url": "assets/glb/severance/milchick.glb",
+        "url": "assets/glb/severance/neil.glb",
         "notes": "Single GLB contains both skeleton+mesh and all animations."
       },
       "animations": [
@@ -249,7 +249,7 @@
           "durationSec": 4.333,
           "loop": "repeat",
           "tags": ["emote", "celebration"],
-          "notes": "Music Dance Experience easter egg. Milchick's perks celebration."
+          "notes": "Music Dance Experience easter egg. Neil's perks celebration."
         }
       ],
       "defaults": {

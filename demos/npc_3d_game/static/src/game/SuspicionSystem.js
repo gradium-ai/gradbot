@@ -1,7 +1,7 @@
 import { CONFIG } from '../config.js';
 
 /**
- * Tracks Milchick's suspicion of Mark on a 0–3 scale.
+ * Tracks Neil's suspicion of Mark on a 0–3 scale.
  *
  *   0 = calm
  *   1 = mildly suspicious

@@ -61,7 +61,7 @@ export class VoiceClient {
   }
 
   /**
-   * Open a voice session for a Milchick check-in.
+   * Open a voice session for a Neil check-in.
    */
   async connectCheckin() {
     await this._connectToPath('/ws/checkin');

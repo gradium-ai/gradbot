@@ -10,11 +10,11 @@ export class NPCPatrol {
 
     // Legs (dark pants)
     const legGeo = new THREE.BoxGeometry(0.18, 0.4, 0.18);
-    const legL = new THREE.Mesh(legGeo, Materials.milchickPants);
+    const legL = new THREE.Mesh(legGeo, Materials.neilPants);
     legL.position.set(-0.12, 0.2, 0);
     legL.castShadow = true;
     this.mesh.add(legL);
-    const legR = new THREE.Mesh(legGeo, Materials.milchickPants);
+    const legR = new THREE.Mesh(legGeo, Materials.neilPants);
     legR.position.set(0.12, 0.2, 0);
     legR.castShadow = true;
     this.mesh.add(legR);
@@ -22,7 +22,7 @@ export class NPCPatrol {
     // Torso (tan suit)
     const torso = new THREE.Mesh(
       new THREE.BoxGeometry(0.5, 0.55, 0.28),
-      Materials.milchickSuit
+      Materials.neilSuit
     );
     torso.position.y = 0.68;
     torso.castShadow = true;
@@ -30,11 +30,11 @@ export class NPCPatrol {
 
     // Arms
     const armGeo = new THREE.BoxGeometry(0.14, 0.45, 0.14);
-    const armL = new THREE.Mesh(armGeo, Materials.milchickSuit);
+    const armL = new THREE.Mesh(armGeo, Materials.neilSuit);
     armL.position.set(-0.32, 0.62, 0);
     armL.castShadow = true;
     this.mesh.add(armL);
-    const armR = new THREE.Mesh(armGeo, Materials.milchickSuit);
+    const armR = new THREE.Mesh(armGeo, Materials.neilSuit);
     armR.position.set(0.32, 0.62, 0);
     armR.castShadow = true;
     this.mesh.add(armR);
@@ -103,7 +103,7 @@ export class NPCPatrol {
     this._forward.copy(dir);
     this.mesh.rotation.y = Math.atan2(dir.x, dir.z);
 
-    const step = CONFIG.MILCHICK_SPEED * dt;
+    const step = CONFIG.NEIL_SPEED * dt;
     if (step >= dist) {
       pos.copy(target);
     } else {
@@ -115,10 +115,10 @@ export class NPCPatrol {
     const toPlayer = new THREE.Vector3().subVectors(playerPos, this.mesh.position);
     toPlayer.y = 0;
     const dist = toPlayer.length();
-    if (dist > CONFIG.MILCHICK_DETECT_RANGE) return false;
+    if (dist > CONFIG.NEIL_DETECT_RANGE) return false;
 
     toPlayer.normalize();
     const dot = this._forward.dot(toPlayer);
-    return dot > CONFIG.MILCHICK_DETECT_DOT;
+    return dot > CONFIG.NEIL_DETECT_DOT;
   }
 }
