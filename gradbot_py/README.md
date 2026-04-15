@@ -88,7 +88,7 @@ async def ws(websocket: fastapi.WebSocket):
     )
 ```
 
-`gradbot.routes.setup` registers `/api/audio-config`, serves your static files, and automatically serves the bundled JS audio processor at `/static/js/`. With `with_voices=True`, it also exposes `/api/voices` backed by the Gradium voice catalog.
+`gradbot.routes.setup` registers `/api/audio-config`, serves your static files, and automatically serves the bundled JS audio processor at `/static/js/`.
 
 ### WebSocket Protocol
 
