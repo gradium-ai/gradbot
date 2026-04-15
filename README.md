@@ -96,7 +96,6 @@ Every demo is a standalone FastAPI + WebSocket app. Pick one, `uv sync`, and run
 |------|-------------|-------------|
 | **[simple_chat](demos/simple_chat/)** | Basic voice conversation | Minimal starting point, dynamic voice/prompt switching |
 | **[fantasy_shop](demos/fantasy_shop/)** | Haggling game: buy a sword from NPCs | Tool calling, multi-character, game state, deferred tools |
-| **[spanish_teacher](demos/spanish_teacher/)** | Language lesson with pronunciation practice | Educational UX, hiding imperfect STT from the learner |
 | **[hotel](demos/hotel/)** | Hotel booking agent for Paris, Bali, Dubai | Deferred tool results with natural chit-chat using Web Search API |
 | **[business_bank](demos/business_bank/)** | Banking agent with PIN auth and loan applications | Security flows, multi-step business logic |
 | **[Fast food ordering assistant](demos/chick_fil_a/)** | Multilingual voice ordering agent | Menu browsing, order customization, multilingual support |

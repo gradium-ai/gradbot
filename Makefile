@@ -1,6 +1,5 @@
-DEMOS := business_bank chick_fil_a fantasy_shop hotel mcp_demo \
-         mtg_adviser simple_chat spanish_teacher threejs_game \
-         voice_text_adventure wellness_checkin
+DEMOS := business_bank chick_fil_a fantasy_shop hotel \
+         simple_chat spanish_teacher threejs_game
 
 MATURIN := uv tool run maturin
 MANIFEST := -m gradbot_py/Cargo.toml
