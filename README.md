@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>Open-source voice agent framework.<br>~60 lines of code. Any OpenAI-compatible LLM.</strong>
+  <strong>Open-source voice agent framework.<br>~50 lines of code. Any OpenAI-compatible LLM.</strong>
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@ Gradbot gives you the event loop for voice agents. You write the logic, it handl
 
 At its core is a multiplexing engine written in Rust that coordinates three streams in real time: **speech-to-text**, **LLM inference**, and **text-to-speech** while managing conversational state, turn-taking, and interruptions. It works with any **OpenAI-compatible LLM** (GPT-4o, Claude, Groq, Ollama, LM Studio, etc.) and uses **[Gradium](https://gradium.ai)** for streaming STT/TTS across multiple voices from the Gradium voice catalog and 5 languages.
 
-Whether you're building a [haggling game](demos/fantasy_shop/) or a [travel booking assistant](demos/hotel/), Gradbot lets you go from idea to working voice experience in around 60 lines of code.
+Whether you're building a [haggling game](demos/fantasy_shop/) or a [travel booking assistant](demos/hotel/), Gradbot lets you go from idea to working voice experience in under 50 lines of code.
 
 https://github.com/user-attachments/assets/290fbdb6-386c-4a2a-8c37-f30c9b023aec
 
@@ -127,31 +127,37 @@ The core pattern in every `main.py`:
 # 1. Define tools
 tools = [
     gradbot.ToolDef(
-        name="add_to_order",
-        description="Add a pizza to the order",
-        parameters_json='{"type": "object", "properties": {"pizza": {"type": "string"}}, "required": ["pizza"]}'
+        "add_to_order",
+        "Add a pizza to the order",
+        '{"type": "object", "properties": {"pizza": {"type": "string"}}, "required": ["pizza"]}',
     ),
 ]
 
-# 2. Start a session
-config = gradbot.SessionConfig(
-    voice_id=voice.voice_id,
-    instructions="You are Marco, a friendly pizzaiolo...",
-    language=gradbot.Lang.En,
-    tools=tools,
-    assistant_speaks_first=True,
-)
-input_handle, output_handle = await gradbot.run(
-    session_config=config,
-    input_format=gradbot.AudioFormat.OggOpus,
-    output_format=gradbot.AudioFormat.OggOpus,
-)
+# 2. Configure the session via an on_start callback
+def on_start(msg: dict) -> gradbot.SessionConfig:
+    return gradbot.SessionConfig(
+        voice_id="YTpq7expH9539ERJ",
+        instructions="You are Marco, a friendly pizzaiolo...",
+        language=gradbot.Lang.En,
+        tools=tools,
+        assistant_speaks_first=True,
+    )
 
-# 3. Handle tool calls in the output loop
-if msg.msg_type == "tool_call":
-    args = json.loads(msg.tool_call.args_json)
-    order.append(args["pizza"])
-    await msg.tool_call_handle.send(json.dumps({"result": "Added!"}))
+# 3. Handle tool calls
+async def on_tool_call(handle, input_handle, websocket):
+    if handle.name == "add_to_order":
+        order.append(handle.args["pizza"])
+        await handle.send_json({"result": "Added!"})
+
+# 4. Wire it up
+@app.websocket("/ws/chat")
+async def ws_chat(websocket: fastapi.WebSocket):
+    await gradbot.websocket.handle_session(
+        websocket,
+        config=gradbot.config.from_env(),
+        on_start=on_start,
+        on_tool_call=on_tool_call,
+    )
 ```
 
 ### Tips
