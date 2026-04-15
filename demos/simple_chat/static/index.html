@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="icon" type="image/png" href="static/favicon.png">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gradbot Voice Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --ink: #1a1a1a;
+            --ink-soft: #444;
+            --ink-faint: #666;
+            --surface: #faf9f7;
+            --surface-raised: #fff;
+            --accent: #2a2a2a;
+            --accent-hover: #000;
+            --border: #e8e6e1;
+            --border-light: #f0eee9;
+            --danger: #c44;
+            --active: #2d8a4e;
+            --border-hover: #c5c2bc;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--surface);
+            background-image:
+                radial-gradient(ellipse 80% 60% at 50% 0%, rgba(210,200,185,0.25) 0%, transparent 70%),
+                radial-gradient(ellipse 60% 50% at 80% 100%, rgba(190,200,210,0.15) 0%, transparent 60%);
+            color: var(--ink);
+            min-height: 100vh;
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1.5rem;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 480px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .header h1 {
+            font-family: 'Instrument Serif', serif;
+            font-weight: 400;
+            font-size: 2.75rem;
+            letter-spacing: -0.02em;
+            line-height: 1.1;
+            color: var(--ink);
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            font-family: 'Instrument Serif', serif;
+            font-style: italic;
+            font-size: 1.0625rem;
+            color: var(--ink-faint);
+            font-weight: 400;
+            letter-spacing: 0.005em;
+        }
+
+        .header::after {
+            content: '';
+            display: block;
+            width: 32px;
+            height: 1.5px;
+            background: var(--border);
+            margin: 1.25rem auto 0;
+        }
+
+        /* Orb — the main interaction point */
+        .orb-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 1.75rem;
+        }
+
+        .orb-wrap {
+            position: relative;
+            width: 140px;
+            height: 140px;
+            margin-bottom: 1.25rem;
+        }
+
+        /* Outer glow layer */
+        .orb-glow {
+            position: absolute;
+            inset: -16px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(0,0,0,0.03) 40%, transparent 70%);
+            transition: background 0.5s;
+            pointer-events: none;
+        }
+
+        .orb-wrap.active .orb-glow {
+            background: radial-gradient(circle, rgba(45,138,78,0.12) 30%, transparent 70%);
+            animation: glow-pulse 2.5s ease-in-out infinite;
+        }
+
+        @keyframes glow-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.06); }
+        }
+
+        .orb-ring {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            border: 1.5px solid var(--border);
+            transition: border-color 0.4s, transform 0.4s;
+        }
+
+        .orb-wrap.active .orb-ring {
+            border-color: var(--active);
+            animation: orb-breathe 2.5s ease-in-out infinite;
+        }
+
+        @keyframes orb-breathe {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.06); opacity: 0.5; }
+        }
+
+        .orb-btn {
+            position: absolute;
+            inset: 14px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(145deg, #333, #1a1a1a);
+            color: #fff;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.3s, transform 0.15s, box-shadow 0.3s;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15), 0 1px 4px rgba(0,0,0,0.1);
+        }
+
+        .orb-btn:hover {
+            background: linear-gradient(145deg, #444, #222);
+            transform: scale(1.03);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.2), 0 2px 6px rgba(0,0,0,0.12);
+        }
+        .orb-btn:active { transform: scale(0.97); }
+
+        .orb-btn.recording {
+            background: linear-gradient(145deg, #d65, #b33);
+            box-shadow: 0 4px 20px rgba(204,68,68,0.3), 0 1px 4px rgba(204,68,68,0.15);
+        }
+        .orb-btn.recording:hover {
+            background: linear-gradient(145deg, #c55, #a22);
+            box-shadow: 0 6px 24px rgba(204,68,68,0.4), 0 2px 6px rgba(204,68,68,0.2);
+        }
+        .orb-btn svg { transition: opacity 0.2s; }
+
+        .orb-status {
+            font-size: 0.875rem;
+            color: var(--ink-soft);
+            letter-spacing: 0.03em;
+            min-height: 1.2em;
+            transition: color 0.3s;
+        }
+
+        .orb-status.active { color: var(--active); }
+        .orb-status.error { color: var(--danger); }
+
+        /* Controls row — beneath orb */
+        .controls-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1.25rem;
+            margin-bottom: 2rem;
+            width: 100%;
+            max-width: 340px;
+        }
+
+        /* Custom dropdown */
+        .dropdown {
+            position: relative;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .dropdown-trigger {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            background: transparent;
+            border: 1.5px solid var(--border);
+            border-radius: 100px;
+            font-family: inherit;
+            font-size: 0.875rem;
+            color: var(--ink);
+            cursor: pointer;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            outline: none;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        .dropdown-trigger:hover { border-color: var(--border-hover); }
+        .dropdown-trigger:focus, .dropdown.open .dropdown-trigger {
+            border-color: var(--ink-soft);
+            box-shadow: 0 0 0 3px rgba(0,0,0,0.04);
+        }
+
+        .dropdown-trigger .dd-text {
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .dropdown-trigger .dd-chevron {
+            flex-shrink: 0;
+            width: 16px;
+            height: 16px;
+            color: var(--ink-faint);
+            transition: transform 0.2s;
+        }
+
+        .dropdown.open .dd-chevron { transform: rotate(180deg); }
+
+        .dropdown-menu {
+            position: absolute;
+            bottom: calc(100% + 6px);
+            left: 0;
+            right: 0;
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(8px);
+            border: 1.5px solid var(--border);
+            border-radius: 14px;
+            padding: 0.375rem;
+            max-height: 240px;
+            overflow-y: auto;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(6px);
+            transition: opacity 0.18s, transform 0.18s, visibility 0.18s;
+            z-index: 50;
+            box-shadow: 0 12px 32px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.05);
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+
+        .dropdown-menu::-webkit-scrollbar { width: 4px; }
+        .dropdown-menu::-webkit-scrollbar-track { background: transparent; }
+        .dropdown-menu::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+        .dropdown.open .dropdown-menu {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.625rem;
+            border-radius: 10px;
+            font-size: 0.875rem;
+            color: var(--ink);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .dropdown-item:hover { background: var(--border-light); }
+        .dropdown-item.selected { background: var(--border-light); font-weight: 500; }
+
+        .dropdown-item .flag {
+            font-size: 1.1rem;
+            flex-shrink: 0;
+        }
+
+        /* Divider between languages in dropdown */
+        .dropdown-divider {
+            height: 1px;
+            background: var(--border-light);
+            margin: 0.25rem 0.5rem;
+        }
+
+        /* Echo toggle — pill style to match dropdown */
+        .echo-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+            padding: 0.5rem 0.75rem;
+            border: 1.5px solid var(--border);
+            border-radius: 100px;
+            transition: border-color 0.2s;
+        }
+
+        .echo-toggle:hover { border-color: var(--border-hover); }
+        .echo-toggle:focus-within { border-color: var(--ink-soft); box-shadow: 0 0 0 3px rgba(0,0,0,0.04); }
+
+        .echo-toggle input { display: none; }
+
+        .echo-toggle .track {
+            width: 30px;
+            height: 17px;
+            background: var(--border);
+            border-radius: 10px;
+            position: relative;
+            transition: background 0.25s;
+            flex-shrink: 0;
+        }
+
+        .echo-toggle .track::after {
+            content: '';
+            position: absolute;
+            width: 13px;
+            height: 13px;
+            background: #fff;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            transition: transform 0.25s;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+        }
+
+        .echo-toggle input:checked + .track {
+            background: var(--ink);
+        }
+
+        .echo-toggle input:checked + .track::after {
+            transform: translateX(13px);
+        }
+
+        .echo-toggle .echo-label {
+            font-size: 0.8125rem;
+            color: var(--ink-soft);
+        }
+
+        /* Transcript */
+        .transcript-section {
+            width: 100%;
+            background: var(--surface-raised);
+            border: 1px solid var(--border-light);
+            border-radius: 14px;
+            overflow: hidden;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04), 0 0 0 1px rgba(0,0,0,0.02);
+        }
+
+        .transcript-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.625rem 0.875rem;
+            border-bottom: 1px solid var(--border-light);
+        }
+
+        .transcript-header span {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--ink-soft);
+            font-weight: 500;
+        }
+
+        .transcript {
+            max-height: 280px;
+            overflow-y: auto;
+            padding: 0.75rem;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+
+        .transcript::-webkit-scrollbar { width: 4px; }
+        .transcript::-webkit-scrollbar-track { background: transparent; }
+        .transcript::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+        .transcript-empty {
+            text-align: center;
+            color: var(--ink-faint);
+            font-size: 0.875rem;
+            padding: 2rem 0;
+            font-weight: 400;
+            font-style: italic;
+        }
+
+        .transcript-item {
+            margin-bottom: 0.625rem;
+            padding: 0.5rem 0.625rem;
+            border-radius: 8px;
+            animation: msg-in 0.25s ease-out;
+        }
+
+        @keyframes msg-in {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .transcript-item.user {
+            background: linear-gradient(135deg, #f5f4f1, #efeee9);
+            margin-left: 2.5rem;
+            border: 1px solid rgba(0,0,0,0.03);
+        }
+
+        .transcript-item.assistant {
+            background: linear-gradient(135deg, #f0f7f2, #e8f3ea);
+            margin-right: 2.5rem;
+            border: 1px solid rgba(45,138,78,0.06);
+        }
+
+        .transcript-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--ink-soft);
+            margin-bottom: 0.2rem;
+            font-weight: 500;
+        }
+
+        .transcript-text {
+            font-size: 0.9375rem;
+            line-height: 1.55;
+            color: var(--ink);
+        }
+
+        /* Powered by */
+        .powered-by {
+            position: fixed;
+            top: 1rem;
+            right: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            color: var(--ink-soft);
+            font-size: 0.75rem;
+            font-weight: 600;
+            opacity: 0.7;
+            letter-spacing: 0.02em;
+        }
+
+        .powered-by svg {
+            height: 22px;
+            width: auto;
+        }
+
+        /* Visualizer canvas — hidden but functional for audio analysis */
+        .visualizer-hidden {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Entry animation */
+        .container > * {
+            animation: fade-up 0.5s ease-out both;
+        }
+        .container > :nth-child(1) { animation-delay: 0s; }
+        .container > :nth-child(2) { animation-delay: 0.08s; }
+        .container > :nth-child(3) { animation-delay: 0.16s; }
+        .container > :nth-child(4) { animation-delay: 0.24s; }
+
+        @keyframes fade-up {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Responsive */
+        @media (max-width: 480px) {
+            body { padding: 1.5rem 1rem; }
+            .header h1 { font-size: 2rem; }
+            .controls-bar {
+                flex-direction: column;
+                gap: 0.625rem;
+                max-width: 260px;
+            }
+            .dropdown { width: 100%; }
+            .transcript-item.user { margin-left: 1.5rem; }
+            .transcript-item.assistant { margin-right: 1.5rem; }
+            .powered-by { position: static; margin-top: 2rem; opacity: 0.5; }
+        }
+
+        @media (min-height: 800px) {
+            .header { margin-bottom: 3rem; }
+            .orb-section { margin-bottom: 2.25rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Voice Chat</h1>
+            <p>Talk to a traveller from the year 2347</p>
+        </div>
+
+        <div class="orb-section">
+            <div class="orb-wrap" id="orbWrap">
+                <div class="orb-glow"></div>
+                <div class="orb-ring"></div>
+                <button class="orb-btn" id="orbBtn" aria-label="Start voice chat">
+                    <svg id="iconMic" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                        <line x1="12" y1="19" x2="12" y2="22"/>
+                    </svg>
+                    <svg id="iconStop" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" style="display:none">
+                        <rect x="6" y="6" width="12" height="12" rx="2"/>
+                    </svg>
+                </button>
+            </div>
+            <span class="orb-status" id="status" aria-live="polite">Tap to begin</span>
+        </div>
+
+        <div class="controls-bar">
+            <div class="dropdown" id="voiceDropdown">
+                <button class="dropdown-trigger" id="dropdownTrigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                    <span class="dd-text" id="ddText">Loading voices...</span>
+                    <svg class="dd-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 6l4 4 4-4"/>
+                    </svg>
+                </button>
+                <div class="dropdown-menu" id="dropdownMenu" role="listbox"></div>
+            </div>
+            <label class="echo-toggle">
+                <input type="checkbox" id="echoCancellation" checked aria-label="Echo cancellation">
+                <span class="track"></span>
+                <span class="echo-label">Echo cancel</span>
+            </label>
+        </div>
+
+        <div class="transcript-section">
+            <div class="transcript-header">
+                <span>Transcript</span>
+            </div>
+            <div class="transcript" id="transcript">
+                <p class="transcript-empty">Your conversation will appear here</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="powered-by">
+        <span>Powered by</span>
+        <svg viewBox="0 0 1201 262" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M60.7237 245.259C41.8152 234.104 26.9637 218.579 16.1814 198.682C5.39202 178.792 0 156.234 0 131C0 105.773 5.45416 83.2112 16.3625 63.3145C27.2708 43.4286 42.1792 27.8993 61.0877 16.7375C79.9944 5.58271 100.721 0 123.264 0C142.9 0 160.655 4.06533 176.534 12.1889C192.407 20.3195 205.497 31.0549 215.803 44.3952C226.104 57.7389 233.439 71.9285 237.801 86.9673H188.714C183.38 74.8424 174.773 64.8959 162.899 57.1313C151.017 49.3702 137.808 45.4861 123.264 45.4861C108.959 45.4861 96.0497 49.0042 84.5395 56.0367C73.024 63.0764 63.9337 73.0834 57.2687 86.0576C50.5983 99.0389 47.2694 114.021 47.2694 131C47.2694 147.983 50.5983 162.965 57.2687 175.939C63.9337 188.92 73.024 198.927 84.5395 205.96C96.0497 212.999 108.959 216.514 123.264 216.514C136.111 216.514 147.683 213.785 157.99 208.326C168.289 202.868 176.351 195.896 182.169 187.403C187.987 178.913 191.26 170.299 191.988 161.565L193.806 147.375L204.714 159.745H130.174V125.176H239.619V258.361H203.622L199.986 228.884H198.168C193.561 234.47 187.561 239.801 180.17 244.896C172.772 249.992 164.17 254.118 154.353 257.27C144.535 260.419 134.172 262 123.264 262C100.476 262 79.6304 256.421 60.7237 245.259Z" fill="currentColor"/><path d="M255.976 74.2312H294.156L297.792 89.8813H299.61C303.003 85.2758 307.427 81.509 312.881 78.5986C318.335 75.6882 325.062 74.2312 333.063 74.2312H366.878V116.078H335.971C324.336 116.078 315.484 119.174 309.428 125.36C303.365 131.544 300.338 140.584 300.338 152.467V258.361H255.976L255.976 74.2312Z" fill="currentColor"/><path d="M397.604 254.541C387.542 249.57 379.844 242.775 374.514 234.161C369.18 225.554 366.515 215.91 366.515 205.231C366.515 193.348 369.243 182.915 374.697 173.938C380.151 164.965 388.513 157.926 399.785 152.833C411.058 147.737 424.931 145.19 441.42 145.19H485.053V140.826C485.053 130.879 482.019 122.812 475.963 116.626C469.9 110.439 461.656 107.347 451.236 107.347C444.93 107.347 439.357 108.381 434.51 110.439C429.659 112.504 425.84 115.233 423.056 118.626C420.267 122.027 418.387 125.542 417.421 129.181H373.424C374.39 118.992 378.088 109.412 384.513 100.432C390.933 91.4591 399.842 84.2381 411.239 78.7798C422.63 73.3215 435.966 70.5923 451.236 70.5923C467.235 70.5923 481.11 73.5667 492.87 79.5083C504.625 85.4571 513.716 93.7618 520.141 104.437C526.561 115.112 529.776 127.24 529.776 140.826V258.361H491.233L487.597 240.167H485.779C481.655 245.749 474.871 250.781 465.417 255.266C455.964 259.754 445.056 262 432.692 262C419.358 262 407.66 259.509 397.604 254.541ZM464.326 220.696C471.11 217.186 476.263 212.146 479.78 205.597C483.292 199.048 485.053 191.529 485.053 183.035V177.577H445.782C434.147 177.577 425.476 179.759 419.784 184.126C414.085 188.494 411.239 194.442 411.239 201.958C411.239 209.236 413.723 215.057 418.694 219.424C423.658 223.792 430.874 225.974 440.328 225.974C449.537 225.974 457.537 224.218 464.326 220.696Z" fill="currentColor"/><path d="M585.587 249.808C572.616 241.684 562.374 230.341 554.862 215.785C547.346 201.23 543.591 184.734 543.591 166.298C543.591 147.62 547.346 131 554.862 116.444C562.374 101.889 572.616 90.6061 585.587 82.6035C598.552 74.5972 612.915 70.5923 628.676 70.5923C640.55 70.5923 651.037 72.7778 660.128 77.1451C669.218 81.509 676.309 86.9673 681.399 93.5201H683.217V3.63889H727.941V258.361H689.398L685.762 237.619H683.943C678.127 244.896 670.61 250.781 661.401 255.266C652.184 259.754 641.276 262 628.676 262C612.915 262 598.552 257.938 585.587 249.808ZM659.947 213.966C667.219 209.36 672.911 202.992 677.035 194.862C681.154 186.738 683.217 177.215 683.217 166.298C683.217 155.381 681.154 145.801 677.035 137.549C672.911 129.305 667.219 122.994 659.947 118.626C652.674 114.259 644.674 112.077 635.948 112.077C627.222 112.077 619.221 114.259 611.949 118.626C604.677 122.994 598.916 129.305 594.678 137.549C590.434 145.801 588.315 155.381 588.315 166.298C588.315 177.215 590.434 186.738 594.678 194.862C598.916 202.992 604.677 209.36 611.949 213.966C619.221 218.579 627.222 220.881 635.948 220.881C644.674 220.881 652.674 218.579 659.947 213.966Z" fill="currentColor"/><path d="M745.757 1.45342H793.391V42.9382H745.757V1.45342ZM747.211 74.2312H791.573V258.361H747.211V74.2312Z" fill="currentColor"/><path d="M978.106 258.361H978.467V143.862C978.24 145.598 978.106 147.371 978.106 149.194V258.361Z" fill="currentColor"/><path d="M933.747 74.2312V179.034C933.747 186.553 931.985 193.469 928.474 199.773C924.956 206.084 920.111 210.999 913.929 214.513C907.747 218.031 900.777 219.787 893.022 219.787C885.504 219.787 878.715 218.031 872.659 214.513C866.598 210.999 861.87 206.141 858.479 199.958C855.08 193.771 853.388 186.799 853.388 179.034V74.2312H809.027V184.855C809.027 200.139 812.118 213.664 818.3 225.43C824.48 237.199 833.083 246.233 844.115 252.537C855.144 258.844 867.688 262 881.749 262C893.385 262 903.868 259.871 913.201 255.632C922.092 251.589 928.923 246.817 933.748 241.338L933.747 74.2312Z" fill="currentColor"/><path d="M1192.09 106.256C1186.15 95.098 1178.03 86.3668 1167.73 80.0556C1157.42 73.7479 1145.97 70.5923 1133.37 70.5923C1120.28 70.5923 1108.64 73.3215 1098.46 78.7798C1088.28 84.2381 1080.77 90.6062 1075.92 97.884H1074.1C1070.22 91.0966 1063.79 84.8494 1054.83 79.1458C1045.86 73.4494 1035.19 70.5923 1022.83 70.5923C1013.13 70.5923 1004.16 72.7778 995.924 77.1451C988.326 81.1669 982.563 85.6276 978.468 90.4756L978.467 143.862C979.085 139.133 980.527 134.721 982.834 130.634C985.981 125.058 990.225 120.691 995.56 117.535C1000.89 114.387 1006.71 112.806 1013.01 112.806C1019.31 112.806 1024.89 114.259 1029.74 117.173C1034.59 120.083 1038.34 124.266 1041.01 129.724C1043.68 135.183 1045.01 141.679 1045.01 149.195V258.361H1089.73V149.195C1089.73 142.404 1091.25 136.22 1094.28 130.634C1097.31 125.058 1101.49 120.691 1106.83 117.535C1112.16 114.387 1117.97 112.806 1124.28 112.806C1130.82 112.806 1136.46 114.259 1141.19 117.173C1145.91 120.083 1149.61 124.266 1152.28 129.724C1154.94 135.183 1156.28 141.679 1156.28 149.195V258.361H1201V144.099C1201 130.034 1198.03 117.415 1192.09 106.256Z" fill="currentColor"/><path d="M977.382 91.7007H975.564L971.927 74.2312H933.747L933.748 241.338C933.986 241.067 934.245 240.804 934.473 240.529H936.291L939.927 258.361L978.106 258.361V149.194C978.106 147.371 978.24 145.598 978.467 143.862L978.468 90.4756C978.12 90.8869 977.704 91.2831 977.382 91.7007Z" fill="currentColor"/></svg>
+    </div>
+
+    <!-- Hidden canvas for audio analysis -->
+    <div class="visualizer-hidden">
+        <canvas id="visualizer"></canvas>
+    </div>
+
+    <!-- Audio processor scripts -->
+    <script src="static/js/opus-encoder.js"></script>
+    <script src="static/js/audio-processor.js"></script>
+    <script src="static/js/synced-audio-player.js"></script>
+    <script>fetch("api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
+
+    <script>
+        const FLAGS = {
+            en: '\u{1F1EC}\u{1F1E7}',
+            fr: '\u{1F1EB}\u{1F1F7}',
+            de: '\u{1F1E9}\u{1F1EA}',
+            es: '\u{1F1EA}\u{1F1F8}',
+            pt: '\u{1F1E7}\u{1F1F7}'
+        };
+
+        // State
+        let voices = [];
+        let selectedVoice = null;
+        let selectedVoiceId = null;
+        let selectedVoiceLang = null;
+        let ws = null;
+        let player = null;
+        let isRecording = false;
+        let turnBubbles = {};
+
+        // DOM
+        const dropdown = document.getElementById('voiceDropdown');
+        const ddTrigger = document.getElementById('dropdownTrigger');
+        const ddMenu = document.getElementById('dropdownMenu');
+        const ddText = document.getElementById('ddText');
+        const orbBtn = document.getElementById('orbBtn');
+        const orbWrap = document.getElementById('orbWrap');
+        const iconMic = document.getElementById('iconMic');
+        const iconStop = document.getElementById('iconStop');
+        const statusEl = document.getElementById('status');
+        const transcript = document.getElementById('transcript');
+        const echoCancellationToggle = document.getElementById('echoCancellation');
+
+        // Custom dropdown logic
+        function toggleDropdown() {
+            const isOpen = dropdown.classList.toggle('open');
+            ddTrigger.setAttribute('aria-expanded', isOpen);
+        }
+
+        function closeDropdown() {
+            dropdown.classList.remove('open');
+            ddTrigger.setAttribute('aria-expanded', 'false');
+        }
+
+        ddTrigger.addEventListener('click', (e) => { e.stopPropagation(); toggleDropdown(); });
+        ddTrigger.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { closeDropdown(); return; }
+            const isOpen = dropdown.classList.contains('open');
+            if (!isOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault(); toggleDropdown(); return;
+            }
+            if (!isOpen) return;
+            const items = [...ddMenu.querySelectorAll('.dropdown-item')];
+            const current = items.findIndex(el => el.dataset.voice === selectedVoice);
+            if (e.key === 'ArrowDown') { e.preventDefault(); const next = items[Math.min(current + 1, items.length - 1)]; selectVoice(next.dataset.voice, next.dataset.voiceId); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); const prev = items[Math.max(current - 1, 0)]; selectVoice(prev.dataset.voice, prev.dataset.voiceId); toggleDropdown(); }
+            else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeDropdown(); }
+        });
+        document.addEventListener('click', closeDropdown);
+
+        function selectVoice(name, voiceId) {
+            selectedVoice = name;
+            selectedVoiceId = voiceId || null;
+            const v = voices.find(x => x.name === name);
+            selectedVoiceLang = v ? v.language : null;
+            const voice = voices.find(v => v.name === name);
+            const flag = voice ? (FLAGS[voice.language] || '\u{1F310}') : '';
+            ddText.textContent = `${flag}  ${name}`;
+            ddMenu.querySelectorAll('.dropdown-item').forEach(el => {
+                el.classList.toggle('selected', el.dataset.voice === name);
+            });
+            closeDropdown();
+        }
+
+        // Voices
+        async function loadVoices() {
+            try {
+                const response = await fetch('api/voices');
+                const data = await response.json();
+                voices = data.voices;
+                renderVoices();
+            } catch (error) {
+                console.error('Failed to load voices:', error);
+                statusEl.textContent = 'Failed to load voices';
+                statusEl.className = 'orb-status error';
+            }
+        }
+
+        function renderVoices() {
+            ddMenu.innerHTML = '';
+            let lastLang = null;
+            voices.forEach((voice, i) => {
+                const flag = FLAGS[voice.language] || '\u{1F310}';
+                if (lastLang && voice.language !== lastLang) {
+                    const div = document.createElement('div');
+                    div.className = 'dropdown-divider';
+                    ddMenu.appendChild(div);
+                }
+                lastLang = voice.language;
+                const item = document.createElement('div');
+                item.className = 'dropdown-item' + (i === 0 ? ' selected' : '');
+                item.dataset.voice = voice.name;
+                item.dataset.voiceId = voice.voice_id;
+                item.setAttribute('role', 'option');
+                item.innerHTML = `<span class="flag">${flag}</span><span>${voice.name}</span>`;
+                ddMenu.appendChild(item);
+            });
+            if (voices.length > 0) selectVoice(voices[0].name, voices[0].voice_id);
+        }
+
+        ddMenu.addEventListener('click', (e) => {
+            const item = e.target.closest('.dropdown-item');
+            if (item) { e.stopPropagation(); selectVoice(item.dataset.voice, item.dataset.voiceId); }
+        });
+
+        // Transcript bubbles
+        let userBubble = null;
+        let hadAssistantBubble = false;
+
+        function getBubbleForTurn(turnIdx, isUser) {
+            if (isUser) {
+                if (userBubble && !hadAssistantBubble) return userBubble;
+                hadAssistantBubble = false;
+                userBubble = document.createElement('div');
+                userBubble.className = 'transcript-item user';
+                userBubble.innerHTML = '<div class="transcript-label">You</div><div class="transcript-text"></div>';
+                userBubble._textEl = userBubble.querySelector('.transcript-text');
+                transcript.appendChild(userBubble);
+                return userBubble;
+            }
+            let bubble = turnBubbles[turnIdx];
+            if (!bubble) {
+                hadAssistantBubble = true;
+                bubble = document.createElement('div');
+                bubble.className = 'transcript-item assistant';
+                bubble.innerHTML = '<div class="transcript-label">Assistant</div><div class="transcript-text"></div>';
+                bubble._textEl = bubble.querySelector('.transcript-text');
+                transcript.appendChild(bubble);
+                turnBubbles[turnIdx] = bubble;
+            }
+            return bubble;
+        }
+
+        let scrollRaf = 0;
+        function handleText({ text, turnIdx, isUser }) {
+            const bubble = getBubbleForTurn(turnIdx, isUser);
+            bubble._textEl.textContent += text + ' ';
+            if (!scrollRaf) {
+                scrollRaf = requestAnimationFrame(() => {
+                    transcript.scrollTop = transcript.scrollHeight;
+                    scrollRaf = 0;
+                });
+            }
+        }
+
+        // Toggle chat
+        function toggleChat() {
+            if (isRecording) {
+                stopChat();
+            } else {
+                startChat();
+            }
+        }
+
+        async function startChat() {
+            if (!selectedVoice) {
+                statusEl.textContent = 'Select a voice first';
+                statusEl.className = 'orb-status error';
+                return;
+            }
+
+            transcript.innerHTML = '';
+            turnBubbles = {};
+            userBubble = null;
+            hadAssistantBubble = false;
+
+            player = new SyncedAudioPlayer({
+                basePath: 'static/js',
+                sampleRate: 24000,
+                pcmOutput: window.__pcmOutput || false,
+                echoCancellation: echoCancellationToggle.checked,
+                onEncodedAudio: (opusData) => {
+                    if (isRecording && ws && ws.readyState === WebSocket.OPEN) ws.send(opusData);
+                },
+                onText: handleText,
+                onEvent: (eventType, msg) => {
+                    console.log('Event:', eventType, msg);
+                    if (eventType === 'demo_mode') {
+                        statusEl.textContent = 'Demo mode';
+                        statusEl.className = 'orb-status';
+                    }
+                },
+                onError: (error) => {
+                    console.error('Player error:', error);
+                    statusEl.textContent = error.message;
+                    statusEl.className = 'orb-status error';
+                }
+            });
+
+            try {
+                await player.start();
+            } catch (error) {
+                console.error('Failed to setup audio:', error);
+                statusEl.textContent = 'Microphone access denied';
+                statusEl.className = 'orb-status error';
+                return;
+            }
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const basePath = window.location.pathname.replace(/\/$/, '');
+            ws = new WebSocket(`${protocol}//${window.location.host}${basePath}/ws/chat`);
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({ type: 'start', voice_name: selectedVoice, voice_id: selectedVoiceId, language: selectedVoiceLang }));
+                isRecording = true;
+                orbBtn.classList.add('recording');
+                orbWrap.classList.add('active');
+                iconMic.style.display = 'none';
+                iconStop.style.display = 'block';
+                statusEl.textContent = 'Listening';
+                statusEl.className = 'orb-status active';
+                ddTrigger.disabled = true;
+            };
+
+            ws.onmessage = (event) => player.handleMessage(event.data);
+
+            ws.onerror = () => {
+                statusEl.textContent = 'Connection error';
+                statusEl.className = 'orb-status error';
+            };
+
+            ws.onclose = () => {
+                resetUI();
+                if (statusEl.textContent === 'Listening') {
+                    statusEl.textContent = 'Disconnected';
+                    statusEl.className = 'orb-status';
+                }
+            };
+        }
+
+        function stopChat() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'stop' }));
+                ws.close();
+            }
+            ws = null;
+            if (player) { player.stop(); player = null; }
+            resetUI();
+            statusEl.textContent = 'Chat ended';
+            statusEl.className = 'orb-status';
+        }
+
+        function resetUI() {
+            isRecording = false;
+            orbBtn.classList.remove('recording');
+            orbWrap.classList.remove('active');
+            iconMic.style.display = 'block';
+            iconStop.style.display = 'none';
+            ddTrigger.disabled = false;
+        }
+
+        orbBtn.addEventListener('click', toggleChat);
+        loadVoices();
+    </script>
+</body>
+</html>

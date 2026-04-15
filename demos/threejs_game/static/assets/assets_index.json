@@ -1,0 +1,268 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-03-07T00:00:00.000Z",
+  "characters": {
+    "mark": {
+      "id": "mark",
+      "displayName": "Laurent Scout",
+      "skeleton": {
+        "url": "assets/glb/severance/mark.glb",
+        "bindPose": {
+          "id": "bind_pose",
+          "displayName": "Bind Pose",
+          "sourceClipName": "Idle",
+          "durationSec": 6.667,
+          "loop": "once",
+          "notes": "First frame of Idle used as bind/rest pose."
+        }
+      },
+      "animationSource": {
+        "url": "assets/glb/severance/mark.glb",
+        "notes": "Single GLB contains both skeleton+mesh and all animations."
+      },
+      "animations": [
+        {
+          "id": "idle",
+          "displayName": "Idle",
+          "sourceClipName": "Idle",
+          "durationSec": 6.667,
+          "loop": "repeat",
+          "tags": ["idle", "default"],
+          "notes": "Player standing still. Default state."
+        },
+        {
+          "id": "walking",
+          "displayName": "Walking",
+          "sourceClipName": "Walking",
+          "durationSec": 0.800,
+          "loop": "repeat",
+          "tags": ["locomotion", "walk"],
+          "notes": "Looping walk cycle for normal WASD movement."
+        },
+        {
+          "id": "running",
+          "displayName": "Running",
+          "sourceClipName": "Running",
+          "durationSec": 1.300,
+          "loop": "repeat",
+          "tags": ["locomotion", "run"],
+          "notes": "Looping run cycle for sprint movement."
+        },
+        {
+          "id": "run",
+          "displayName": "Run (Alt)",
+          "sourceClipName": "Run",
+          "durationSec": 0.567,
+          "loop": "repeat",
+          "tags": ["locomotion", "run"],
+          "notes": "Shorter/faster run cycle. Alternate to Running."
+        },
+        {
+          "id": "start_walking",
+          "displayName": "Start Walking",
+          "sourceClipName": "Start Walking",
+          "durationSec": 2.333,
+          "loop": "once",
+          "tags": ["locomotion", "transition"],
+          "notes": "One-shot transition from idle into walk. Play before Walking loop."
+        },
+        {
+          "id": "crouched_walking",
+          "displayName": "Crouched Walking",
+          "sourceClipName": "Crouched Walking",
+          "durationSec": 0.800,
+          "loop": "repeat",
+          "tags": ["locomotion", "stealth"],
+          "notes": "Looping crouch-walk for sneaking past Milchick."
+        },
+        {
+          "id": "sneaking_forward",
+          "displayName": "Sneaking Forward",
+          "sourceClipName": "Sneaking Forward",
+          "durationSec": 1.333,
+          "loop": "repeat",
+          "tags": ["locomotion", "stealth"],
+          "notes": "Alternate stealth walk. More exaggerated than Crouched Walking."
+        },
+        {
+          "id": "typing",
+          "displayName": "Typing",
+          "sourceClipName": "Typing",
+          "durationSec": 13.167,
+          "loop": "repeat",
+          "tags": ["interaction", "desk"],
+          "notes": "Seated typing at desk terminal. Used during data refinement."
+        },
+        {
+          "id": "sitting_idle",
+          "displayName": "Sitting Idle",
+          "sourceClipName": "Sitting Idle",
+          "durationSec": 3.433,
+          "loop": "repeat",
+          "tags": ["idle", "desk"],
+          "notes": "Seated idle at desk. Used between typing bursts."
+        },
+        {
+          "id": "stand_to_sit",
+          "displayName": "Stand To Sit",
+          "sourceClipName": "Stand To Sit",
+          "durationSec": 1.767,
+          "loop": "once",
+          "tags": ["transition", "desk"],
+          "notes": "One-shot transition from standing to seated. Play before Typing/Sitting Idle."
+        },
+        {
+          "id": "sit_to_stand",
+          "displayName": "Sit To Stand",
+          "sourceClipName": "Sit To Stand",
+          "durationSec": 1.800,
+          "loop": "once",
+          "tags": ["transition", "desk"],
+          "notes": "One-shot transition from seated to standing. Play before returning to Idle."
+        },
+        {
+          "id": "look_around",
+          "displayName": "Look Around",
+          "sourceClipName": "Look Around",
+          "durationSec": 3.567,
+          "loop": "repeat",
+          "tags": ["npc", "patrol"],
+          "notes": "NPC scanning animation. Used by Milchick at waypoint pauses."
+        },
+        {
+          "id": "angry_point",
+          "displayName": "Angry Point",
+          "sourceClipName": "Angry Point",
+          "durationSec": 1.933,
+          "loop": "once",
+          "tags": ["npc", "detection"],
+          "notes": "NPC points accusingly. Played when Milchick spots the player."
+        },
+        {
+          "id": "angry_gesture",
+          "displayName": "Angry Gesture",
+          "sourceClipName": "Angry Gesture",
+          "durationSec": 1.733,
+          "loop": "once",
+          "tags": ["npc", "detection"],
+          "notes": "NPC angry reaction. Played when suspicion reaches critical."
+        },
+        {
+          "id": "swing_dancing",
+          "displayName": "Swing Dancing",
+          "sourceClipName": "Swing Dancing",
+          "durationSec": 19.733,
+          "loop": "repeat",
+          "tags": ["emote", "celebration"],
+          "notes": "Victory celebration / Music Dance Experience easter egg."
+        }
+      ],
+      "defaults": {
+        "defaultAnimationId": "idle",
+        "crossFadeSec": 0.25
+      },
+      "rig": {
+        "type": "mixamo",
+        "rootBone": "mixamorig:Hips",
+        "nodeCount": 41,
+        "skinCount": 1,
+        "animationCountInGLB": 15
+      }
+    },
+    "milchick": {
+      "id": "milchick",
+      "displayName": "Neil",
+      "skeleton": {
+        "url": "assets/glb/severance/milchick.glb",
+        "bindPose": {
+          "id": "bind_pose",
+          "displayName": "Bind Pose",
+          "sourceClipName": "Idle",
+          "durationSec": 1.567,
+          "loop": "once",
+          "notes": "First frame of Idle used as bind/rest pose."
+        }
+      },
+      "animationSource": {
+        "url": "assets/glb/severance/milchick.glb",
+        "notes": "Single GLB contains both skeleton+mesh and all animations."
+      },
+      "animations": [
+        {
+          "id": "idle",
+          "displayName": "Idle",
+          "sourceClipName": "Idle",
+          "durationSec": 1.567,
+          "loop": "repeat",
+          "tags": ["idle", "default"],
+          "notes": "Standing idle at waypoint. Default state."
+        },
+        {
+          "id": "walking",
+          "displayName": "Walking",
+          "sourceClipName": "Walking",
+          "durationSec": 0.800,
+          "loop": "repeat",
+          "tags": ["locomotion", "walk"],
+          "notes": "Looping walk cycle for hallway patrol."
+        },
+        {
+          "id": "looking_around",
+          "displayName": "Looking Around",
+          "sourceClipName": "Looking Around",
+          "durationSec": 5.067,
+          "loop": "repeat",
+          "tags": ["patrol", "scan"],
+          "notes": "Scanning area for player. Played at waypoint pauses."
+        },
+        {
+          "id": "angry_point",
+          "displayName": "Angry Point",
+          "sourceClipName": "Angry Point",
+          "durationSec": 1.933,
+          "loop": "once",
+          "tags": ["detection", "caught"],
+          "notes": "Points accusingly when spotting the player."
+        },
+        {
+          "id": "angry_gesture",
+          "displayName": "Angry Gesture",
+          "sourceClipName": "Angry Gesture",
+          "durationSec": 2.600,
+          "loop": "once",
+          "tags": ["detection", "angry"],
+          "notes": "Angry reaction when suspicion reaches critical level."
+        },
+        {
+          "id": "talking",
+          "displayName": "Talking",
+          "sourceClipName": "Talking",
+          "durationSec": 3.133,
+          "loop": "repeat",
+          "tags": ["interaction", "dialogue"],
+          "notes": "Talking/confrontation animation. Used during dialogue scenes."
+        },
+        {
+          "id": "silly_dancing",
+          "displayName": "Silly Dancing",
+          "sourceClipName": "Silly Dancing",
+          "durationSec": 4.333,
+          "loop": "repeat",
+          "tags": ["emote", "celebration"],
+          "notes": "Music Dance Experience easter egg. Milchick's perks celebration."
+        }
+      ],
+      "defaults": {
+        "defaultAnimationId": "idle",
+        "crossFadeSec": 0.25
+      },
+      "rig": {
+        "type": "mixamo",
+        "rootBone": "mixamorig:Hips",
+        "nodeCount": 33,
+        "skinCount": 1,
+        "animationCountInGLB": 7
+      }
+    }
+  }
+}

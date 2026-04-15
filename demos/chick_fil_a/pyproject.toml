@@ -1,0 +1,9 @@
+[project]
+name = "chick-fil-a-demo"
+version = "0.1.0"
+description = "Chick-fil-A voice ordering demo"
+requires-python = ">=3.12"
+dependencies = ["gradbot"]
+
+[tool.uv.sources]
+gradbot = { path = "../../gradbot_py" }

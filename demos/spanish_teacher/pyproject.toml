@@ -1,0 +1,9 @@
+[project]
+name = "spanish-teacher"
+version = "0.1.0"
+description = "Spanish language teacher demo with voice"
+requires-python = ">=3.12"
+dependencies = ["gradbot"]
+
+[tool.uv.sources]
+gradbot = { path = "../../gradbot_py", editable = true }

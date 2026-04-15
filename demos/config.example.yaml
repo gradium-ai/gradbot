@@ -1,0 +1,33 @@
+# Copy this file to config.yaml inside any demo directory to override defaults.
+# Only include the values you want to change.
+
+llm:
+  # model: "gpt-4o"                # LLM model name (or set LLM_MODEL env var)
+  # base_url: "https://openrouter.ai/api/v1"  # LLM API base URL (or set LLM_BASE_URL env var)
+  # api_key: "sk-..."              # LLM API key (or set LLM_API_KEY env var)
+  # extra_config:                  # Extra fields merged into chat completion request body
+  #   reasoning:
+  #     effort: "none"
+
+gradium:
+  # api_key: "your-gradium-key"    # Gradium API key (or set GRADIUM_API_KEY env var)
+  # base_url: "https://api.gradium.ai/api"  # Gradium base URL (or set GRADIUM_BASE_URL env var)
+
+tts:
+  # padding_bonus: 0.0        # -4.0 to 4.0, positive = wait longer before finalizing
+  # rewrite_rules: "en"       # Text normalization rules (language code or custom)
+  # extra_config:             # Extra JSON fields merged into TTS stream config
+  #   some_key: some_value
+
+stt:
+  # flush_duration_s: 0.5     # Silence duration to flush STT pipeline
+  # extra_config:             # Extra JSON fields merged into STT stream config
+  #   some_key: some_value
+
+session:
+  # silence_timeout_s: 5.0        # Seconds of silence before prompting continuation
+  # assistant_speaks_first: true   # Whether assistant speaks first
+
+gradbot_server:
+  # url: "wss://server.com/ws"   # Enables remote mode (gradbot_server handles STT/LLM/TTS)
+  # api_key: "grd_..."           # Your Gradium API key (or use GRADIUM_API_KEY env var)

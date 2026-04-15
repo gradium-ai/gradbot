@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="static/favicon.png">
+    <title>Friendly Fried Chicken Joint</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Lato:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --red: #E51636;
+            --red-dark: #b01228;
+            --maroon: #5b1014;
+            --cream: #FFF8F0;
+            --cream-dark: #F5EDE3;
+            --brown-light: #D4C4B0;
+            --brown: #8B7355;
+            --text: #3D2B1F;
+            --text-light: #7A6A5E;
+            --white: #FFFFFF;
+            --shadow-sm: 0 1px 3px rgba(61,43,31,0.08);
+            --shadow-md: 0 4px 12px rgba(61,43,31,0.1);
+            --shadow-lg: 0 8px 30px rgba(61,43,31,0.12);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Lato', sans-serif;
+            background: var(--cream);
+            background-image:
+                radial-gradient(circle at 20% 50%, rgba(229,22,54,0.03) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(139,115,85,0.05) 0%, transparent 40%);
+            min-height: 100vh;
+            color: var(--text);
+        }
+
+        /* ── Header strip ── */
+        .top-bar {
+            background: var(--red);
+            padding: 10px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            box-shadow: 0 2px 8px rgba(229,22,54,0.3);
+        }
+        .top-bar h1 {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.6rem;
+            color: var(--white);
+            letter-spacing: 2px;
+        }
+
+        /* ── Layout ── */
+        .layout {
+            display: grid;
+            grid-template-columns: 270px 1fr 320px;
+            gap: 16px;
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 16px;
+            min-height: calc(100vh - 52px);
+        }
+        @media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+
+        /* ── Panels base ── */
+        .panel {
+            background: var(--white);
+            border-radius: 12px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid rgba(212,196,176,0.4);
+        }
+
+        .panel-title {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.35rem;
+            letter-spacing: 1.5px;
+            color: var(--maroon);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--cream-dark);
+            margin-bottom: 16px;
+        }
+        .panel-title svg { width: 20px; height: 20px; color: var(--red); }
+
+        /* ── Left: Agent panel ── */
+        .agent-panel {
+            padding: 20px 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            position: sticky;
+            top: 16px;
+            max-height: calc(100vh - 84px);
+        }
+
+        .agent-panel .panel-title {
+            width: 100%;
+            border-bottom: none;
+            justify-content: center;
+            padding-bottom: 0;
+            margin-bottom: 4px;
+            font-size: 1.2rem;
+        }
+
+        .chicken-container {
+            width: 230px;
+            height: 250px;
+            border-radius: 12px;
+            background:
+                linear-gradient(135deg, var(--cream) 0%, var(--cream-dark) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            border: 2px solid var(--cream-dark);
+            position: relative;
+            overflow: hidden;
+        }
+        .chicken-container::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 10px;
+            background: radial-gradient(ellipse at 50% 80%, rgba(229,22,54,0.06) 0%, transparent 60%);
+            pointer-events: none;
+        }
+        .chicken-container img {
+            width: 210px;
+            height: auto;
+            object-fit: contain;
+            filter: drop-shadow(0 4px 8px rgba(61,43,31,0.15));
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Waveform */
+        .waveform {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            height: 28px;
+            justify-content: center;
+            padding: 0 8px;
+        }
+        .waveform .bar {
+            width: 3px;
+            background: var(--red);
+            border-radius: 3px;
+            transition: height 0.06s ease-out;
+            height: 3px;
+            opacity: 0.7;
+        }
+
+        /* Transcript */
+        .transcript-area {
+            flex: 1;
+            width: 100%;
+            overflow-y: auto;
+            min-height: 60px;
+            max-height: 180px;
+            font-size: 0.88rem;
+            color: var(--text-light);
+            line-height: 1.5;
+            padding: 4px 0;
+        }
+        .transcript-area .placeholder {
+            text-align: center;
+            padding: 20px 8px;
+            color: var(--brown-light);
+            font-size: 0.85rem;
+        }
+        .transcript-area .msg {
+            margin-bottom: 6px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            text-align: left;
+        }
+        .transcript-area .msg.user {
+            background: #EFF6FF;
+            color: #1D4ED8;
+            margin-left: 20px;
+            border: 1px solid #DBEAFE;
+        }
+        .transcript-area .msg.agent {
+            background: var(--cream);
+            color: var(--text);
+            margin-right: 20px;
+            border: 1px solid var(--cream-dark);
+        }
+        .transcript-area .msg .label {
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0.5;
+            margin-bottom: 2px;
+        }
+
+        /* Mic button */
+        .mic-btn {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            border: 3px solid var(--red);
+            background: var(--white);
+            color: var(--red);
+            cursor: pointer;
+            box-shadow: 0 2px 12px rgba(229,22,54,0.2);
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .mic-btn:hover {
+            background: var(--red);
+            color: var(--white);
+            transform: scale(1.05);
+            box-shadow: 0 4px 20px rgba(229,22,54,0.35);
+        }
+        .mic-btn:disabled { border-color: var(--brown-light); color: var(--brown-light); box-shadow: none; cursor: not-allowed; background: var(--cream); }
+        .mic-btn.active {
+            background: var(--red);
+            color: var(--white);
+            border-color: var(--red);
+            box-shadow: 0 0 0 4px rgba(229,22,54,0.15), 0 4px 16px rgba(229,22,54,0.3);
+            animation: pulse-ring 2s ease-out infinite;
+        }
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 4px rgba(229,22,54,0.15), 0 4px 16px rgba(229,22,54,0.3); }
+            50% { box-shadow: 0 0 0 8px rgba(229,22,54,0.08), 0 4px 16px rgba(229,22,54,0.3); }
+            100% { box-shadow: 0 0 0 4px rgba(229,22,54,0.15), 0 4px 16px rgba(229,22,54,0.3); }
+        }
+
+        .status-text {
+            font-size: 0.75rem;
+            color: var(--brown);
+            letter-spacing: 0.5px;
+        }
+
+        /* ── Language selector ── */
+        .lang-selector {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .lang-btn {
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 2px solid var(--brown-light);
+            background: var(--white);
+            color: var(--text);
+            font-family: 'Lato', sans-serif;
+            font-size: 0.78rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            letter-spacing: 0.5px;
+        }
+        .lang-btn:hover {
+            border-color: var(--red);
+            color: var(--red);
+        }
+        .lang-btn.selected {
+            background: var(--red);
+            border-color: var(--red);
+            color: var(--white);
+        }
+        .lang-label {
+            font-size: 0.7rem;
+            color: var(--brown);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 700;
+        }
+
+        /* ── Speed slider ── */
+        .speed-control {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 0 8px;
+        }
+        .speed-slider {
+            width: 100%;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            border-radius: 2px;
+            background: var(--cream-dark);
+            outline: none;
+            cursor: pointer;
+        }
+        .speed-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--red);
+            cursor: pointer;
+            box-shadow: 0 1px 4px rgba(229,22,54,0.3);
+        }
+        .speed-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--red);
+            cursor: pointer;
+            border: none;
+        }
+        .speed-value {
+            font-size: 0.75rem;
+            color: var(--text-light);
+            font-weight: 700;
+        }
+
+        /* ── Center: Menu panel ── */
+        .menu-panel {
+            padding: 24px;
+            overflow-y: auto;
+            max-height: calc(100vh - 84px);
+        }
+
+        .menu-empty {
+            color: var(--brown-light);
+            text-align: center;
+            padding: 60px 20px;
+            font-size: 0.95rem;
+        }
+
+        .menu-category { margin-bottom: 28px; }
+
+        .category-title {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.3rem;
+            letter-spacing: 1px;
+            color: var(--maroon);
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 3px solid var(--red);
+            display: inline-block;
+        }
+
+        .menu-item {
+            padding: 14px 12px;
+            margin-bottom: 4px;
+            border-radius: 8px;
+            transition: background 0.15s ease;
+        }
+        .menu-item:hover { background: var(--cream); }
+
+        .item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 4px;
+        }
+        .item-name { font-weight: 700; color: var(--text); font-size: 0.95rem; }
+        .item-price {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.15rem;
+            color: var(--red);
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+            margin-left: 16px;
+        }
+        .item-description { color: var(--text-light); font-size: 0.82rem; line-height: 1.4; margin-bottom: 4px; }
+        .item-options { font-size: 0.78rem; color: var(--brown); font-style: italic; }
+
+        /* ── Right: Order panel ── */
+        .order-panel {
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            position: sticky;
+            top: 16px;
+            max-height: calc(100vh - 84px);
+        }
+
+        .order-content {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        .order-empty {
+            color: var(--brown-light);
+            text-align: center;
+            padding: 40px 16px;
+            font-size: 0.9rem;
+        }
+
+        .order-item {
+            padding: 12px 0;
+            border-bottom: 1px dashed var(--cream-dark);
+        }
+        .order-item:last-child { border-bottom: none; }
+
+        .order-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .order-item-name { font-weight: 700; color: var(--text); font-size: 0.9rem; }
+        .order-item-qty { color: var(--brown); font-size: 0.8rem; margin-left: 6px; }
+        .order-item-price {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.1rem;
+            color: var(--text);
+            letter-spacing: 0.5px;
+        }
+        .order-item-custom {
+            font-size: 0.78rem;
+            color: var(--text-light);
+            margin-top: 4px;
+            padding-left: 14px;
+        }
+        .order-item-custom li { margin-bottom: 1px; }
+
+        /* Order totals */
+        .order-totals {
+            border-top: 2px solid var(--cream-dark);
+            padding-top: 12px;
+            margin-top: 8px;
+        }
+        .order-totals .row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+            font-size: 0.88rem;
+            color: var(--text-light);
+        }
+        .order-totals .row.total {
+            font-weight: 900;
+            font-size: 1rem;
+            color: var(--text);
+            margin-top: 4px;
+            padding-top: 6px;
+            border-top: 1px solid var(--cream-dark);
+        }
+
+        .checkout-btn {
+            margin-top: 16px;
+            width: 100%;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 10px;
+            background: var(--red);
+            color: var(--white);
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.3rem;
+            letter-spacing: 1.5px;
+            text-align: center;
+            box-shadow: 0 4px 16px rgba(229,22,54,0.3);
+        }
+        .checkout-btn .sub { font-family: 'Lato', sans-serif; font-size: 0.7rem; letter-spacing: 0; opacity: 0.8; }
+
+        /* Order placed */
+        .order-placed-msg {
+            margin-top: 16px;
+            background: linear-gradient(135deg, #F0FDF4, #DCFCE7);
+            border: 2px solid #86EFAC;
+            border-radius: 12px;
+            padding: 20px 16px;
+            text-align: center;
+        }
+        .order-placed-msg h3 {
+            font-family: 'Bebas Neue', sans-serif;
+            color: var(--red);
+            font-size: 1.6rem;
+            letter-spacing: 2px;
+        }
+        .order-placed-msg .name { color: var(--maroon); font-weight: 700; font-size: 1.05rem; margin-top: 4px; }
+        .order-placed-msg .details { color: var(--text-light); font-size: 0.85rem; margin-top: 8px; line-height: 1.5; }
+
+        /* Scrollbars */
+        .menu-panel::-webkit-scrollbar,
+        .order-content::-webkit-scrollbar,
+        .transcript-area::-webkit-scrollbar { width: 5px; }
+        .menu-panel::-webkit-scrollbar-track,
+        .order-content::-webkit-scrollbar-track,
+        .transcript-area::-webkit-scrollbar-track { background: transparent; }
+        .menu-panel::-webkit-scrollbar-thumb,
+        .order-content::-webkit-scrollbar-thumb,
+        .transcript-area::-webkit-scrollbar-thumb { background: var(--brown-light); border-radius: 3px; }
+        .menu-panel::-webkit-scrollbar-thumb:hover,
+        .order-content::-webkit-scrollbar-thumb:hover,
+        .transcript-area::-webkit-scrollbar-thumb:hover { background: var(--brown); }
+    </style>
+</head>
+<body>
+    <!-- Top bar -->
+    <div class="top-bar">
+        <h1>FRIENDLY FRIED CHICKEN JOINT</h1>
+    </div>
+
+    <div class="layout">
+        <!-- Left: Agent -->
+        <div class="agent-panel panel">
+            <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+                MR CHICKCHIK
+            </div>
+            <div class="chicken-container">
+                <img id="chickenImg" src="static/visemes/sil.png" alt="Chicken assistant">
+            </div>
+            <div class="waveform" id="waveform"></div>
+            <div class="transcript-area" id="transcriptArea" style="display:none">
+                <div class="placeholder">Tap the mic to start ordering</div>
+            </div>
+            <div class="lang-label">Language</div>
+            <div class="lang-selector" id="langSelector">
+                <button class="lang-btn selected" data-lang="en">EN</button>
+                <button class="lang-btn" data-lang="fr">FR</button>
+                <button class="lang-btn" data-lang="de">DE</button>
+                <button class="lang-btn" data-lang="es">ES</button>
+                <button class="lang-btn" data-lang="pt">PT</button>
+            </div>
+            <div class="speed-control" id="voiceSelectContainer" style="display:none">
+                <div class="lang-label">Voice</div>
+                <select id="voiceSelect" style="width:100%;padding:6px 8px;border-radius:8px;border:2px solid var(--brown-light);font-family:'Lato',sans-serif;font-size:0.78rem;font-weight:700;color:var(--text);background:var(--white);cursor:pointer;"></select>
+            </div>
+            <div class="speed-control" style="flex-direction:row;gap:8px;justify-content:center;">
+                <input type="checkbox" id="echoCancellation" checked>
+                <label for="echoCancellation" style="font-size:0.7rem;color:var(--brown);text-transform:uppercase;letter-spacing:1px;font-weight:700;cursor:pointer;">Echo Cancellation</label>
+            </div>
+            <div class="speed-control" style="flex-direction:row;gap:8px;justify-content:center;">
+                <input type="checkbox" id="showTranscript">
+                <label for="showTranscript" style="font-size:0.7rem;color:var(--brown);text-transform:uppercase;letter-spacing:1px;font-weight:700;cursor:pointer;">Show Transcript</label>
+            </div>
+            <div class="speed-control">
+                <div class="lang-label">Voice Speed</div>
+                <input type="range" class="speed-slider" id="speedSlider" min="0.5" max="2.0" step="0.1" value="1.0">
+                <div class="speed-value" id="speedValue">1.0x</div>
+            </div>
+            <button class="mic-btn" id="micBtn" title="Start ordering">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            </button>
+            <div class="status-text" id="statusText">Tap to start</div>
+        </div>
+
+        <!-- Center: Menu -->
+        <div class="menu-panel panel">
+            <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                MENU
+            </div>
+            <div id="menuContent">
+                <div class="menu-empty" id="menuEmpty">Ask to see the menu to get started!</div>
+            </div>
+        </div>
+
+        <!-- Right: Order -->
+        <div class="order-panel panel">
+            <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                YOUR ORDER
+            </div>
+            <div class="order-content" id="orderContent">
+                <div class="order-empty">Your order is empty</div>
+            </div>
+            <div class="order-totals" id="orderTotals" style="display:none">
+                <div class="row"><span>Subtotal</span><span id="subtotalVal">$0.00</span></div>
+                <div class="row"><span>Tax</span><span id="taxVal">$0.00</span></div>
+                <div class="row total"><span>Total</span><span id="totalVal">$0.00</span></div>
+            </div>
+            <div class="checkout-btn" id="checkoutBtn" style="display:none">
+                <span id="checkoutTotal">Total: $0.00</span><br>
+                <span class="sub">Tap to Add Items</span>
+            </div>
+            <div id="orderPlacedArea"></div>
+        </div>
+    </div>
+
+    <script src="static/js/opus-encoder.js"></script>
+    <script src="static/js/audio-processor.js"></script>
+    <script src="static/js/synced-audio-player.js"></script>
+    <script>fetch("api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
+    <script>
+    // ── Viseme lipsync engine (ported from wawa-lipsync) ──
+    class ChickenLipsync {
+        constructor(analyser) {
+            this.analyser = analyser;
+            this.dataArray = new Uint8Array(analyser.frequencyBinCount);
+            this.sampleRate = 48000;
+            this.binWidth = this.sampleRate / (analyser.fftSize || 2048);
+            this.bands = [
+                {start:50,end:200},{start:200,end:400},{start:400,end:800},
+                {start:800,end:1500},{start:1500,end:2500},{start:2500,end:4000},{start:4000,end:8000}
+            ];
+            this.history = [];
+            this.historySize = 10;
+            this.viseme = 'sil';
+            this.visemeStartTime = 0;
+        }
+
+        _avg(arr) { return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0; }
+
+        _extractBands() {
+            this.analyser.getByteFrequencyData(this.dataArray);
+            return this.bands.map(({start,end}) => {
+                const lo = Math.round(start/this.binWidth);
+                const hi = Math.min(Math.round(end/this.binWidth), this.dataArray.length-1);
+                return this._avg(Array.from(this.dataArray.slice(lo,hi))) / 255;
+            });
+        }
+
+        process() {
+            const bands = this._extractBands();
+            const volume = this._avg(bands);
+
+            let sumW=0, sumWF=0;
+            for (let i=0; i<this.dataArray.length; i++) {
+                const v = this.dataArray[i]/255;
+                sumW += v;
+                sumWF += i * this.binWidth * v;
+            }
+            const centroid = sumW > 0 ? sumWF/sumW : 0;
+
+            const feat = { bands, volume, centroid };
+            this.history.push(feat);
+            if (this.history.length > this.historySize) this.history.shift();
+
+            const avg = this._getAvg();
+            const scores = this._score(feat, avg);
+            const adjusted = this._adjust(scores);
+
+            let best = 'sil', bestVal = -Infinity;
+            for (const [k,v] of Object.entries(adjusted)) {
+                if (v > bestVal) { bestVal = v; best = k; }
+            }
+            if (best !== this.viseme) this.visemeStartTime = performance.now();
+            this.viseme = best;
+            return best;
+        }
+
+        _getAvg() {
+            const n = this.history.length;
+            const avg = { volume:0, centroid:0, bands: Array(7).fill(0) };
+            for (const f of this.history) {
+                avg.volume += f.volume; avg.centroid += f.centroid;
+                f.bands.forEach((b,i) => avg.bands[i] += b);
+            }
+            avg.volume /= n; avg.centroid /= n;
+            avg.bands = avg.bands.map(b => b/n);
+            return avg;
+        }
+
+        _score(feat, avg) {
+            const s = {sil:0,PP:0,FF:0,TH:0,DD:0,kk:0,CH:0,SS:0,nn:0,RR:0,aa:0,E:0,I:0,O:0,U:0};
+            const [b0,b1,b2,b3,b4,b5,b6] = feat.bands;
+            const dv = feat.volume - avg.volume;
+            const dc = feat.centroid - avg.centroid;
+
+            if (avg.volume < 0.2 && feat.volume < 0.2) s.sil = 1;
+
+            const plosives = ['PP','DD','kk','nn'];
+            for (const p of plosives) {
+                if (dv < 0.01) s[p] -= 0.5;
+                if (avg.volume < 0.2) s[p] += 0.2;
+                if (dc > 1000) s[p] += 0.2;
+            }
+
+            if (feat.centroid > 1000 && feat.centroid < 8000) {
+                if (feat.centroid > 7000) s.DD += 0.6;
+                else if (feat.centroid > 5000) s.kk += 0.6;
+                else if (feat.centroid > 4000) { s.PP += 1; if (b6>0.25 && feat.centroid<6000) s.DD += 1.4; }
+                else s.nn += 0.6;
+            }
+
+            if (dc > 1000 && feat.centroid > 6000 && avg.centroid > 5000 && feat.bands[6] > 0.4 && avg.bands[6] > 0.3)
+                s.FF = 0.7;
+
+            if (avg.volume > 0.1 && avg.centroid < 6000 && feat.centroid < 6000) {
+                const [,ab1,ab2,ab3,,ab4] = avg.bands;
+                const d12 = Math.abs(ab1-ab2);
+                const spread = Math.max(Math.abs(ab2-ab3), Math.abs(ab2-ab3), Math.abs(ab2-ab3));
+                if (ab2 > 0.1 || ab3 > 0.1) {
+                    if (ab3 > ab2) { s.aa = 0.8; if (ab2 > ab1) s.aa += 0.2; }
+                    if (ab2 > ab1 && ab2 > ab3) s.I = 0.7;
+                    if (d12 < 0.25) s.U = 0.7;
+                    if (spread < 0.25) s.O = 0.9;
+                    if (ab1 > ab2 && ab2 > ab3) s.E = 1;
+                    if (ab2 < 0.2 && ab3 > 0.3) s.I = 0.7;
+                    if (ab2 > 0.25 && ab4 > 0.25) s.O = 0.7;
+                    if (ab2 < 0.15 && ab4 < 0.15) s.U = 0.7;
+                }
+            }
+            return s;
+        }
+
+        _adjust(scores) {
+            const out = {...scores};
+            if (this.viseme) {
+                const elapsed = performance.now() - this.visemeStartTime;
+                let mult = 1;
+                if (elapsed <= 100) mult = 1.3;
+                else if (elapsed <= 200) mult = 1.3 - 0.3 * ((elapsed-100)/100);
+                else mult = Math.max(0.5, 1 - (elapsed-200)/1000);
+                if (out[this.viseme] !== undefined) out[this.viseme] *= mult;
+            }
+            return out;
+        }
+    }
+
+    // ── Viseme image map ──
+    const VISEME_IMAGES = {};
+    ['sil','PP','FF','TH','DD','kk','CH','SS','nn','RR','aa','E','I','O','U'].forEach(v => {
+        VISEME_IMAGES[v] = `static/visemes/${v}.png`;
+        const img = new Image();
+        img.src = VISEME_IMAGES[v];
+    });
+
+    // ── DOM refs ──
+    const chickenImg = document.getElementById('chickenImg');
+    const micBtn = document.getElementById('micBtn');
+    const statusText = document.getElementById('statusText');
+    const menuContent = document.getElementById('menuContent');
+    const orderContent = document.getElementById('orderContent');
+    const orderTotals = document.getElementById('orderTotals');
+    const subtotalVal = document.getElementById('subtotalVal');
+    const taxVal = document.getElementById('taxVal');
+    const totalVal = document.getElementById('totalVal');
+    const checkoutBtn = document.getElementById('checkoutBtn');
+    const checkoutTotal = document.getElementById('checkoutTotal');
+    const orderPlacedArea = document.getElementById('orderPlacedArea');
+    const transcriptArea = document.getElementById('transcriptArea');
+    const showTranscriptToggle = document.getElementById('showTranscript');
+    showTranscriptToggle.addEventListener('change', () => {
+        transcriptArea.style.display = showTranscriptToggle.checked ? '' : 'none';
+    });
+    const waveformEl = document.getElementById('waveform');
+
+    // Create waveform bars
+    const NUM_BARS = 32;
+    const bars = [];
+    for (let i = 0; i < NUM_BARS; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+        waveformEl.appendChild(bar);
+        bars.push(bar);
+    }
+
+    // ── Voice options per language ──
+    const VOICE_OPTIONS = {
+        fr: [
+            { id: '8IWnaR9UcTNGRihW', name: 'Claire' },
+            { id: 'biPZlD1tJvi7Ixhq', name: 'Juliette' },
+            { id: 'cc9VTN6fVa4s37K0', name: 'Antoine' },
+            { id: 'HvE1EoQDBLHnT7wd', name: 'Margaux' },
+            { id: 'zIGaffB0kKEBG_8u', name: 'Théo' },
+        ],
+    };
+
+    const voiceSelect = document.getElementById('voiceSelect');
+    const voiceSelectContainer = document.getElementById('voiceSelectContainer');
+    const echoCancellationToggle = document.getElementById('echoCancellation');
+
+    function updateVoiceDropdown(lang) {
+        const options = VOICE_OPTIONS[lang];
+        if (options && options.length) {
+            voiceSelect.innerHTML = '';
+            // Add default (server-side) option
+            const defOpt = document.createElement('option');
+            defOpt.value = '';
+            defOpt.textContent = 'Default';
+            voiceSelect.appendChild(defOpt);
+            for (const v of options) {
+                const opt = document.createElement('option');
+                opt.value = v.id;
+                opt.textContent = v.name;
+                voiceSelect.appendChild(opt);
+            }
+            voiceSelectContainer.style.display = '';
+        } else {
+            voiceSelectContainer.style.display = 'none';
+        }
+    }
+
+    // ── Language selector ──
+    let selectedLang = 'en';
+    const langSelector = document.getElementById('langSelector');
+    const UI_STRINGS = {
+        en: { orderPlaced: 'ORDER PLACED!', thankYou: 'Thank you, {name}!', readySoon: 'Your order will be ready soon! Total: ${total}', subtotal: 'Subtotal', tax: 'Tax', total: 'Total', orderEmpty: 'Your order is empty', menuEmpty: 'Ask to see the menu to get started!', tapToStart: 'Tap to start', connecting: 'Connecting...', listening: 'Listening...', failed: 'Failed — tap to retry', options: 'Options', qty: 'x1', you: 'You', currency: '$' },
+        fr: { orderPlaced: 'COMMANDE PASSÉE !', thankYou: 'Merci, {name} !', readySoon: 'Votre commande sera prête bientôt ! Total : {total}€', subtotal: 'Sous-total', tax: 'Taxe', total: 'Total', orderEmpty: 'Votre commande est vide', menuEmpty: 'Demandez à voir le menu pour commencer !', tapToStart: 'Appuyez pour commencer', connecting: 'Connexion...', listening: 'Écoute en cours...', failed: 'Échec — réessayez', options: 'Options', qty: 'x1', you: 'Vous', currency: '€' },
+        de: { orderPlaced: 'BESTELLUNG AUFGEGEBEN!', thankYou: 'Danke, {name}!', readySoon: 'Ihre Bestellung ist bald fertig! Gesamt: {total}€', subtotal: 'Zwischensumme', tax: 'Steuer', total: 'Gesamt', orderEmpty: 'Ihre Bestellung ist leer', menuEmpty: 'Fragen Sie nach der Speisekarte!', tapToStart: 'Tippen zum Starten', connecting: 'Verbindung wird hergestellt...', listening: 'Zuhören...', failed: 'Fehlgeschlagen — erneut versuchen', options: 'Optionen', qty: 'x1', you: 'Du', currency: '€' },
+        es: { orderPlaced: '¡PEDIDO REALIZADO!', thankYou: '¡Gracias, {name}!', readySoon: '¡Su pedido estará listo pronto! Total: ${total}', subtotal: 'Subtotal', tax: 'Impuesto', total: 'Total', orderEmpty: 'Su pedido está vacío', menuEmpty: '¡Pida ver el menú para empezar!', tapToStart: 'Toque para comenzar', connecting: 'Conectando...', listening: 'Escuchando...', failed: 'Error — toque para reintentar', options: 'Opciones', qty: 'x1', you: 'Tú', currency: '$' },
+        pt: { orderPlaced: 'PEDIDO FEITO!', thankYou: 'Obrigado, {name}!', readySoon: 'Seu pedido ficará pronto em breve! Total: ${total}', subtotal: 'Subtotal', tax: 'Imposto', total: 'Total', orderEmpty: 'Seu pedido está vazio', menuEmpty: 'Peça para ver o cardápio para começar!', tapToStart: 'Toque para começar', connecting: 'Conectando...', listening: 'Ouvindo...', failed: 'Erro — toque para tentar novamente', options: 'Opções', qty: 'x1', you: 'Você', currency: '$' },
+    };
+    function t(key) { return (UI_STRINGS[selectedLang] || UI_STRINGS.en)[key] || UI_STRINGS.en[key]; }
+    function fmtPrice(amount) { const c = t('currency'); return c === '€' ? amount.toFixed(2) + '€' : '$' + amount.toFixed(2); }
+
+    function updateUILanguage() {
+        // Update static UI text to match selected language
+        const menuEmpty = document.getElementById('menuEmpty');
+        if (menuEmpty) menuEmpty.textContent = t('menuEmpty');
+        if (!isRunning) statusText.textContent = t('tapToStart');
+        // Update order empty state if visible
+        const orderEmpty = orderContent.querySelector('.order-empty');
+        if (orderEmpty) orderEmpty.textContent = t('orderEmpty');
+    }
+
+    langSelector.addEventListener('click', (e) => {
+        const btn = e.target.closest('.lang-btn');
+        if (!btn) return;
+        langSelector.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        selectedLang = btn.dataset.lang;
+        updateUILanguage();
+        updateVoiceDropdown(selectedLang);
+    });
+
+    // ── Speed slider ──
+    let voiceSpeed = 1.0;
+    const speedSlider = document.getElementById('speedSlider');
+    const speedValue = document.getElementById('speedValue');
+
+    speedSlider.addEventListener('input', () => {
+        voiceSpeed = parseFloat(speedSlider.value);
+        speedValue.textContent = voiceSpeed.toFixed(1) + 'x';
+    });
+
+    speedSlider.addEventListener('change', () => {
+        voiceSpeed = parseFloat(speedSlider.value);
+        speedValue.textContent = voiceSpeed.toFixed(1) + 'x';
+        // Send config update mid-session if connected
+        if (isRunning && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'config', speed: voiceSpeed }));
+        }
+    });
+
+    // ── State ──
+    let ws = null;
+    let player = null;
+    let isRunning = false;
+    let lipsync = null;
+    let rafId = null;
+    let turnBubbles = {};
+    let userBubble = null;
+    let hadAssistantBubble = false;
+
+    // ── Animation loop ──
+    function animationLoop() {
+        if (!lipsync) { rafId = requestAnimationFrame(animationLoop); return; }
+
+        const viseme = lipsync.process();
+        const src = VISEME_IMAGES[viseme];
+        if (chickenImg.src !== src) chickenImg.src = src;
+
+        const analyser = lipsync.analyser;
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(data);
+        const step = Math.floor(data.length / NUM_BARS);
+        for (let i = 0; i < NUM_BARS; i++) {
+            const val = data[i * step] / 255;
+            bars[i].style.height = Math.max(3, val * 24) + 'px';
+        }
+
+        rafId = requestAnimationFrame(animationLoop);
+    }
+
+    // ── Session ──
+    async function toggleSession() {
+        if (isRunning) { stopSession(); return; }
+
+        micBtn.disabled = true;
+        statusText.textContent = t('connecting');
+
+        try {
+            player = new SyncedAudioPlayer({
+                basePath: 'static/js',
+                sampleRate: 24000,
+                pcmOutput: window.__pcmOutput || false,
+                echoCancellation: echoCancellationToggle.checked,
+                onEncodedAudio: (opusData) => {
+                    if (isRunning && ws && ws.readyState === WebSocket.OPEN) ws.send(opusData);
+                },
+                onText: handleText,
+                onEvent: (eventType, msg) => handleMessage(msg),
+                onError: (err) => console.error('Player error:', err),
+            });
+            await player.start();
+
+            const analyser = player.audioProcessor && player.audioProcessor.outputAnalyser;
+            if (analyser) {
+                lipsync = new ChickenLipsync(analyser);
+                rafId = requestAnimationFrame(animationLoop);
+            }
+
+            const _bp = window.location.pathname.replace(/\/$/, ""); const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${_bp}/ws/order`;
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                transcriptArea.innerHTML = '';
+                isRunning = true;
+                const startMsg = { type: 'start', language: selectedLang, speed: voiceSpeed };
+                const selectedVoice = voiceSelect.value;
+                if (selectedVoice) startMsg.voice_id = selectedVoice;
+                ws.send(JSON.stringify(startMsg));
+                micBtn.disabled = false;
+                micBtn.classList.add('active');
+                statusText.textContent = t('listening');
+            };
+            ws.onmessage = (ev) => player.handleMessage(ev.data);
+            ws.onclose = () => stopSession();
+            ws.onerror = () => stopSession();
+        } catch (err) {
+            console.error('Failed to start:', err);
+            micBtn.disabled = false;
+            statusText.textContent = t('failed');
+        }
+    }
+
+    function stopSession() {
+        isRunning = false;
+        micBtn.classList.remove('active');
+        micBtn.disabled = false;
+        statusText.textContent = t('tapToStart');
+
+        if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+        lipsync = null;
+        chickenImg.src = VISEME_IMAGES['sil'];
+        bars.forEach(b => b.style.height = '3px');
+
+        if (ws) {
+            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }));
+            ws.close(); ws = null;
+        }
+        if (player) { player.stop(); player = null; }
+        turnBubbles = {}; userBubble = null; hadAssistantBubble = false;
+    }
+
+    micBtn.addEventListener('click', toggleSession);
+
+    // ── Message handlers ──
+    function handleMessage(data) {
+        if (data.type === 'menu_display') displayMenu(data);
+        else if (data.type === 'order_updated') displayOrder(data);
+        else if (data.type === 'order_placed') displayOrderPlaced(data);
+    }
+
+    function displayMenu(data) {
+        menuContent.innerHTML = '';
+        for (const section of data.menu) {
+            const cat = document.createElement('div');
+            cat.className = 'menu-category';
+
+            const title = document.createElement('div');
+            title.className = 'category-title';
+            title.textContent = section.category;
+            cat.appendChild(title);
+
+            for (const item of section.items) {
+                const el = document.createElement('div');
+                el.className = 'menu-item';
+
+                const hdr = document.createElement('div');
+                hdr.className = 'item-header';
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'item-name';
+                nameSpan.textContent = item.name;
+                const priceSpan = document.createElement('span');
+                priceSpan.className = 'item-price';
+                priceSpan.textContent = fmtPrice(item.price);
+                hdr.appendChild(nameSpan);
+                hdr.appendChild(priceSpan);
+                el.appendChild(hdr);
+
+                if (item.description) {
+                    const desc = document.createElement('div');
+                    desc.className = 'item-description';
+                    desc.textContent = item.description;
+                    el.appendChild(desc);
+                }
+
+                if (item.options && Object.keys(item.options).length) {
+                    const opts = document.createElement('div');
+                    opts.className = 'item-options';
+                    opts.textContent = t('options') + ': ' + Object.entries(item.options)
+                        .map(([k,v]) => `${k}: ${v.join(', ')}`)
+                        .join(' | ');
+                    el.appendChild(opts);
+                }
+                cat.appendChild(el);
+            }
+            menuContent.appendChild(cat);
+        }
+    }
+
+    function displayOrder(data) {
+        if (!data.items || !data.items.length) {
+            orderContent.innerHTML = '<div class="order-empty">' + t('orderEmpty') + '</div>';
+            orderTotals.style.display = 'none';
+            checkoutBtn.style.display = 'none';
+            return;
+        }
+
+        orderContent.innerHTML = '';
+        for (const item of data.items) {
+            const el = document.createElement('div');
+            el.className = 'order-item';
+
+            const hdr = document.createElement('div');
+            hdr.className = 'order-item-header';
+            const leftSpan = document.createElement('span');
+            const oName = document.createElement('span');
+            oName.className = 'order-item-name';
+            oName.textContent = item.name;
+            const oQty = document.createElement('span');
+            oQty.className = 'order-item-qty';
+            oQty.textContent = 'x1';
+            leftSpan.appendChild(oName);
+            leftSpan.appendChild(oQty);
+            const oPrice = document.createElement('span');
+            oPrice.className = 'order-item-price';
+            oPrice.textContent = fmtPrice(item.price);
+            hdr.appendChild(leftSpan);
+            hdr.appendChild(oPrice);
+            el.appendChild(hdr);
+
+            if (item.customizations && Object.keys(item.customizations).length) {
+                const cust = document.createElement('ul');
+                cust.className = 'order-item-custom';
+                for (const [k,v] of Object.entries(item.customizations)) {
+                    const vals = Array.isArray(v) ? v : [v];
+                    for (const val of vals) {
+                        const li = document.createElement('li');
+                        li.textContent = val;
+                        cust.appendChild(li);
+                    }
+                }
+                el.appendChild(cust);
+            }
+            orderContent.appendChild(el);
+        }
+
+        const subtotal = data.total;
+        const tax = Math.round(subtotal * 0.07 * 100) / 100;
+        const total = subtotal + tax;
+
+        document.querySelector('#orderTotals .row:nth-child(1) span:first-child').textContent = t('subtotal');
+        document.querySelector('#orderTotals .row:nth-child(2) span:first-child').textContent = t('tax');
+        document.querySelector('#orderTotals .row.total span:first-child').textContent = t('total');
+        subtotalVal.textContent = fmtPrice(subtotal);
+        taxVal.textContent = fmtPrice(tax);
+        totalVal.textContent = fmtPrice(total);
+        orderTotals.style.display = 'block';
+
+        checkoutTotal.textContent = `${t('total')}: ${fmtPrice(total)}`;
+        checkoutBtn.style.display = 'block';
+    }
+
+    function displayOrderPlaced(data) {
+        const total = (data.total + Math.round(data.total * 0.07 * 100) / 100).toFixed(2);
+        orderPlacedArea.innerHTML = '';
+        const msg = document.createElement('div');
+        msg.className = 'order-placed-msg';
+        const h3 = document.createElement('h3');
+        h3.textContent = t('orderPlaced');
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'name';
+        nameDiv.textContent = t('thankYou').replace('{name}', data.customer_name);
+        const detailsDiv = document.createElement('div');
+        detailsDiv.className = 'details';
+        detailsDiv.textContent = t('readySoon').replace('{total}', total);
+        msg.appendChild(h3);
+        msg.appendChild(nameDiv);
+        msg.appendChild(detailsDiv);
+        orderPlacedArea.appendChild(msg);
+    }
+
+    // ── Transcript ──
+    function getBubble(turnIdx, isUser) {
+        if (isUser) {
+            if (userBubble && !hadAssistantBubble) return userBubble;
+            hadAssistantBubble = false;
+            userBubble = document.createElement('div');
+            userBubble.className = 'msg user';
+            userBubble.innerHTML = '<div class="label">' + t('you') + '</div><div class="text"></div>';
+            transcriptArea.appendChild(userBubble);
+            return userBubble;
+        }
+        let bubble = turnBubbles[turnIdx];
+        if (!bubble) {
+            hadAssistantBubble = true;
+            bubble = document.createElement('div');
+            bubble.className = 'msg agent';
+            bubble.innerHTML = '<div class="label">Agent</div><div class="text"></div>';
+            transcriptArea.appendChild(bubble);
+            turnBubbles[turnIdx] = bubble;
+
+            while (transcriptArea.children.length > 60) {
+                const removed = transcriptArea.removeChild(transcriptArea.firstChild);
+                for (const k in turnBubbles) { if (turnBubbles[k] === removed) delete turnBubbles[k]; }
+                if (userBubble === removed) userBubble = null;
+            }
+        }
+        return bubble;
+    }
+
+    function handleText({ text, turnIdx, isUser }) {
+        if (transcriptArea.querySelector('.placeholder')) transcriptArea.innerHTML = '';
+        const bubble = getBubble(turnIdx, isUser);
+        const textEl = bubble.querySelector('.text');
+        if (textEl) textEl.textContent += text + ' ';
+        transcriptArea.scrollTop = transcriptArea.scrollHeight;
+    }
+    </script>
+</body>
+</html>

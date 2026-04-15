@@ -1,0 +1,1186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="static/favicon.png">
+    <title>Gradbot Booking</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --page-bg: #f7f5f2;
+            --surface: #fbfaf8;
+            --border: #b9b7b2;
+            --border-strong: #8f8a82;
+            --text: #161514;
+            --muted: #66615a;
+            --stage: #050505;
+            --track: #d7d420;
+            --chip: #efeeeb;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            min-height: 100vh;
+            background: var(--page-bg);
+            color: var(--text);
+            font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        }
+
+        button, input, select { font: inherit; }
+        button { cursor: pointer; }
+
+        /* ── Page shell ── */
+        .page { max-width: 1320px; margin: 0 auto; padding: 0 28px 28px; }
+
+        header {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            padding: 16px 0;
+        }
+
+        .brand { display: flex; align-items: center; gap: 10px; }
+        .brand-title { font-size: 20px; font-weight: 700; color: var(--text); }
+
+        .nav { display: flex; gap: 28px; margin-left: auto; }
+        .nav a {
+            text-decoration: none;
+            color: var(--muted);
+            font-size: 15px;
+            font-weight: 500;
+            transition: color .15s;
+        }
+        .nav a:hover { color: var(--text); }
+
+        .profile-avatar {
+            width: 44px; height: 44px;
+            border-radius: 50%;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        /* ── Main layout: sidebar + workspace ── */
+        .main-layout {
+            display: grid;
+            grid-template-columns: 220px minmax(0, 1fr);
+            gap: 24px;
+        }
+
+        @media (max-width: 900px) {
+            .main-layout { grid-template-columns: 1fr; }
+            .filters { display: none; }
+            .nav { display: none; }
+            .profile-avatar { display: none; }
+            .page { padding: 0 12px 12px; }
+        }
+
+        /* ── Sidebar filters ── */
+        .filters {
+            padding-top: 8px;
+        }
+
+        .filters-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 20px;
+        }
+
+        .filter-group { margin-bottom: 20px; }
+
+        .filter-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+
+        .filter-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            background: var(--surface);
+            font-size: 14px;
+            color: var(--text);
+            outline: none;
+        }
+        .filter-input:focus { border-color: var(--border-strong); }
+        .filter-input::placeholder { color: var(--border); }
+
+        .filter-display {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            background: var(--surface);
+            font-size: 14px;
+            color: var(--text);
+        }
+        .filter-display-left { display: flex; align-items: center; gap: 8px; }
+
+        .traveler-stepper {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            background: var(--surface);
+        }
+        .traveler-stepper button {
+            width: 38px; height: 38px;
+            border: none;
+            background: transparent;
+            font-size: 18px;
+            color: var(--muted);
+        }
+        .traveler-stepper button:hover { background: var(--chip); }
+        .traveler-value {
+            flex: 1;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .budget-slider-wrap { padding: 4px 0; }
+        .budget-slider {
+            width: 100%;
+            accent-color: var(--track);
+            cursor: pointer;
+        }
+        .budget-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 2px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        /* ── Workspace ── */
+        .workspace { min-width: 0; }
+
+        .stage-frame {
+            border-radius: 16px;
+            background: url('./static/bg.png') center / cover no-repeat, var(--stage);
+            min-height: 600px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        /* Summary bar - only shown in idle state */
+        .workspace-summary {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            padding: 20px 24px 16px;
+            background:
+                linear-gradient(180deg, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.15), transparent);
+            position: relative;
+            z-index: 2;
+            flex-shrink: 0;
+        }
+
+        .stage-frame.in-call .workspace-summary { display: none; }
+
+        .summary-kicker {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: rgba(255, 255, 255, 0.5);
+            margin-bottom: 2px;
+        }
+
+        .summary-text {
+            font-size: 16px;
+            font-weight: 600;
+            color: #f5f2ec;
+            max-width: 50ch;
+        }
+
+        /* Idle state: full background visible with centered text */
+        .stage-idle {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 2rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .idle-title {
+            font-size: 28px;
+            font-weight: 650;
+            color: #f5f2ec;
+            margin-bottom: 8px;
+            text-shadow: 0 2px 20px rgba(0,0,0,0.5);
+        }
+
+        .idle-body {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.7);
+            max-width: 42ch;
+            margin: 0 auto;
+            line-height: 1.5;
+            text-shadow: 0 1px 10px rgba(0,0,0,0.5);
+        }
+
+        /* In-call: frosted overlay + two panels */
+        .stage-frame.in-call::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: rgba(5, 5, 5, 0.88);
+            backdrop-filter: blur(32px);
+            -webkit-backdrop-filter: blur(32px);
+            z-index: 0;
+        }
+        .stage-frame.in-call > * {
+            position: relative;
+            z-index: 1;
+        }
+
+        .stage-panels {
+            display: none;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            flex: 1;
+            padding: 0 16px 16px;
+            min-height: 0;
+        }
+
+        .stage-frame.in-call .stage-idle { display: none; }
+        .stage-frame.in-call .stage-panels { display: grid; }
+
+        @media (max-width: 768px) {
+            .stage-panels { grid-template-columns: 1fr; }
+        }
+
+        .stage-panel {
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            padding: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            max-height: 520px;
+        }
+
+        .panel-header {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.5);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+
+        .panel-scroll {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        .panel-empty {
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255, 255, 255, 0.25);
+            font-size: 14px;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        /* ── Search results cards ── */
+        .searching {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 2rem;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 13px;
+        }
+
+        .spinner {
+            width: 28px; height: 28px;
+            border: 2.5px solid rgba(255, 255, 255, 0.1);
+            border-top-color: rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .query-header {
+            margin-bottom: 10px;
+            padding: 8px 10px;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 8px;
+        }
+        .query-label {
+            font-size: 9px;
+            color: rgba(255, 255, 255, 0.35);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 2px;
+        }
+        .query-text {
+            font-size: 13px;
+            color: #f5f2ec;
+            font-weight: 600;
+        }
+
+        .result-card {
+            display: block;
+            text-decoration: none;
+            color: inherit;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            transition: border-color .15s;
+        }
+        .result-card:hover { border-color: rgba(255, 255, 255, 0.18); }
+
+        .result-card-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #e8e4dd;
+            margin-bottom: 2px;
+        }
+        .result-card-url {
+            font-size: 11px;
+            color: rgba(215, 212, 32, 0.7);
+            margin-bottom: 4px;
+        }
+        .result-card-body {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.45);
+            line-height: 1.45;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        /* ── Result card image ── */
+        .result-card-img {
+            border-radius: 6px;
+            overflow: hidden;
+            margin-bottom: 8px;
+            max-height: 140px;
+        }
+
+        .result-card-img img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        /* ── Booking confirmed ── */
+        .booking-card {
+            background: rgba(74, 222, 128, 0.08);
+            border: 1px solid rgba(74, 222, 128, 0.25);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+        }
+        .booking-card h3 {
+            color: #4ade80;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+        .booking-detail {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            font-size: 13px;
+        }
+        .booking-detail .label { color: rgba(255, 255, 255, 0.4); }
+        .booking-detail .value { font-weight: 600; color: #f5f2ec; }
+        .confirmation-number {
+            font-size: 22px;
+            font-weight: bold;
+            color: rgba(215, 212, 32, 0.9);
+            margin-top: 10px;
+            letter-spacing: 2px;
+        }
+
+        /* ── Transcript ── */
+        .transcript-entry {
+            margin-bottom: 8px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            max-width: 90%;
+            font-size: 13px;
+            line-height: 1.45;
+            color: #f5f2ec;
+        }
+        .transcript-entry.user {
+            background: rgba(100, 181, 246, 0.12);
+            margin-left: auto;
+            text-align: right;
+            border: 1px solid rgba(100, 181, 246, 0.15);
+        }
+        .transcript-entry.assistant {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .transcript-entry.system {
+            background: rgba(215, 212, 32, 0.06);
+            border: 1px solid rgba(215, 212, 32, 0.1);
+            max-width: 100%;
+            text-align: center;
+            font-size: 12px;
+            color: rgba(215, 212, 32, 0.7);
+            font-style: italic;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .system-spinner {
+            width: 12px; height: 12px;
+            border: 2px solid rgba(215, 212, 32, 0.15);
+            border-top-color: rgba(215, 212, 32, 0.6);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+
+        .transcript-speaker {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.35);
+            margin-bottom: 2px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* ── Call dock ── */
+        .call-dock {
+            margin-top: 16px;
+            border-radius: 16px;
+            background: rgba(17, 17, 17, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: #f3f1ec;
+            padding: 10px 16px;
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            align-items: center;
+            gap: 16px;
+        }
+
+        @media (max-width: 768px) {
+            .call-dock {
+                grid-template-columns: 1fr;
+                gap: 10px;
+                justify-items: center;
+                padding: 10px 12px;
+            }
+            .dock-settings { justify-self: center; }
+            .dock-cluster { flex-wrap: wrap; justify-content: center; }
+        }
+
+        .dock-cluster {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            min-width: 0;
+        }
+
+        .recording-indicator {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #4ade80;
+            white-space: nowrap;
+        }
+        .recording-indicator.active { display: flex; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .recording-dot {
+            width: 8px; height: 8px;
+            background: #4ade80;
+            border-radius: 50%;
+            animation: pulse 1.2s infinite;
+        }
+
+        .dock-select {
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.06);
+            color: #f3f1ec;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .lang-selector {
+            display: flex;
+            gap: 4px;
+        }
+
+        .lang-btn {
+            padding: 4px 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.04);
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: all .15s;
+        }
+
+        .lang-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #f3f1ec;
+        }
+
+        .lang-btn.selected {
+            background: var(--track);
+            color: #1a1a1a;
+            border-color: var(--track);
+        }
+
+        .dock-settings {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            justify-self: end;
+        }
+
+        .setting-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 34px; height: 18px;
+        }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.12);
+            transition: .2s;
+            border-radius: 18px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 14px; width: 14px;
+            left: 2px; bottom: 2px;
+            background: white;
+            transition: .2s;
+            border-radius: 50%;
+        }
+        .toggle-switch input:checked + .toggle-slider { background: var(--track); }
+        .toggle-switch input:checked + .toggle-slider:before { transform: translateX(16px); }
+
+        .dock-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn {
+            padding: 8px 24px;
+            border: none;
+            border-radius: 999px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all .2s;
+        }
+        .btn-primary {
+            background: var(--track);
+            color: #1a1a1a;
+        }
+        .btn-primary:hover { filter: brightness(1.1); }
+        .btn-secondary {
+            background: rgba(244, 67, 54, 0.15);
+            color: #f65d4e;
+            border: 1px solid rgba(244, 67, 54, 0.25);
+        }
+        .btn-secondary:hover { background: rgba(244, 67, 54, 0.25); }
+
+        .status {
+            text-align: center;
+            padding: 6px;
+            font-size: 13px;
+            border-radius: 8px;
+            margin-top: 12px;
+        }
+        .status.connecting { background: rgba(255, 193, 7, 0.1); color: #d4a017; }
+        .status.connected { background: rgba(76, 175, 80, 0.1); color: #4caf50; }
+        .status.disconnected { background: rgba(244, 67, 54, 0.1); color: #e53935; }
+        .status.idle { color: var(--muted); }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <header>
+            <div class="brand">
+                <svg width="36" height="36" viewBox="0 0 84 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M8 21.5L42 8L76 21.5L42 35L8 21.5Z" fill="#E1E119" stroke="#2A2925" stroke-width="2.4" stroke-linejoin="round"/>
+                    <path d="M16 24.5V31.5C16 39.232 27.64 45.5 42 45.5C56.36 45.5 68 39.232 68 31.5V24.5" stroke="#2A2925" stroke-width="2.4" stroke-linecap="round"/>
+                    <path d="M14.5 24V40.5" stroke="#2A2925" stroke-width="2.4" stroke-linecap="round"/>
+                    <circle cx="14.5" cy="43.5" r="3.2" fill="#2A2925"/>
+                </svg>
+                <div class="brand-title">Gradbot Booking</div>
+            </div>
+
+            <nav class="nav">
+                <a href="#">Explore</a>
+                <a href="#">Booking</a>
+                <a href="#">Rewards</a>
+                <a href="#">Support</a>
+            </nav>
+
+            <div class="profile-avatar">
+                <svg viewBox="0 0 44 44" width="44" height="44"><rect width="44" height="44" rx="22" fill="#ECE8E1"/><circle cx="22" cy="17" r="9" fill="#7E4D3C"/><path d="M12 41C13.6 32.4 17.94 28.1 22 28.1C26.06 28.1 30.4 32.4 32 41" fill="#C9D6E0"/></svg>
+            </div>
+        </header>
+
+        <main class="main-layout">
+            <aside class="filters">
+                <h1 class="filters-title">Search Filters</h1>
+
+                <div class="filter-group">
+                    <label class="filter-label" for="destinationFilter">Destination</label>
+                    <input class="filter-input" id="destinationFilter" type="text" placeholder="e.g., London">
+                </div>
+
+                <div class="filter-group">
+                    <label class="filter-label" for="checkInDate">Check-in</label>
+                    <input class="filter-input" id="checkInDate" type="date">
+                </div>
+
+                <div class="filter-group">
+                    <label class="filter-label" for="checkOutDate">Check-out</label>
+                    <input class="filter-input" id="checkOutDate" type="date">
+                </div>
+
+                <div class="filter-group">
+                    <label class="filter-label">Travelers</label>
+                    <div class="traveler-stepper">
+                        <button id="travelerMinus" type="button">&#8722;</button>
+                        <span class="traveler-value" id="travelerCount">2 Adults</span>
+                        <button id="travelerPlus" type="button">+</button>
+                    </div>
+                </div>
+
+                <div class="filter-group">
+                    <label class="filter-label">Budget</label>
+                    <div class="budget-slider-wrap">
+                        <input class="budget-slider" id="budgetFilter" type="range" min="0" max="5000" step="100" value="5000">
+                    </div>
+                    <div class="budget-labels">
+                        <span>0</span>
+                        <span id="budgetLabel">0 - 5000+</span>
+                    </div>
+                </div>
+            </aside>
+
+            <section class="workspace">
+                <div class="stage-frame" id="stageFrame">
+                    <div class="workspace-summary">
+                        <div>
+                            <div class="summary-kicker" id="summaryKicker">Hotel booking assistant</div>
+                            <div class="summary-text" id="summaryText">Tell Sophie where you'd like to travel.</div>
+                        </div>
+                    </div>
+
+                    <div class="stage-idle" id="stageIdle">
+                        <div>
+                            <div class="idle-title">Ready when you are.</div>
+                            <div class="idle-body">Search results and booking details will appear here once Sophie starts looking.</div>
+                        </div>
+                    </div>
+
+                    <div class="stage-panels">
+                        <div class="stage-panel">
+                            <div class="panel-header" id="searchResultsHeader">Search Results</div>
+                            <div class="panel-scroll" id="hotelContent">
+                                <div class="panel-empty">Waiting for search...</div>
+                            </div>
+                        </div>
+
+                        <div class="stage-panel">
+                            <div class="panel-header" id="conversationHeader">Conversation</div>
+                            <div class="panel-scroll" id="transcript"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="call-dock">
+                    <div class="dock-cluster">
+                        <div class="recording-indicator" id="recordingIndicator">
+                            <span class="recording-dot"></span>
+                            <span id="listeningLabel">Listening</span>
+                        </div>
+
+                        <select class="dock-select" id="agentSelect">
+                            <option value="Sophie" selected>Sophie</option>
+                            <option value="Sydney">Sydney</option>
+                            <option value="Colin">Colin</option>
+                            <option value="Claire">Claire</option>
+                            <option value="Juliette">Juliette</option>
+                            <option value="Antoine">Antoine</option>
+                            <option value="Margaux">Margaux</option>
+                            <option value="Theo">Théo</option>
+                        </select>
+
+                        <div class="lang-selector" id="langSelector">
+                            <button class="lang-btn selected" data-lang="en">EN</button>
+                            <button class="lang-btn" data-lang="fr">FR</button>
+                            <button class="lang-btn" data-lang="es">ES</button>
+                            <button class="lang-btn" data-lang="de">DE</button>
+                            <button class="lang-btn" data-lang="pt">PT</button>
+                        </div>
+                    </div>
+
+                    <div class="dock-settings">
+                        <div class="setting-item">
+                            <span>Echo</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="echoCancellation" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="setting-item">
+                            <span>Speed</span>
+                            <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.1" value="1.0"
+                                style="width: 60px; accent-color: var(--track); cursor: pointer;">
+                            <span id="speedValue" style="min-width: 2.2em; text-align: center;">1.0x</span>
+                        </div>
+                    </div>
+
+                    <div class="dock-actions">
+                        <button class="btn btn-primary" id="startBtn" type="button">Call Sophie</button>
+                        <button class="btn btn-secondary" id="stopBtn" type="button" style="display: none;">Hang Up</button>
+                    </div>
+                </div>
+
+                <div class="status idle" id="status">Click "Call Sophie" to start your reservation</div>
+            </section>
+        </main>
+    </div>
+
+    <script src="./static/js/opus-encoder.js"></script>
+    <script src="./static/js/audio-processor.js"></script>
+    <script src="./static/js/synced-audio-player.js"></script>
+    <script>fetch("./api/audio-config").then(r=>r.json()).then(c=>{window.__pcmOutput=c.pcm})</script>
+
+    <script>
+        let ws = null;
+        let player = null;
+        let isRecording = false;
+        let turnBubbles = {};
+        let userBubble = null;
+        let hadAssistantBubble = false;
+
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const status = document.getElementById('status');
+        const transcript = document.getElementById('transcript');
+        const hotelContent = document.getElementById('hotelContent');
+        const stageFrame = document.getElementById('stageFrame');
+        const recordingIndicator = document.getElementById('recordingIndicator');
+        const echoCancellationToggle = document.getElementById('echoCancellation');
+        const speedSlider = document.getElementById('speedSlider');
+        const speedValue = document.getElementById('speedValue');
+        const agentSelect = document.getElementById('agentSelect');
+        const langSelector = document.getElementById('langSelector');
+        const travelerMinus = document.getElementById('travelerMinus');
+        const travelerPlus = document.getElementById('travelerPlus');
+        const travelerCount = document.getElementById('travelerCount');
+        const summaryKicker = document.getElementById('summaryKicker');
+        const summaryText = document.getElementById('summaryText');
+        const destinationFilter = document.getElementById('destinationFilter');
+        const checkInDate = document.getElementById('checkInDate');
+        const checkOutDate = document.getElementById('checkOutDate');
+        const budgetFilter = document.getElementById('budgetFilter');
+        const budgetLabel = document.getElementById('budgetLabel');
+
+        let travelers = 2;
+
+        // Set default dates: check-in = tomorrow, check-out = +3 days
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const checkout = new Date(tomorrow);
+        checkout.setDate(checkout.getDate() + 3);
+        checkInDate.value = tomorrow.toISOString().split('T')[0];
+        checkOutDate.value = checkout.toISOString().split('T')[0];
+
+        let selectedLang = 'en';
+
+        const UI_STRINGS = {
+            en: { searchResults: 'Search Results', conversation: 'Conversation', waitingForSearch: 'Waiting for search...', listening: 'Listening', noResults: 'No results found', connecting: 'Connecting...', connected: 'Connected - Speak to {name}', callEnded: 'Call ended', connError: 'Connection error', connFailed: 'Connection failed', micDenied: 'Microphone access denied', clickToStart: 'Click "Call {name}" to start your reservation', tellTravel: 'Tell {name} where you\'d like to travel and she\'ll find the perfect hotel for you', assistant: 'Hotel booking assistant', tellTravelShort: 'Tell {name} where you\'d like to travel.', searchQuery: 'Search query' },
+            fr: { searchResults: 'Résultats de recherche', conversation: 'Conversation', waitingForSearch: 'En attente de recherche...', listening: 'Écoute', noResults: 'Aucun résultat trouvé', connecting: 'Connexion...', connected: 'Connecté - Parlez à {name}', callEnded: 'Appel terminé', connError: 'Erreur de connexion', connFailed: 'Échec de connexion', micDenied: 'Accès au micro refusé', clickToStart: 'Cliquez sur "Appeler {name}" pour commencer', tellTravel: 'Dites à {name} où vous aimeriez voyager et elle trouvera l\'hôtel idéal pour vous', assistant: 'Assistante de réservation', tellTravelShort: 'Dites à {name} où vous aimeriez voyager.', searchQuery: 'Recherche' },
+            es: { searchResults: 'Resultados de búsqueda', conversation: 'Conversación', waitingForSearch: 'Esperando búsqueda...', listening: 'Escuchando', noResults: 'No se encontraron resultados', connecting: 'Conectando...', connected: 'Conectado - Hable con {name}', callEnded: 'Llamada terminada', connError: 'Error de conexión', connFailed: 'Conexión fallida', micDenied: 'Acceso al micrófono denegado', clickToStart: 'Haga clic en "Llamar a {name}" para comenzar', tellTravel: 'Dígale a {name} a dónde le gustaría viajar y ella encontrará el hotel perfecto', assistant: 'Asistente de reservas', tellTravelShort: 'Dígale a {name} a dónde le gustaría viajar.', searchQuery: 'Consulta de búsqueda' },
+            de: { searchResults: 'Suchergebnisse', conversation: 'Gespräch', waitingForSearch: 'Warte auf Suche...', listening: 'Zuhören', noResults: 'Keine Ergebnisse gefunden', connecting: 'Verbindung wird hergestellt...', connected: 'Verbunden - Sprechen Sie mit {name}', callEnded: 'Anruf beendet', connError: 'Verbindungsfehler', connFailed: 'Verbindung fehlgeschlagen', micDenied: 'Mikrofonzugriff verweigert', clickToStart: 'Klicken Sie auf "Anrufen {name}" um zu starten', tellTravel: 'Sagen Sie {name}, wohin Sie reisen möchten, und sie findet das perfekte Hotel für Sie', assistant: 'Buchungsassistentin', tellTravelShort: 'Sagen Sie {name}, wohin Sie reisen möchten.', searchQuery: 'Suchanfrage' },
+            pt: { searchResults: 'Resultados da busca', conversation: 'Conversa', waitingForSearch: 'Aguardando busca...', listening: 'Ouvindo', noResults: 'Nenhum resultado encontrado', connecting: 'Conectando...', connected: 'Conectado - Fale com {name}', callEnded: 'Chamada encerrada', connError: 'Erro de conexão', connFailed: 'Falha na conexão', micDenied: 'Acesso ao microfone negado', clickToStart: 'Clique em "Ligar para {name}" para começar', tellTravel: 'Diga à {name} para onde você gostaria de viajar e ela encontrará o hotel perfeito para você', assistant: 'Assistente de reservas', tellTravelShort: 'Diga à {name} para onde você gostaria de viajar.', searchQuery: 'Consulta de busca' },
+        };
+        function t(key) { return (UI_STRINGS[selectedLang] || UI_STRINGS.en)[key] || UI_STRINGS.en[key]; }
+
+        budgetFilter.addEventListener('input', () => {
+            const val = parseInt(budgetFilter.value);
+            budgetLabel.textContent = val >= 5000 ? '0 - 5000+' : `0 - ${val}`;
+        });
+
+        function updateUILanguage() {
+            const name = getAgentName();
+            document.getElementById('searchResultsHeader').textContent = t('searchResults');
+            document.getElementById('conversationHeader').textContent = t('conversation');
+            document.getElementById('listeningLabel').textContent = t('listening');
+            const panelEmpty = hotelContent.querySelector('.panel-empty');
+            if (panelEmpty) panelEmpty.textContent = t('tellTravel').replace('{name}', name);
+            setAgentSummary(t('assistant'), t('tellTravelShort').replace('{name}', name));
+        }
+
+        langSelector.addEventListener('click', (e) => {
+            const btn = e.target.closest('.lang-btn');
+            if (!btn) return;
+            langSelector.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            selectedLang = btn.dataset.lang;
+            updateUILanguage();
+        });
+
+        function setAgentSummary(kicker, text) {
+            summaryKicker.textContent = kicker;
+            summaryText.textContent = text;
+        }
+
+        const _esc = document.createElement('div');
+        function esc(t) { _esc.textContent = t; return _esc.innerHTML; }
+
+        function getAgentName() { return agentSelect.value; }
+
+        function getDomain(url) {
+            try { return new URL(url).hostname; } catch { return url; }
+        }
+
+        // Travelers
+        function updateTravelerLabel() {
+            travelerCount.textContent = `${travelers} ${travelers === 1 ? 'Adult' : 'Adults'}`;
+        }
+        travelerMinus.addEventListener('click', () => { travelers = Math.max(1, travelers - 1); updateTravelerLabel(); });
+        travelerPlus.addEventListener('click', () => { travelers++; updateTravelerLabel(); });
+
+        speedSlider.addEventListener('input', () => { speedValue.textContent = parseFloat(speedSlider.value).toFixed(1) + 'x'; });
+        speedSlider.addEventListener('change', () => {
+            speedValue.textContent = parseFloat(speedSlider.value).toFixed(1) + 'x';
+            if (isRecording && ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'config', speed: parseFloat(speedSlider.value) }));
+            }
+        });
+
+        agentSelect.addEventListener('change', () => {
+            const name = getAgentName();
+            startBtn.textContent = `Call ${name}`;
+            setStatus(t('clickToStart').replace('{name}', name), 'idle');
+            hotelContent.innerHTML = `<div class="panel-empty">${t('tellTravel').replace('{name}', name)}</div>`;
+        });
+
+        // --- Results Display ---
+
+        function showSearching(msg) {
+            hotelContent.innerHTML = `
+                <div class="searching">
+                    <div class="spinner"></div>
+                    <div>${esc(msg)}</div>
+                </div>
+            `;
+        }
+
+        function showSearchResults(data) {
+            let html = `
+                <div class="query-header">
+                    <div class="query-label">${t('searchQuery')}</div>
+                    <div class="query-text">${esc(data.query)}</div>
+                </div>
+            `;
+
+            const images = data.images || [];
+
+            if (!data.results || data.results.length === 0) {
+                html += `<div class="panel-empty">${t('noResults')}</div>`;
+            } else {
+                data.results.forEach((result, i) => {
+                    const img = images[i];
+                    const imgHtml = img
+                        ? `<div class="result-card-img"><img src="${esc(img.url)}" alt="${esc(img.title)}" loading="lazy" onerror="this.parentElement.style.visibility='hidden'"></div>`
+                        : '';
+                    html += `
+                        <a class="result-card" href="${esc(result.href)}" target="_blank" rel="noopener">
+                            ${imgHtml}
+                            <div class="result-card-title">${esc(result.title)}</div>
+                            <div class="result-card-url">${esc(getDomain(result.href))}</div>
+                            <div class="result-card-body">${esc(result.body)}</div>
+                        </a>
+                    `;
+                });
+            }
+
+            hotelContent.innerHTML = html;
+        }
+
+        function showBookingConfirmed(data) {
+            const b = data.booking;
+            hotelContent.innerHTML = `
+                <div class="booking-card">
+                    <h3>Booking Confirmed!</h3>
+                    <div class="booking-detail"><span class="label">Hotel</span><span class="value">${esc(b.hotel)}</span></div>
+                    <div class="booking-detail"><span class="label">Room</span><span class="value">${esc(b.room)}</span></div>
+                    <div class="booking-detail"><span class="label">Check-in</span><span class="value">${esc(b.check_in)}</span></div>
+                    <div class="booking-detail"><span class="label">Check-out</span><span class="value">${esc(b.check_out)}</span></div>
+                    <div class="booking-detail"><span class="label">Guests</span><span class="value">${b.guests}</span></div>
+                    <div class="booking-detail"><span class="label">Guest Name</span><span class="value">${esc(b.guest_name)}</span></div>
+                    <div class="confirmation-number">${esc(b.confirmation_number)}</div>
+                </div>
+            `;
+        }
+
+        // --- Transcript ---
+
+        function getBubbleForTurn(turnIdx, isUser) {
+            if (isUser) {
+                if (userBubble && !hadAssistantBubble) return userBubble;
+                hadAssistantBubble = false;
+
+                userBubble = document.createElement('div');
+                userBubble.className = 'transcript-entry user';
+                const sp = document.createElement('div');
+                sp.className = 'transcript-speaker';
+                sp.textContent = 'You';
+                userBubble.appendChild(sp);
+                const tx = document.createElement('span');
+                tx.className = 'transcript-text';
+                userBubble.appendChild(tx);
+                transcript.appendChild(userBubble);
+                return userBubble;
+            }
+
+            let bubble = turnBubbles[turnIdx];
+            if (!bubble) {
+                hadAssistantBubble = true;
+
+                bubble = document.createElement('div');
+                bubble.className = 'transcript-entry assistant';
+                const sp = document.createElement('div');
+                sp.className = 'transcript-speaker';
+                sp.textContent = getAgentName();
+                bubble.appendChild(sp);
+                const tx = document.createElement('span');
+                tx.className = 'transcript-text';
+                bubble.appendChild(tx);
+                transcript.appendChild(bubble);
+                turnBubbles[turnIdx] = bubble;
+            }
+            return bubble;
+        }
+
+        function handleText({ text, turnIdx, isUser }) {
+            const bubble = getBubbleForTurn(turnIdx, isUser);
+            bubble.querySelector('.transcript-text').textContent += text + ' ';
+            while (transcript.children.length > 80) {
+                const removed = transcript.removeChild(transcript.firstChild);
+                for (const k in turnBubbles) { if (turnBubbles[k] === removed) delete turnBubbles[k]; }
+                if (userBubble === removed) userBubble = null;
+            }
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        function addSystemMessage(text, loading = false) {
+
+            const entry = document.createElement('div');
+            entry.className = 'transcript-entry system';
+            if (loading) {
+                entry.innerHTML = `<span class="system-spinner"></span><span>${esc(text)}</span>`;
+                entry.dataset.loading = '1';
+            } else {
+                entry.textContent = text;
+            }
+            transcript.appendChild(entry);
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        function clearLoadingMessages() {
+            transcript.querySelectorAll('.transcript-entry.system[data-loading]').forEach(el => {
+                el.querySelector('.system-spinner')?.remove();
+                delete el.dataset.loading;
+            });
+        }
+
+        // --- WebSocket ---
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'tool_started':
+                    addSystemMessage(msg.message, true);
+                    showSearching(msg.message);
+                    break;
+                case 'search_results':
+                    clearLoadingMessages();
+                    showSearchResults(msg);
+                    break;
+                case 'booking_confirmed':
+                    clearLoadingMessages();
+                    showBookingConfirmed(msg);
+                    break;
+                case 'error':
+                    console.error('Server error:', msg.message);
+                    break;
+                case 'event':
+                    console.log('Event:', msg.event);
+                    break;
+            }
+        }
+
+        function setStatus(text, cls) {
+            status.textContent = text;
+            status.className = 'status ' + cls;
+        }
+
+        async function startCall() {
+            try {
+                turnBubbles = {};
+                userBubble = null;
+                hadAssistantBubble = false;
+    
+                const agentName = getAgentName();
+                hotelContent.innerHTML = `<div class="panel-empty">${t('tellTravel').replace('{name}', agentName)}</div>`;
+                transcript.innerHTML = '';
+
+                setStatus(t('connecting'), 'connecting');
+
+                player = new SyncedAudioPlayer({
+                    basePath: './static/js',
+                    sampleRate: 24000,
+                    pcmOutput: window.__pcmOutput || false,
+                    echoCancellation: echoCancellationToggle.checked,
+                    onEncodedAudio: (opusData) => {
+                        if (isRecording && ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(opusData);
+                        }
+                    },
+                    onText: handleText,
+                    onEvent: (eventType, msg) => { handleMessage(msg); },
+                    onError: (error) => {
+                        console.error('Player error:', error);
+                        setStatus('Error: ' + error.message, 'disconnected');
+                    }
+                });
+
+                try {
+                    await player.start();
+                } catch (e) {
+                    console.error('Audio setup failed:', e);
+                    setStatus(t('micDenied'), 'disconnected');
+                    return;
+                }
+
+                const _bp = window.location.pathname.replace(/\/$/, "");
+                const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${_bp}/ws/chat`;
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    setStatus(t('connected').replace('{name}', agentName), 'connected');
+                    ws.send(JSON.stringify({
+                        type: 'start',
+                        agent: agentName,
+                        language: selectedLang,
+                        speed: parseFloat(speedSlider.value),
+                        destination: destinationFilter.value.trim(),
+                        check_in: checkInDate.value,
+                        check_out: checkOutDate.value,
+                        travelers: travelers,
+                        budget: parseInt(budgetFilter.value),
+                    }));
+                    agentSelect.disabled = true;
+                    speedSlider.disabled = false; // Allow speed changes mid-call
+                    langSelector.querySelectorAll('.lang-btn').forEach(b => b.disabled = true);
+                    isRecording = true;
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = 'inline-flex';
+                    recordingIndicator.classList.add('active');
+                    stageFrame.classList.add('in-call');
+                };
+
+                ws.onmessage = (event) => { player.handleMessage(event.data); };
+
+                ws.onclose = () => {
+                    setStatus(t('callEnded'), 'disconnected');
+                    endCall();
+                };
+
+                ws.onerror = (e) => {
+                    console.error('WebSocket error:', e);
+                    setStatus(t('connError'), 'disconnected');
+                    endCall();
+                };
+
+            } catch (e) {
+                console.error('Failed to start:', e);
+                setStatus(t('connFailed'), 'disconnected');
+            }
+        }
+
+        function endCall() {
+            isRecording = false;
+            startBtn.style.display = 'inline-flex';
+            stopBtn.style.display = 'none';
+            recordingIndicator.classList.remove('active');
+            stageFrame.classList.remove('in-call');
+            agentSelect.disabled = false;
+            speedSlider.disabled = false;
+            langSelector.querySelectorAll('.lang-btn').forEach(b => b.disabled = false);
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'stop' }));
+                ws.close();
+            }
+            ws = null;
+
+            if (player) { player.stop(); player = null; }
+
+            setAgentSummary(t('assistant'), t('tellTravelShort').replace('{name}', getAgentName()));
+        }
+
+        startBtn.addEventListener('click', startCall);
+        stopBtn.addEventListener('click', endCall);
+
+        AudioProcessor.preloadDecoder('./static/js');
+    </script>
+</body>
+</html>

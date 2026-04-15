@@ -1,0 +1,230 @@
+{
+  "categories": {
+    "entrees": {
+      "name": "Entrees & Sandwiches",
+      "items": [
+        {
+          "id": "original_sandwich",
+          "name": "Classic Chicken Sandwich",
+          "description": "A boneless breast of chicken seasoned to perfection, hand-breaded, pressure cooked in 100% refined peanut oil",
+          "price": 4.59,
+          "options": {
+            "bread": ["Regular Bun", "Multigrain Bun"],
+            "extras": ["Extra Pickles", "No Pickles", "Add Cheese", "Add Bacon", "Add Lettuce", "Add Tomato"]
+          }
+        },
+        {
+          "id": "spicy_sandwich",
+          "name": "Spicy Chicken Sandwich",
+          "description": "A boneless breast of chicken seasoned with a spicy blend of peppers",
+          "price": 5.05,
+          "options": {
+            "bread": ["Regular Bun", "Multigrain Bun"],
+            "extras": ["Extra Pickles", "No Pickles", "Add Cheese", "Add Bacon", "Add Lettuce", "Add Tomato"]
+          }
+        },
+        {
+          "id": "deluxe_sandwich",
+          "name": "Deluxe Chicken Sandwich",
+          "description": "Classic chicken sandwich with lettuce, tomato, and cheese",
+          "price": 5.75,
+          "options": {
+            "bread": ["Regular Bun", "Multigrain Bun"],
+            "extras": ["Extra Pickles", "No Pickles", "Add Bacon"]
+          }
+        },
+        {
+          "id": "grilled_sandwich",
+          "name": "Grilled Chicken Sandwich",
+          "description": "Grilled chicken breast served on a multigrain bun with lettuce and tomato",
+          "price": 6.19,
+          "options": {
+            "bread": ["Multigrain Bun"],
+            "extras": ["Add Cheese", "Add Bacon", "Extra Lettuce", "Extra Tomato"]
+          }
+        },
+        {
+          "id": "nuggets_8",
+          "name": "8-Count Chicken Nuggets",
+          "description": "Bite-sized pieces of boneless chicken breast, seasoned to perfection, hand-breaded and pressure cooked",
+          "price": 4.35,
+          "options": {
+            "sauce": ["House Sauce", "Polynesian Sauce", "BBQ Sauce", "Ranch", "Honey Mustard", "Buffalo Sauce"]
+          }
+        },
+        {
+          "id": "nuggets_12",
+          "name": "12-Count Chicken Nuggets",
+          "description": "Bite-sized pieces of boneless chicken breast",
+          "price": 6.29,
+          "options": {
+            "sauce": ["House Sauce", "Polynesian Sauce", "BBQ Sauce", "Ranch", "Honey Mustard", "Buffalo Sauce"]
+          }
+        }
+      ]
+    },
+    "sides": {
+      "name": "Sides",
+      "items": [
+        {
+          "id": "waffle_fries_medium",
+          "name": "Medium Waffle Potato Fries",
+          "description": "Waffle-shaped potatoes cooked in canola oil",
+          "price": 2.35,
+          "options": {
+            "seasoning": ["Regular", "Extra Salt", "No Salt"]
+          }
+        },
+        {
+          "id": "waffle_fries_large",
+          "name": "Large Waffle Potato Fries",
+          "description": "Waffle-shaped potatoes cooked in canola oil",
+          "price": 2.95,
+          "options": {
+            "seasoning": ["Regular", "Extra Salt", "No Salt"]
+          }
+        },
+        {
+          "id": "mac_cheese",
+          "name": "Mac & Cheese",
+          "description": "A classic macaroni and cheese recipe with a blend of cheeses",
+          "price": 3.65,
+          "options": {}
+        },
+        {
+          "id": "chicken_noodle_soup",
+          "name": "Chicken Noodle Soup",
+          "description": "Hearty breast of chicken and vegetables in a savory broth",
+          "price": 4.25,
+          "options": {}
+        },
+        {
+          "id": "side_salad",
+          "name": "Side Salad",
+          "description": "Mixed greens, grape tomatoes, and shredded Monterey Jack and Cheddar cheeses",
+          "price": 3.95,
+          "options": {
+            "dressing": ["Garden Herb Ranch", "Light Italian", "Zesty Apple Cider Vinaigrette", "No Dressing"]
+          }
+        }
+      ]
+    },
+    "drinks": {
+      "name": "Drinks",
+      "items": [
+        {
+          "id": "lemonade_medium",
+          "name": "Medium Lemonade",
+          "description": "Classic lemonade made with real lemon juice",
+          "price": 2.65,
+          "options": {
+            "type": ["Regular", "Diet"]
+          }
+        },
+        {
+          "id": "lemonade_large",
+          "name": "Large Lemonade",
+          "description": "Classic lemonade made with real lemon juice",
+          "price": 3.15,
+          "options": {
+            "type": ["Regular", "Diet"]
+          }
+        },
+        {
+          "id": "iced_tea_medium",
+          "name": "Medium Iced Tea",
+          "description": "Freshly-brewed each day from a blend of tea leaves",
+          "price": 2.35,
+          "options": {
+            "type": ["Sweet", "Unsweetened"]
+          }
+        },
+        {
+          "id": "iced_tea_large",
+          "name": "Large Iced Tea",
+          "description": "Freshly-brewed each day from a blend of tea leaves",
+          "price": 2.85,
+          "options": {
+            "type": ["Sweet", "Unsweetened"]
+          }
+        },
+        {
+          "id": "soft_drink_medium",
+          "name": "Medium Soft Drink",
+          "description": "Choose your favorite fountain drink",
+          "price": 2.35,
+          "options": {
+            "flavor": ["Coca-Cola", "Diet Coke", "Sprite", "Dr. Pepper", "Hi-C Fruit Punch"]
+          }
+        },
+        {
+          "id": "soft_drink_large",
+          "name": "Large Soft Drink",
+          "description": "Choose your favorite fountain drink",
+          "price": 2.85,
+          "options": {
+            "flavor": ["Coca-Cola", "Diet Coke", "Sprite", "Dr. Pepper", "Hi-C Fruit Punch"]
+          }
+        },
+        {
+          "id": "coffee",
+          "name": "Coffee",
+          "description": "THRIVE Farmers hot-brewed coffee",
+          "price": 1.95,
+          "options": {
+            "additions": ["Black", "Cream", "Sugar", "Cream and Sugar"]
+          }
+        }
+      ]
+    },
+    "desserts": {
+      "name": "Desserts & Treats",
+      "items": [
+        {
+          "id": "milkshake",
+          "name": "Milkshake",
+          "description": "Hand-spun the old-fashioned way",
+          "price": 4.79,
+          "options": {
+            "flavor": ["Chocolate", "Vanilla", "Strawberry", "Cookies & Cream"]
+          }
+        },
+        {
+          "id": "icedream_cone",
+          "name": "Ice Cream Cone",
+          "description": "A delicious frozen dairy treat",
+          "price": 1.65,
+          "options": {}
+        },
+        {
+          "id": "icedream_cup",
+          "name": "Ice Cream Cup",
+          "description": "A delicious frozen dairy treat",
+          "price": 2.05,
+          "options": {}
+        },
+        {
+          "id": "chocolate_chip_cookie",
+          "name": "Chocolate Chip Cookie",
+          "description": "Warm, chewy cookie with chocolate chips",
+          "price": 1.45,
+          "options": {}
+        },
+        {
+          "id": "brownie",
+          "name": "Chocolate Fudge Brownie",
+          "description": "Rich, fudgy brownie with chocolate chunks",
+          "price": 2.15,
+          "options": {}
+        },
+        {
+          "id": "fruit_cup",
+          "name": "Fruit Cup",
+          "description": "A nutritious fruit mix made with mandarin orange segments, fresh strawberry slices, and blueberries",
+          "price": 3.75,
+          "options": {}
+        }
+      ]
+    }
+  }
+}

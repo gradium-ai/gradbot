@@ -1,0 +1,12 @@
+[project]
+name = "gradbot-demo"
+version = "0.1.0"
+description = "Gradbot Voice Chat Demo"
+requires-python = ">=3.12"
+dependencies = ["gradbot"]
+
+[project.scripts]
+demo = "main:app"
+
+[tool.uv.sources]
+gradbot = { path = "../../gradbot_py" }
