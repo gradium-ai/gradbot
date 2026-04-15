@@ -47,7 +47,7 @@ Install from PyPI:
 pip install gradbot
 ```
 
-Or run a demo directly (builds the native extension from source — requires a stable Rust toolchain via [rustup](https://rustup.rs)):
+Or run a demo directly (builds from source):
 
 ```bash
 cd demos/simple_chat
@@ -285,8 +285,8 @@ gradbot/
 ├── gradbot_lib/            # Core Rust library (STT/LLM/TTS multiplexing)
 ├── gradbot_py/             # Python bindings (PyO3 + maturin)
 │   └── gradbot/            # Python package (fastapi helpers, config, audio worklet)
-├── gradbot_server/         # Standalone remote-mode server (clients call over WebSocket; STT/LLM/TTS run server-side)
-├── src/                    # Single-process server binary speaking OpenAI Realtime + Twilio Media Streams protocols
+├── gradbot_server/         # Standalone WebSocket server (remote mode)
+├── src/                    # Server binary (OpenAI & Twilio WebSocket protocols)
 ├── demos/                  # Example applications
 │   ├── app.py              # Combined app mounting all demos (for Docker)
 │   └── config.example.yaml # Configuration template

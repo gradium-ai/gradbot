@@ -66,27 +66,29 @@ When `gradbot_url` is set, all other client params are ignored. The server handl
 
 ## FastAPI Integration
 
-The `gradbot.fastapi` module provides a WebSocket handler and route setup for building voice demos.
+The `gradbot.websocket` and `gradbot.routes` modules provide a WebSocket handler and route setup for building voice demos.
 
 ```python
-from fastapi import FastAPI, WebSocket
-from gradbot.fastapi import websocket_chat_handler, setup_demo_routes
+import fastapi
+import gradbot
 
-app = FastAPI()
+app = fastapi.FastAPI()
+cfg = gradbot.config.from_env()
 
-setup_demo_routes(app, static_dir="static", voices=True)
+gradbot.routes.setup(app, config=cfg, static_dir="static", with_voices=True)
 
 @app.websocket("/ws")
-async def ws(websocket: WebSocket):
-    await websocket_chat_handler(
+async def ws(websocket: fastapi.WebSocket):
+    await gradbot.websocket.handle_session(
         websocket,
+        config=cfg,
         on_start=lambda msg: gradbot.SessionConfig(
             instructions="You are a helpful assistant.",
         ),
     )
 ```
 
-`setup_demo_routes` registers `/api/audio-config`, serves your static files, and automatically serves the bundled JS audio processor at `/static/js/`.
+`gradbot.routes.setup` registers `/api/audio-config`, serves your static files, and automatically serves the bundled JS audio processor at `/static/js/`. With `with_voices=True`, it also exposes `/api/voices` backed by the Gradium voice catalog.
 
 ### WebSocket Protocol
 
@@ -105,11 +107,8 @@ async def ws(websocket: WebSocket):
 
 - **`run(...)`:** Create clients and start a session. Returns `(SessionInputHandle, SessionOutputHandle)`.
 - **`create_clients(...)`:** Create reusable `GradbotClients` for multiple sessions.
-- **`flagship_voices()`:** List all available voices.
-- **`flagship_voice(name)`:** Look up a voice by name (case-insensitive).
-- **`voices_json()`:** All voices as JSON-serializable dicts.
-- **`voice_switching_tools()`:** `ToolDef` list for `switch_to_{name}` tools.
-- **`resolve_voice_from_tool(tool_name)`:** Resolve a `switch_to_*` tool name to a `FlagshipVoice`.
+- **`flagship_voices()`:** List all built-in flagship voices.
+- **`flagship_voice(name)`:** Look up a flagship voice by name (case-insensitive).
 - **`init_logging()`:** Initialize debug logging.
 
 ### Enums
@@ -119,7 +118,7 @@ async def ws(websocket: WebSocket):
 | `Lang` | `En`, `Fr`, `Es`, `De`, `Pt` |
 | `Gender` | `Masculine`, `Feminine` |
 | `Country` | `Us`, `Gb`, `Fr`, `De`, `Mx`, `Es`, `Br` |
-| `AudioFormat` | `OggOpus`, `Pcm` (24kHz in / 48kHz out), `Ulaw` (G.711 mu-law) |
+| `AudioFormat` | `OggOpus`, `Pcm`, `Ulaw` |
 
 ### Classes
 
