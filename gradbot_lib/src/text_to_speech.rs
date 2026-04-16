@@ -40,7 +40,8 @@ impl TtsClient {
         };
         let client = gradium::Client::new(&api_key)
             .with_base_url(base_url)
-            .context("TTS: failed to initialize Gradium client")?;
+            .context("TTS: failed to initialize Gradium client")?
+            .with_api_source("gradbot-tts".to_string());
         Ok(Self(client))
     }
 

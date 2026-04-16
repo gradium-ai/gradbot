@@ -28,7 +28,8 @@ impl SttClient {
         };
         let client = gradium::Client::new(&api_key)
             .with_base_url(base_url)
-            .context("STT: failed to initialize Gradium client")?;
+            .context("STT: failed to initialize Gradium client")?
+            .with_api_source("gradbot-stt".to_string());
         Ok(Self(client))
     }
 

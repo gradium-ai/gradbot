@@ -26,7 +26,7 @@ clap = { version = "4.4.12", features = ["derive"] }
 futures = "0.3.28"
 futures-util = "0.3.30"
 gradbot = { path = "gradbot_lib", version = "0.6.4" }
-gradium = { version = "0.1.8", default-features = false, features = ["rustls"] }
+gradium = { version = "0.1.10", default-features = false, features = ["rustls"] }
 kaudio = "0.2.1"
 law-encoder = "0.1.0"
 log = "0.4.20"

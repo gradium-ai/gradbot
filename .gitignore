@@ -1,7 +1,6 @@
 # Rust
 **/target/
 **/logs/
-Cargo.lock
 
 # Python
 __pycache__/
