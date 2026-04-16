@@ -136,10 +136,15 @@ export class VoiceClient {
       if (bytes.length === 0) return;
 
       if (this._audio) {
+        // Don't pass turnIdx to avoid false turn-change detection in
+        // AudioProcessor.  The server sends the initial OGG header with
+        // turn_idx=0 but assistant_speaks_first bumps the first audio to
+        // turn_idx=1, which would destroy the decoder before it can be used.
+        // The decoder handles new OGG streams naturally via BOS pages.
         this._audio.playOpusData(
           bytes,
           this._pendingStopS,
-          this._pendingTurnIdx,
+          undefined,
           this._pendingInterrupted,
         );
       }
