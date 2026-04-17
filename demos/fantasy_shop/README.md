@@ -17,14 +17,14 @@ A voice-based haggling game set in a fantasy weapon shop. Use your wits (and a f
 
 ### Princess Celestia (The Manager)
 - Secretly a princess checking on her kingdom's merchants
-- Can apply a 25 gold discount... but only for worthy causes (defending the village from dragons!)
+- Can apply a 25 gold discount, but only for a convincing worthy cause
 - Will kick you out if your intentions are selfish
-- Might be charmed by a generous gift...
+- May also accept the ruby as a heartfelt gift if you do not treat it as payment
 
 ## Winning Strategies
 
 1. **The Hero's Path**: Convince the manager you need the sword to fight dragons
-2. **The Gentleman's Path**: Gift the ruby to the manager (she won't notice it's fake, and appreciates the gesture)
+2. **The Gift Path**: Offer the ruby as a sincere gift, not as payment, and downplay its value
 3. **Combination**: Use both approaches for maximum discount!
 
 ## Setup
@@ -56,4 +56,6 @@ The AI characters have access to these tools:
 - `kick_out_of_shop` - Game over!
 - `call_manager` - Summon the manager (attendant only)
 - `apply_discount` - Apply 25 gold discount (manager only, requires worthy cause)
+- `accept_ruby_gift` - Accept the ruby as a gift and reduce the price
 - `sell_sword` - Complete the purchase (victory!)
+- `change_language` - Switch to French, German, Spanish, or Portuguese during the conversation

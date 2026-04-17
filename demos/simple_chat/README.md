@@ -1,6 +1,6 @@
 # Simple Chat Demo
 
-A real-time voice chat demo using gradbot.
+A minimal real-time voice chat demo using gradbot.
 
 ## Setup
 
@@ -18,7 +18,8 @@ This will build gradbot from source using maturin.
 ```bash
 # Set your API keys
 export GRADIUM_API_KEY=your_key_here
-export LLM_API_KEY=your_llm_key  # or use LLM_BASE_URL + LLM_API_KEY for other providers
+export LLM_API_KEY=your_llm_key
+export LLM_BASE_URL=your_llm_endpoint
 
 # Run the server
 uv run uvicorn main:app --reload
@@ -28,8 +29,9 @@ Then open http://localhost:8000 in your browser.
 
 ## Features
 
-- Select from 14 flagship voices across 5 languages
-- Customize the AI system prompt
-- **Change voice and prompt mid-conversation** without restarting
+- Minimal FastAPI + WebSocket voice chat example
+- Fixed time-traveller system prompt defined in `main.py`
+- Choose a voice from the available Gradium catalog voices before starting
 - Real-time voice conversation
 - Live transcript display
+- Echo cancellation toggle in the UI
