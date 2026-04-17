@@ -132,7 +132,7 @@ class Config(pydantic_settings.BaseSettings):
         if self.gradium_base_url and not self.gradium.base_url:
             self.gradium.base_url = self.gradium_base_url
         if not self.gradium.base_url:
-            self.gradium.base_url = "https://gradium.ai/api/"
+            self.gradium.base_url = "https://api.gradium.ai/api/"
         if self.gradbot_url and not self.gradbot_server.url:
             self.gradbot_server.url = self.gradbot_url
         if self.gradbot_api_key and not self.gradbot_server.api_key:
