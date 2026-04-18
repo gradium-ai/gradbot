@@ -24,7 +24,9 @@ At its core is a multiplexing engine written in Rust that coordinates three stre
 
 Whether you're building a [haggling game](demos/fantasy_shop/) or a [travel booking assistant](demos/hotel/), Gradbot lets you go from idea to working voice experience in under 50 lines of code.
 
-https://github.com/user-attachments/assets/290fbdb6-386c-4a2a-8c37-f30c9b023aec
+[![Food Ordering Voice Agent Demo](https://img.youtube.com/vi/YKkBCFnLsj8/maxresdefault.jpg)](https://youtu.be/YKkBCFnLsj8)
+
+[![NPC 3D Game Demo](https://img.youtube.com/vi/WTFU4NZ9b2k/maxresdefault.jpg)](https://youtu.be/WTFU4NZ9b2k)
 
 ## Features
 
