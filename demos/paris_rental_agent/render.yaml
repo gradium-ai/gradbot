@@ -1,0 +1,70 @@
+services:
+  - type: web
+    name: paris-rental-agent
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r demos/paris_rental_agent/requirements.txt
+    startCommand: uvicorn demos.paris_rental_agent.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      - key: DATABASE_URL
+        fromDatabase:
+          name: paris-rental-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: APP_ENV
+        value: production
+      - key: ENABLE_DEMO_ACCOUNT
+        value: false
+      - key: BASE_URL
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: GRADIUM_API_KEY
+        sync: false
+
+  - type: worker
+    name: paris-rental-worker
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r demos/paris_rental_agent/requirements.txt
+    startCommand: python -m demos.paris_rental_agent.worker
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      - key: DATABASE_URL
+        fromDatabase:
+          name: paris-rental-db
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: GRADIUM_API_KEY
+        sync: false
+
+  - type: cron
+    name: paris-rental-scheduled-search
+    runtime: python
+    plan: starter
+    schedule: "0 8 * * *"
+    buildCommand: pip install -r demos/paris_rental_agent/requirements.txt
+    startCommand: python -m demos.paris_rental_agent.scheduled_search
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      - key: DATABASE_URL
+        fromDatabase:
+          name: paris-rental-db
+          property: connectionString
+      - key: TAVILY_API_KEY
+        sync: false
+
+databases:
+  - name: paris-rental-db
+    plan: free
+    databaseName: paris_rental_agent
+    user: paris_rental

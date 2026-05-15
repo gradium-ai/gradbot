@@ -12,14 +12,22 @@ dist/
 *.so
 *.dylib
 *.dylib.dSYM/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
 
 # Environment
 .env
 .env.*
+!.env.example
+!**/.env.example
 
-# Demo config (contains API keys)
+# Demo config
 demos/config.yaml
 demos/*/config.yaml
+demos/*/DEPLOY_RENDER.md
 
 # IDE
 .idea/
