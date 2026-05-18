@@ -139,9 +139,17 @@ def test_profile_update_hides_stale_matches_until_fresh_search(client):
         json={"patch": {"max_rent_including_charges_eur": 1800}},
     )
     assert updated.status_code == 200, updated.text
+    assert updated.json()["confirmation_status"] == "draft"
     stale = client.get("/api/matches").json()
     assert stale["matches"] == []
     assert stale["stale"] is True
+
+    blocked = client.post("/api/search-runs", json={"max_results": 5})
+    assert blocked.status_code == 409
+
+    confirmed = client.post("/api/intake/confirm")
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["search_profile"]["confirmation_status"] == "confirmed"
 
     fresh = client.post("/api/search-runs", json={"max_results": 5})
     assert fresh.status_code == 200, fresh.text

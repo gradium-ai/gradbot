@@ -56,6 +56,12 @@ CRITICAL RULES:
 - Do not restart, quote, or repeat your previous sentence after an interruption.
 - If prior assistant text is provided as conversation context, treat it only as context; never begin by repeating it.
 - Present at most 3 listings by voice unless the user asks for more.
+
+WHILE WAITING FOR APARTMENT SEARCH RESULTS:
+- If run_apartment_search has been called and its result has not arrived yet, do not discuss specific listings, prices, scores, commute times, or availability.
+- Do not ask a new question while the search is running.
+- Instead, share one short, practical Paris rental tip, such as preparing a rental dossier, checking whether charges are included, reviewing furnished versus unfurnished terms, checking energy ratings, or watching for payment-before-viewing scams.
+- When the tool result arrives, switch back to the actual matches and only use information from the tool result.
 """
 
 
@@ -140,6 +146,17 @@ def _build_prompt(start_context: dict[str, Any]) -> str:
         + f"- drafts_count: {start_context['drafts_count']}\n"
         + f"- last_search_result_count: {start_context['last_search_result_count']}\n"
         + f"- session_instruction: {mode}\n"
+    )
+
+
+def _search_results_instruction(summary: dict[str, Any]) -> str:
+    return (
+        "\n\nAPARTMENT SEARCH TOOL RESULT IS NOW AVAILABLE:\n"
+        + json.dumps(summary, ensure_ascii=False)
+        + "\nUse only this result when speaking about listings. If there are no matches or "
+        "the tool returned an error, say so briefly and suggest reviewing the profile. "
+        "If there are matches, mention how many were found and describe the top match "
+        "in one short sentence. Do not invent fields that are not present.\n"
     )
 
 
@@ -229,7 +246,9 @@ def build_tools() -> list[gradbot.ToolDef]:
                 "explicitly asks to search or run the search. Do not call this for profile edits "
                 "like adding amenities or room must-haves. Blocked unless the profile is "
                 "confirmed (set allow_unconfirmed_profile=true only if the user explicitly asks "
-                "to search with the draft)."
+                "to search with the draft). This search can take several seconds. After calling "
+                "it, keep the conversation useful with one brief Paris rental tip while waiting, "
+                "but do not mention any specific listings until the tool result arrives."
             ),
             parameters_json=json.dumps({
                 "type": "object",
@@ -321,12 +340,13 @@ def _make_config(
     language: str = "en",
     config: gradbot.config.Config,
     start_context: dict[str, Any],
+    extra_instructions: str = "",
 ) -> gradbot.SessionConfig:
     voice_id = VOICE_ID_FR if language == "fr" else VOICE_ID_EN
     lang_enum = gradbot.LANGUAGES.get(language, gradbot.LANGUAGES["en"])
     return gradbot.SessionConfig(
         voice_id=voice_id,
-        instructions=_build_prompt(start_context),
+        instructions=_build_prompt(start_context) + extra_instructions,
         language=lang_enum,
         tools=build_tools(),
         **{
@@ -346,12 +366,15 @@ async def handle_voice_session(
 ) -> None:
     """Run a Gradbot voice session for a logged-in user."""
     user_id = user.id
+    session_state: dict[str, Any] = {"language": "en", "start_context": None}
 
     def on_start(msg: dict) -> gradbot.SessionConfig:
         language = msg.get("language", "en")
         if language not in gradbot.LANGUAGES:
             language = "en"
         start_context = _load_start_context(user_id)
+        session_state["language"] = language
+        session_state["start_context"] = start_context
         logger.info(
             "Starting voice session for user=%s lang=%s fresh_intake=%s status=%s",
             user_id,
@@ -367,7 +390,9 @@ async def handle_voice_session(
         logger.info("Voice tool call: user_id=%s name=%s", user_id, name)
 
         try:
-            await _dispatch_tool(name, args, handle, ws, user_id)
+            await _dispatch_tool(
+                name, args, handle, input_handle, ws, user_id, config, session_state
+            )
         except Exception as exc:
             logger.exception("Voice tool call failed: %s", name)
             try:
@@ -399,8 +424,11 @@ async def _dispatch_tool(
     name: str,
     args: dict[str, Any],
     handle,
+    input_handle,
     ws: WebSocket,
     user_id: str,
+    config: gradbot.config.Config,
+    session_state: dict[str, Any],
 ) -> None:
     """Dispatch a Gradbot tool call to the corresponding assistant_tools function."""
 
@@ -461,12 +489,29 @@ async def _dispatch_tool(
                 }
                 await handle.send_json(_voice_summarize_search(res))
                 return
+            await ws.send_json({
+                "type": "tool_started",
+                "tool": "run_apartment_search",
+                "message": "Searching with your confirmed profile...",
+            })
             async with lock:
                 res = await assistant_tools.run_apartment_search(
                     db, user_id, max_results=max_results, allow_unconfirmed_profile=allow
                 )
+            summary = _voice_summarize_search(res)
             await ws.send_json({"type": "search_results", "result": res})
-            await handle.send_json(_voice_summarize_search(res))
+            refreshed_context = _load_start_context(user_id)
+            session_state["start_context"] = refreshed_context
+            await input_handle.send_config(
+                _make_config(
+                    language=str(session_state.get("language") or "en"),
+                    config=config,
+                    start_context=refreshed_context,
+                    extra_instructions=_search_results_instruction(summary),
+                )
+            )
+            logger.info("Switched voice prompt to search-result context for user=%s", user_id)
+            await handle.send_json(summary)
             return
 
         if name == "list_top_matches":

@@ -447,6 +447,15 @@ def _apply_patch_to_renter(
     return sources
 
 
+def _mark_profile_needs_confirmation(sp: SearchProfile, intake: ProfileIntakeSession | None = None) -> None:
+    sp.confirmation_status = "draft"
+    sp.last_confirmed_at = None
+    if intake is not None:
+        intake.status = "review_required"
+        intake.confirmed_at = None
+        intake.confirmed_profile_snapshot = None
+
+
 # ─────────────────────── tools ───────────────────────
 def start_profile_intake(db: Session, user_id: str) -> dict[str, Any]:
     sp = _get_or_create_search_profile(db, user_id)
@@ -515,7 +524,10 @@ def extract_requirements_from_transcript(
 
     # Apply remainder to search profile
     sp_patch = {k: v for k, v in patch.items() if k not in ("work_location_label", "work_location_address")}
-    _apply_patch_to_search_profile(sp, sp_patch)
+    changed_fields = set(work_patch)
+    changed_fields.update(_apply_patch_to_search_profile(sp, sp_patch).keys())
+    if changed_fields:
+        _mark_profile_needs_confirmation(sp, intake)
 
     # Update intake session
     intake.raw_transcript = (intake.raw_transcript or "") + "\n" + transcript if intake.raw_transcript else transcript
@@ -567,7 +579,10 @@ def update_profile_draft(
     if work_patch:
         _apply_patch_to_renter(rp, work_patch)
     sp_patch = {k: v for k, v in patch.items() if k not in work_patch}
-    _apply_patch_to_search_profile(sp, sp_patch)
+    changed_fields = set(work_patch)
+    changed_fields.update(_apply_patch_to_search_profile(sp, sp_patch).keys())
+    if changed_fields:
+        _mark_profile_needs_confirmation(sp, intake)
 
     sources = dict(intake.field_sources or {})
     for k in patch:
@@ -577,7 +592,7 @@ def update_profile_draft(
     profile_dict = _profile_dict_for_extraction(sp, rp)
     missing = compute_missing_fields(profile_dict)
     intake.missing_fields = missing
-    if not missing:
+    if changed_fields and not missing:
         intake.status = "review_required"
     db.commit()
     db.refresh(intake)
@@ -680,7 +695,10 @@ def update_renter_profile(
     db: Session, user_id: str, patch: dict[str, Any]
 ) -> dict[str, Any]:
     rp = _get_or_create_renter_profile(db, user_id)
-    _apply_patch_to_renter(rp, patch)
+    sp = _get_or_create_search_profile(db, user_id)
+    changed_fields = _apply_patch_to_renter(rp, patch)
+    if changed_fields:
+        _mark_profile_needs_confirmation(sp)
     db.commit()
     db.refresh(rp)
     return {
@@ -701,7 +719,9 @@ def update_search_profile(
 ) -> dict[str, Any]:
     sp = _get_or_create_search_profile(db, user_id)
     rp = _get_or_create_renter_profile(db, user_id)
-    _apply_patch_to_search_profile(sp, patch)
+    changed_fields = _apply_patch_to_search_profile(sp, patch)
+    if changed_fields:
+        _mark_profile_needs_confirmation(sp)
     db.commit()
     db.refresh(sp)
     return {"ok": True, "search_profile": _serialize_search_profile(sp, renter=rp)}

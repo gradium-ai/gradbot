@@ -157,16 +157,8 @@ const App = (() => {
             await runFreshSearch();
             return;
         }
-        if (
-            state.searchProfile?.confirmation_status === 'confirmed' &&
-            !(payload.missing_fields || []).length
-        ) {
-            await runFreshSearch();
-            return;
-        }
-        if (state.view === 'onboarding' || state.dashboardScreen === 'search' || state.dashboardScreen === 'feed') {
-            render();
-        }
+        state.view = 'onboarding';
+        render();
     }
 
     async function loadMatches() {
@@ -571,7 +563,7 @@ const App = (() => {
 
         document.getElementById('btn-confirm')?.addEventListener('click', async () => {
             // First save current form values
-            await saveOnboardingForm({ silent: true, skipAutoSearch: true });
+            await saveOnboardingForm({ silent: true });
             try {
                 const res = await api('/api/intake/confirm', { method: 'POST' });
                 if (!res.ok) {
@@ -639,14 +631,6 @@ const App = (() => {
             const res = await api('/api/intake/text-update', { method: 'POST', body: { patch } });
             state.intake = res;
             applyProfilePayload(res);
-            if (
-                !opts.skipAutoSearch &&
-                res.confirmation_status === 'confirmed' &&
-                !(res.missing_fields || []).length
-            ) {
-                await runFreshSearch();
-                return;
-            }
             if (!opts.silent) render();
         } catch (e) {
             if (!opts.silent) alert(e.message);
@@ -1148,8 +1132,28 @@ const App = (() => {
         if (!msg || !msg.type) return;
         if (msg.type === 'intake_state' || msg.type === 'profile_confirmed') {
             refreshAfterVoiceProfileChange(msg);
+        } else if (msg.type === 'tool_started' && msg.tool === 'run_apartment_search') {
+            state.searching = true;
+            state.matchesStale = false;
+            state.matches = [];
+            state.view = 'dashboard';
+            state.dashboardScreen = 'feed';
+            render();
         } else if (msg.type === 'search_results') {
-            (async () => { await loadMatches(); if (state.view === 'dashboard') render(); })();
+            state.searching = false;
+            if (msg.result?.ok) {
+                state.matches = msg.result.matches || [];
+                state.matchesStale = false;
+                state.view = 'dashboard';
+                state.dashboardScreen = 'feed';
+                (async () => {
+                    await Promise.all([loadSaved(), loadDrafts(), loadProfiles()]);
+                    render();
+                })();
+            } else {
+                state.matches = [];
+                render();
+            }
         } else if (msg.type === 'matches') {
             // no-op; rendered after next refresh
         } else if (msg.type === 'listing_saved') {
