@@ -1,157 +1,151 @@
-# Paris Rental Agent
+# Paris Rental Agent: Voice enabled AI search using Gradbot and Tavily
 
-An open-source demo of a voice-first apartment search assistant for Paris.
-Users describe what they want, the app turns that conversation into a structured
-search profile, and confirmed profiles can be searched against live web results
-from Tavily.
+A flagship demo for voice-enabled AI search. Users describe what they want in a
+Paris apartment, Gradbot turns the conversation into a structured search
+profile, and [Tavily](https://www.tavily.com/) searches the web for current
+rental listings that can be normalized, scored, and reviewed in the app.
 
-This is a demo application, not a production rental platform. It is useful as a
-reference for Gradbot voice sessions, FastAPI auth, account-scoped tools, and a
-small Render deployment.
+This is a demo application, not a production rental platform.
 
-## Features
+## What It Does
 
 - Voice and text onboarding for a renter search profile.
-- Editable draft profile with required-field validation before search.
-- Tavily-backed Paris listing discovery.
-- Scoring against budget, rooms, furnished preference, commute, and nearby
-  requirements.
+- Editable draft profile with confirmation before search.
+- Live web search for Paris listings through Tavily.
+- Optional commute verification through Google Maps.
+- Match scoring for budget, rooms, furnished preference, commute, and amenities.
 - Saved/rejected listings and viewing-request drafts.
-- Shared business logic for REST chat, voice tools, workers, and tests.
-- Render Blueprint for web, worker, cron, and Postgres.
+- Shared business logic across REST routes, voice tools, background jobs, and tests.
 
-## Architecture
+## Tavily Search
 
-```text
-demos/paris_rental_agent/
-  main.py                  FastAPI entrypoint
-  app/
-    routes/                REST and WebSocket routes
-    services/              Search, scoring, extraction, drafting
-    voice/                 Gradbot voice session and tool definitions
-    jobs/                  Scheduled search job
-  static/                  Single-page frontend
-  render.yaml              Render Blueprint
-  tests/                   Focused API and service tests
-```
+[Tavily](https://www.tavily.com/) powers the live listing discovery in this
+demo. After the user confirms a search profile, the app converts the profile
+into focused Paris rental queries, sends those queries to the
+[Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search),
+and uses the returned web results to find relevant apartment listings.
 
-## Quick Start
+The Tavily integration lives in `app/services/tavily_search.py`:
 
-Run from the repository root.
+- `build_queries()` creates search queries from budget, bedrooms, rooms,
+  furnished preference, and preferred arrondissements.
+- `search_paris_rentals()` calls Tavily, deduplicates URLs, and returns raw web
+  results.
+- `app/services/search_pipeline.py` normalizes those results, scores them
+  against the confirmed profile, and stores the matches.
 
-```bash
-uv pip install -r demos/paris_rental_agent/requirements.txt
-cp demos/paris_rental_agent/.env.example demos/paris_rental_agent/.env
-python demos/paris_rental_agent/scripts/setup_local.py
-uvicorn demos.paris_rental_agent.main:app --reload --port 8000
-```
-
-Open `http://localhost:8000`.
-
-The app falls back to SQLite when `DATABASE_URL` is unset. To use local
-Postgres:
+To use Tavily locally, create an API key from Tavily, then set
+`TAVILY_API_KEY` in `.env`. The
+[Tavily API docs](https://docs.tavily.com/documentation/api-reference/introduction)
+cover authentication, the API base URL, and available endpoints.
 
 ```bash
-docker compose -f demos/paris_rental_agent/docker-compose.yml up -d db
+TAVILY_API_KEY=tvly-your-key
 ```
 
-Then set `DATABASE_URL` in `.env`.
+You can also put the key in `config.yaml`:
 
-## Configuration
-
-Environment variables are preferred for deployed environments. Local
-`config.yaml`, `.env`, SQLite databases, virtualenvs, and cache files are
-ignored by git.
-
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `DATABASE_URL` | No | Defaults to local SQLite. Use `postgresql+psycopg://...` for Postgres. |
-| `SECRET_KEY` | Production | JWT signing secret. Must be at least 32 bytes and not `change-me` in production. |
-| `APP_ENV` | No | Set to `production` to enable secure cookies and runtime safety checks. |
-| `BASE_URL` | Deploys | Public app URL, for example the Render web service URL. |
-| `TAVILY_API_KEY` | Live search | Required for real listing search. Without it, search returns HTTP 503. |
-| `GRADIUM_API_KEY` | Voice | Required for Gradbot voice. |
-| `GOOGLE_MAPS_API_KEY` | No | Enables verified commute calculations. |
-| `ENABLE_DEMO_ACCOUNT` | No | Defaults to `false`. Set to `true` only for local demos. |
-
-For local voice/search config, copy:
-
-```bash
-cp demos/paris_rental_agent/config.example.yaml demos/paris_rental_agent/config.yaml
+```yaml
+tavily:
+  api_key: "tvly-your-key"
 ```
 
-Do not commit `config.yaml` or `.env`.
+Without a Tavily key, the app still runs, but live search returns a
+configuration error.
 
-## Demo Account
+## Run Locally
 
-The fixed demo account is disabled by default. To enable it locally:
-
-```bash
-ENABLE_DEMO_ACCOUNT=true python demos/paris_rental_agent/scripts/setup_local.py
-ENABLE_DEMO_ACCOUNT=true uvicorn demos.paris_rental_agent.main:app --reload --port 8000
-```
-
-When disabled, `/api/demo-credentials` returns 404 and startup does not create
-the demo user.
-
-## Render Deployment
-
-The Blueprint is at:
-
-```text
-demos/paris_rental_agent/render.yaml
-```
-
-In Render:
-
-1. Create **New > Blueprint**.
-2. Connect the repo and branch.
-3. Set **Blueprint Path** to `demos/paris_rental_agent/render.yaml`.
-4. Fill `BASE_URL`, `TAVILY_API_KEY`, and `GRADIUM_API_KEY`.
-5. Deploy and check `/healthz`.
-
-The Blueprint creates:
-
-- `paris-rental-agent`: FastAPI web service.
-- `paris-rental-worker`: polling worker for saved searches.
-- `paris-rental-scheduled-search`: daily 08:00 UTC cron job.
-- `paris-rental-db`: Render Postgres database.
-
-More details are in `DEPLOY_RENDER.md`.
-
-## Security Notes
-
-- Demo credentials are opt-in and should stay disabled in production.
-- Production startup fails if `SECRET_KEY` is unset, too short, or left as
-  `change-me`.
-- Auth uses HTTP-only cookies; secure cookies are enabled when
-  `APP_ENV=production`.
-- Voice WebSocket auth uses the same-origin session cookie in the browser.
-  Query-token fallback remains for non-browser clients, and issued voice tokens
-  expire after five minutes.
-- External listing links are restricted to `http` and `https`, escaped before
-  rendering, and opened with `rel="noopener noreferrer"`.
-- Render/Postgres URLs are logged with passwords masked.
-- Cost-sensitive search sizes are capped at 50 results per request.
-
-## Tests
+Run these commands from the repository root:
 
 ```bash
 cd demos/paris_rental_agent
 uv sync --dev
+cp .env.example .env
+uv run uvicorn main:app --reload --port 8000
+```
+
+Open `http://localhost:8000`.
+
+The app uses a local SQLite database when `DATABASE_URL` is unset. Tables are
+created automatically on startup.
+
+To enable the fixed local demo account:
+
+```bash
+ENABLE_DEMO_ACCOUNT=true uv run python scripts/setup_local.py
+ENABLE_DEMO_ACCOUNT=true uv run uvicorn main:app --reload --port 8000
+```
+
+Otherwise, create an account through the signup screen.
+
+## Configuration
+
+Copy `.env.example` to `.env` and fill only the integrations you need.
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `SECRET_KEY` | Production | JWT signing secret. Use a strong value outside local development. |
+| `DATABASE_URL` | No | Defaults to local SQLite. Use `postgresql+psycopg://...` for Postgres. |
+| `TAVILY_API_KEY` | Search | Required for live apartment search. |
+| `GRADIUM_API_KEY` | Voice | Required for Gradbot voice sessions. |
+| `GOOGLE_MAPS_API_KEY` | No | Enables verified commute calculations. |
+| `APP_ENV` | No | Defaults to `development`. |
+| `BASE_URL` | No | Defaults to `http://localhost:8000`. |
+| `ENABLE_DEMO_ACCOUNT` | No | Defaults to `false`. Set to `true` only for local demos. |
+
+For local voice/provider configuration, you can also copy:
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+`config.yaml`, `.env`, local databases, virtualenvs, and cache files are ignored
+by git.
+
+## Optional Postgres
+
+SQLite is enough for local testing. To use Postgres instead:
+
+```bash
+docker compose up -d db
+```
+
+Then set `DATABASE_URL` in `.env`.
+
+## How It Is Built
+
+- `main.py` creates the FastAPI app, initializes the database, mounts REST
+  routes, mounts the voice WebSocket route, and serves the static frontend.
+- `static/app.js` is a small single-page frontend for signup/login, onboarding,
+  search results, saved listings, viewing drafts, text chat, and voice chat.
+- `app/routes/` contains the HTTP API for auth, intake, profiles, search,
+  listings, assistant chat, and voice.
+- `app/voice/gradbot_session.py` defines the Gradbot voice prompt, tools, and
+  WebSocket tool dispatch.
+- `app/services/assistant_tools.py` is the shared application layer used by REST
+  chat, voice tools, tests, and jobs.
+- `app/services/search_pipeline.py` runs live search, normalizes results, scores
+  listings, stores matches, and marks stale results after profile changes.
+- `app/services/requirement_extraction.py`, `normalize.py`, `scoring.py`,
+  `commute.py`, and `drafting.py` keep domain logic isolated and testable.
+- SQLAlchemy models live in `app/models.py`; API schemas live in `app/schemas.py`.
+
+## Tests
+
+```bash
 uv run pytest tests
 ```
 
-The test suite covers extraction, auth, profile intake, search gating,
-normalization, scoring, saved/rejected listings, viewing drafts, and per-user
-data isolation.
+The test suite covers requirement extraction, profile intake, auth, search
+gating, normalization, scoring, saved/rejected listings, viewing drafts, and
+per-user data isolation.
 
 ## Current Limitations
 
-- Commute status is `unknown` unless `GOOGLE_MAPS_API_KEY` is configured.
-- The text assistant uses deterministic intent matching; the voice path uses
-  Gradbot tool-calling.
+- Search requires `TAVILY_API_KEY`; without it, search endpoints return a
+  configuration error.
+- Commute status is unknown unless `GOOGLE_MAPS_API_KEY` is configured.
 - Viewing messages are drafted only. Sending, dossier upload, payments, and
   browser automation are not implemented.
-- Database migrations are not included; tables are created with SQLAlchemy
-  metadata on startup.
+- Database migrations are not included; SQLAlchemy metadata creates tables on
+  startup.
