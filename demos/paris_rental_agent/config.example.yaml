@@ -1,0 +1,32 @@
+# Copy this file to config.yaml for local development.
+# config.yaml is intentionally ignored by git because it may contain API keys.
+
+# Optional: configure a specific OpenAI-compatible LLM provider.
+# Prefer environment variables for shared or deployed examples:
+#   LLM_MODEL=...
+#   LLM_BASE_URL=...
+#   LLM_API_KEY=...
+# llm:
+#   model: ""
+#   base_url: ""
+#   api_key: ""
+
+gradium:
+  api_key: ""
+  base_url: "https://api.gradium.ai/api"
+
+tavily:
+  api_key: ""
+
+google_maps:
+  api_key: ""
+
+session:
+  silence_timeout_s: 0.0
+  assistant_speaks_first: true
+
+stt:
+  flush_duration_s: 0.5
+
+tts:
+  rewrite_rules: "en"
