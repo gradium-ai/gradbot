@@ -58,6 +58,9 @@ def get_search_profile(
         db.add(sp)
         db.commit()
         db.refresh(sp)
+    elif assistant_tools.repair_search_profile(sp):
+        db.commit()
+        db.refresh(sp)
     return SearchProfileOut.model_validate(sp)
 
 
@@ -72,4 +75,7 @@ def patch_search_profile(
         raise HTTPException(status_code=400, detail="empty patch")
     assistant_tools.update_search_profile(db, current_user.id, payload)
     sp = assistant_tools.get_active_search_profile(db, current_user.id)
+    if sp is not None and assistant_tools.repair_search_profile(sp):
+        db.commit()
+        db.refresh(sp)
     return SearchProfileOut.model_validate(sp)

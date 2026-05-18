@@ -52,6 +52,24 @@ def test_extracts_room_features_and_amenities():
     assert "metro_m" in nearby
 
 
+def test_explicit_kitchen_must_have_promotes_dishwasher():
+    result = extract_requirements("Can I add dishwasher in the kitchen must haves?")
+    rooms = result.profile_patch.get("room_requirements") or {}
+    assert "dishwasher" in rooms.get("kitchen", {}).get("must_have", [])
+    assert "dishwasher" not in rooms.get("kitchen", {}).get("nice_to_have", [])
+
+
+def test_strong_preference_promotes_kitchen_features_to_must_have():
+    result = extract_requirements(
+        "In terms of kitchen, I would really like to have an oven and a dishwasher."
+    )
+    rooms = result.profile_patch.get("room_requirements") or {}
+    kitchen = rooms.get("kitchen", {})
+    assert "oven" in kitchen.get("must_have", [])
+    assert "dishwasher" in kitchen.get("must_have", [])
+    assert "dishwasher" not in kitchen.get("nice_to_have", [])
+
+
 def test_summary_is_useful():
     result = extract_requirements(SAMPLE)
     s = result.summary or ""

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.normalize import normalize_result
+from app.services.normalize import english_listing_title, normalize_result
 from app.services.scoring import score_listing
 
 
@@ -12,6 +12,7 @@ def test_normalize_basic_french_listing():
         "source": "pap.fr",
     }
     out = normalize_result(raw)
+    assert out["title"] == "2 rooms furnished Paris 11ème"
     assert out["surface_m2"] == 38
     assert out["bedrooms"] == 1
     assert out["arrondissement"] == 11
@@ -25,6 +26,25 @@ def test_normalize_handles_missing_data():
     out = normalize_result(raw)
     assert out["title"] == "Studio"
     assert "rent_eur" in out["missing_fields"]
+
+
+def test_english_listing_title_translates_common_french_search_titles():
+    assert (
+        english_listing_title(
+            "Appartements entre particuliers à louer Paris 4ème arrondissement ..."
+        )
+        == "Apartments for rent by owner in Paris 4th arrondissement ..."
+    )
+    assert (
+        english_listing_title(
+            "Appartements à louer Paris 15ème arrondissement 75015 , Seloger.com"
+        )
+        == "Apartments for rent in Paris 15th arrondissement 75015, Seloger.com"
+    )
+    assert (
+        english_listing_title("Location immobilière Paris (75) - Bien'ici")
+        == "Rental property Paris (75) - Bien'ici"
+    )
 
 
 def test_score_strong_match_passes_filters():

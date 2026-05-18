@@ -6,6 +6,7 @@ The voice agent shares the same business logic as REST chat — it calls into
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 VOICE_ID_EN = "ubuXFxVQwVYnZQhy"  # Eva
 VOICE_ID_FR = "b35yykvVppLXyw_l"  # Elise
+_SEARCH_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 SYSTEM_PROMPT = """You are a Paris rental apartment hunting assistant.
@@ -36,6 +38,7 @@ Ask the user to review and correct the profile by text.
 Ask follow-up questions only for missing or ambiguous required fields, one question at a time.
 Never assume the extracted profile is correct until the user confirms it.
 Do not run a search until the profile is confirmed via confirm_profile, unless the user explicitly asks to search with the current draft.
+If the user asks to add, remove, or correct profile details such as amenities, room must-haves, budget, commute, or workplace, update the profile only; do not run a search unless they explicitly ask to search.
 After confirmation, help the user search, compare, save, reject, and draft viewing messages.
 
 CRITICAL RULES:
@@ -49,6 +52,9 @@ CRITICAL RULES:
 - Do not upload documents.
 - Drafting is allowed; sending is not implemented.
 - When you call a tool, do it silently FIRST, then speak to the user about the result.
+- When a user interrupts you or speaks while you are talking, answer the latest user message directly.
+- Do not restart, quote, or repeat your previous sentence after an interruption.
+- If prior assistant text is provided as conversation context, treat it only as context; never begin by repeating it.
 - Present at most 3 listings by voice unless the user asks for more.
 """
 
@@ -176,15 +182,21 @@ def build_tools() -> list[gradbot.ToolDef]:
         gradbot.ToolDef(
             name="update_profile_draft",
             description=(
-                "Patch the draft profile with explicit field values from the user. Use 'voice' as "
-                "source unless the user is correcting via text."
+                "Patch the draft profile with explicit field values from the user. For workplace "
+                "updates, use work_location_address for a street address such as '40 Rue de Louvre' "
+                "or work_location_label for a landmark/neighborhood such as 'République'. Use "
+                "'voice' as source unless the user is correcting via text."
             ),
             parameters_json=json.dumps({
                 "type": "object",
                 "properties": {
                     "patch_json": {
                         "type": "string",
-                        "description": "A JSON string of fields to patch (e.g. '{\"max_rent_including_charges_eur\":1500}').",
+                        "description": (
+                            "A JSON string of fields to patch (e.g. "
+                            "'{\"max_rent_including_charges_eur\":1500}' or "
+                            "'{\"work_location_address\":\"40 Rue de Louvre, 75002 Paris\"}')."
+                        ),
                     },
                     "source": {
                         "type": "string",
@@ -213,9 +225,11 @@ def build_tools() -> list[gradbot.ToolDef]:
         gradbot.ToolDef(
             name="run_apartment_search",
             description=(
-                "Run a fresh apartment search and return top matches. Blocked unless the profile "
-                "is confirmed (set allow_unconfirmed_profile=true only if the user explicitly "
-                "asks to search with the draft)."
+                "Run a fresh apartment search and return top matches. Call only when the user "
+                "explicitly asks to search or run the search. Do not call this for profile edits "
+                "like adding amenities or room must-haves. Blocked unless the profile is "
+                "confirmed (set allow_unconfirmed_profile=true only if the user explicitly asks "
+                "to search with the draft)."
             ),
             parameters_json=json.dumps({
                 "type": "object",
@@ -373,6 +387,14 @@ def _open_session():
     return SessionLocal()
 
 
+def _search_lock(user_id: str) -> asyncio.Lock:
+    lock = _SEARCH_LOCKS.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _SEARCH_LOCKS[user_id] = lock
+    return lock
+
+
 async def _dispatch_tool(
     name: str,
     args: dict[str, Any],
@@ -430,9 +452,19 @@ async def _dispatch_tool(
         if name == "run_apartment_search":
             max_results = int(args.get("max_results") or 10)
             allow = bool(args.get("allow_unconfirmed_profile") or False)
-            res = await assistant_tools.run_apartment_search(
-                db, user_id, max_results=max_results, allow_unconfirmed_profile=allow
-            )
+            lock = _search_lock(user_id)
+            if lock.locked():
+                res = {
+                    "ok": False,
+                    "error": "search_already_running",
+                    "message": "A search is already running. Please wait for it to finish.",
+                }
+                await handle.send_json(_voice_summarize_search(res))
+                return
+            async with lock:
+                res = await assistant_tools.run_apartment_search(
+                    db, user_id, max_results=max_results, allow_unconfirmed_profile=allow
+                )
             await ws.send_json({"type": "search_results", "result": res})
             await handle.send_json(_voice_summarize_search(res))
             return

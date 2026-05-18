@@ -23,6 +23,8 @@ services:
         sync: false
       - key: TAVILY_API_KEY
         sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
       - key: GRADIUM_API_KEY
         sync: false
 
@@ -43,6 +45,8 @@ services:
         sync: false
       - key: TAVILY_API_KEY
         sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
       - key: GRADIUM_API_KEY
         sync: false
 
@@ -61,6 +65,8 @@ services:
           name: paris-rental-db
           property: connectionString
       - key: TAVILY_API_KEY
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
         sync: false
 
 databases:

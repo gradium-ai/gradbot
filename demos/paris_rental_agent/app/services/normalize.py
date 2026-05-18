@@ -178,6 +178,50 @@ def parse_arrondissement(text: str) -> Optional[int]:
     return None
 
 
+def _english_ordinal(n: int) -> str:
+    suffix = "th"
+    if n % 100 not in {11, 12, 13}:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def english_listing_title(title: str) -> str:
+    """Translate common French rental-result titles for the English UI."""
+    out = re.sub(r"\s+", " ", (title or "").strip())
+    if not out:
+        return "Untitled listing"
+
+    replacements = [
+        (r"\bAppartements?\s+entre\s+particuliers\s+[àa]\s+louer\b", "Apartments for rent by owner in"),
+        (r"\bAppartements?\s+[àa]\s+louer\b", "Apartments for rent in"),
+        (r"\bAppartement\s+meubl[ée]\b", "Furnished apartment"),
+        (r"\bAppartement\b", "Apartment"),
+        (r"\bLocation\s+immobili[èe]re\b", "Rental property"),
+        (r"\bLocation\s+appartement\b", "Apartment rental"),
+        (r"\bImmobilier\b", "Real estate"),
+        (r"\bnon\s+meubl[ée]\b", "unfurnished"),
+        (r"\bmeubl[ée]\b", "furnished"),
+        (r"\bpi[èe]ces?\b", "rooms"),
+        (r"\bchambres?\b", "bedrooms"),
+        (r"\b[àa]\s+louer\b", "for rent"),
+    ]
+    for pattern, repl in replacements:
+        out = re.sub(pattern, repl, out, flags=re.IGNORECASE)
+
+    def _arrondissement(match: re.Match[str]) -> str:
+        return f"{_english_ordinal(int(match.group(1)))} arrondissement"
+
+    out = re.sub(
+        r"\b(\d{1,2})(?:er|e|eme|ème)\s+arrondissement\b",
+        _arrondissement,
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(r"\s+,", ",", out)
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    return out or "Untitled listing"
+
+
 FEATURE_KEYWORDS = [
     ("balcony", ["balcony", "balcon"]),
     ("terrace", ["terrace", "terrasse"]),
@@ -223,7 +267,8 @@ def normalize_result(raw: dict[str, Any]) -> dict[str, Any]:
       - is_mock
     """
     url = safe_external_url(raw.get("url") or raw.get("link") or "")
-    title = (raw.get("title") or raw.get("name") or "Untitled listing").strip()
+    raw_title = (raw.get("title") or raw.get("name") or "Untitled listing").strip()
+    title = english_listing_title(raw_title)
     desc = (
         raw.get("description")
         or raw.get("content")
@@ -232,7 +277,7 @@ def normalize_result(raw: dict[str, Any]) -> dict[str, Any]:
         or ""
     ).strip()
 
-    body = " ".join([title, desc])
+    body = " ".join([raw_title, desc])
 
     rent, charges, total = parse_rent(body)
     if rent is None and "rent_eur" in raw:

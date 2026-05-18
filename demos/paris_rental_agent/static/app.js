@@ -21,6 +21,8 @@ const App = (() => {
         voice: null,
         dashboardScreen: 'feed',
         showTranscript: false,
+        searching: false,
+        matchesStale: false,
     };
 
     const AMENITY_DEFAULTS = {
@@ -112,13 +114,66 @@ const App = (() => {
     async function loadOnboardingState() {
         try {
             state.intake = await api('/api/intake/current');
+            return state.intake;
         } catch {}
+        return null;
+    }
+
+    function applyProfilePayload(payload) {
+        if (!payload || typeof payload !== 'object') return;
+        const profile = payload.draft_profile || payload.search_profile;
+        if (profile && typeof profile === 'object') {
+            const {
+                work_location_label,
+                work_location_address,
+                ...searchFields
+            } = profile;
+            state.searchProfile = {
+                ...(state.searchProfile || {}),
+                ...searchFields,
+                confirmation_status: payload.confirmation_status || searchFields.confirmation_status || state.searchProfile?.confirmation_status,
+            };
+            state.renterProfile = {
+                ...(state.renterProfile || {}),
+                work_location_label: work_location_label ?? state.renterProfile?.work_location_label,
+                work_location_address: work_location_address ?? state.renterProfile?.work_location_address,
+            };
+        }
+        if (payload.renter_profile) {
+            state.renterProfile = { ...(state.renterProfile || {}), ...payload.renter_profile };
+        }
+    }
+
+    async function refreshAfterVoiceProfileChange(msg) {
+        const payload = msg?.state || {};
+        state.intake = { ...(state.intake || {}), ...payload };
+        applyProfilePayload(payload);
+
+        const voiceSummary = payload.summary;
+        await Promise.all([loadOnboardingState(), loadProfiles()]);
+        if (voiceSummary && state.intake) state.intake.summary = voiceSummary;
+
+        if (msg.type === 'profile_confirmed' && payload.ok) {
+            await runFreshSearch();
+            return;
+        }
+        if (
+            state.searchProfile?.confirmation_status === 'confirmed' &&
+            !(payload.missing_fields || []).length
+        ) {
+            await runFreshSearch();
+            return;
+        }
+        if (state.view === 'onboarding' || state.dashboardScreen === 'search' || state.dashboardScreen === 'feed') {
+            render();
+        }
     }
 
     async function loadMatches() {
         try {
             const m = await api('/api/matches?include_rejected=false&limit=20');
             state.matches = m?.matches || [];
+            state.matchesStale = Boolean(m?.stale);
         } catch { state.matches = []; }
     }
 
@@ -409,19 +464,19 @@ const App = (() => {
                 </div>
                 <div class="${cls('max_rent_including_charges_eur')}">
                     <label>Max rent incl. charges (€) ${tag('max_rent_including_charges_eur')}</label>
-                    <input id="f-max_rent" type="number" min="0" value="${dp.max_rent_including_charges_eur ?? ''}">
+                    <input id="f-max_rent" type="number" min="1" value="${dp.max_rent_including_charges_eur ?? ''}">
                 </div>
                 <div class="field">
                     <label>Bedrooms ${tag('min_bedrooms')}</label>
                     <input id="f-min_bedrooms" type="number" min="0" value="${dp.min_bedrooms ?? ''}">
                 </div>
                 <div class="field">
-                    <label>Rooms ${tag('min_rooms')}</label>
-                    <input id="f-min_rooms" type="number" min="0" value="${dp.min_rooms ?? ''}">
+                    <label>Minimum rooms (optional) ${tag('min_rooms')}</label>
+                    <input id="f-min_rooms" type="number" min="1" value="${dp.min_rooms ?? ''}">
                 </div>
                 <div class="field">
                     <label>Min surface (m²) ${tag('min_surface_m2')}</label>
-                    <input id="f-min_surface" type="number" min="0" value="${dp.min_surface_m2 ?? ''}">
+                    <input id="f-min_surface" type="number" min="1" value="${dp.min_surface_m2 ?? ''}">
                 </div>
                 <div class="field">
                     <label>Furnished ${tag('furnished_preference')}</label>
@@ -434,7 +489,7 @@ const App = (() => {
                 </div>
                 <div class="${cls('commute_max_minutes')}">
                     <label>Commute max (minutes) ${tag('commute_max_minutes')}</label>
-                    <input id="f-commute_minutes" type="number" min="0" value="${dp.commute_max_minutes ?? 30}">
+                    <input id="f-commute_minutes" type="number" min="1" value="${dp.commute_max_minutes ?? 30}">
                 </div>
                 <div class="${cls('commute_modes')}">
                     <label>Commute modes ${tag('commute_modes')}</label>
@@ -447,12 +502,24 @@ const App = (() => {
                     <input id="f-lr_must" value="${escapeAttr(arr((rooms.living_room||{}).must_have))}">
                 </div>
                 <div class="field full">
+                    <label>Living-room nice-to-haves</label>
+                    <input id="f-lr_nice" value="${escapeAttr(arr((rooms.living_room||{}).nice_to_have))}">
+                </div>
+                <div class="field full">
                     <label>Bedroom must-haves</label>
                     <input id="f-br_must" value="${escapeAttr(arr((rooms.bedroom||{}).must_have))}">
                 </div>
                 <div class="field full">
+                    <label>Bedroom nice-to-haves</label>
+                    <input id="f-br_nice" value="${escapeAttr(arr((rooms.bedroom||{}).nice_to_have))}">
+                </div>
+                <div class="field full">
                     <label>Kitchen must-haves</label>
                     <input id="f-kt_must" value="${escapeAttr(arr((rooms.kitchen||{}).must_have))}">
+                </div>
+                <div class="field full">
+                    <label>Kitchen nice-to-haves</label>
+                    <input id="f-kt_nice" value="${escapeAttr(arr((rooms.kitchen||{}).nice_to_have))}">
                 </div>
                 <div class="field">
                     <label>Preferred arrondissements</label>
@@ -504,7 +571,7 @@ const App = (() => {
 
         document.getElementById('btn-confirm')?.addEventListener('click', async () => {
             // First save current form values
-            await saveOnboardingForm({ silent: true });
+            await saveOnboardingForm({ silent: true, skipAutoSearch: true });
             try {
                 const res = await api('/api/intake/confirm', { method: 'POST' });
                 if (!res.ok) {
@@ -512,7 +579,7 @@ const App = (() => {
                     return;
                 }
                 stopVoice();
-                await goDashboard();
+                await runFreshSearch();
             } catch (e) {
                 if (e.data?.missing_fields) alert('Missing: ' + e.data.missing_fields.join(', '));
                 else alert(e.message);
@@ -521,8 +588,7 @@ const App = (() => {
 
         document.getElementById('btn-search')?.addEventListener('click', async () => {
             try {
-                const res = await api('/api/search-runs', { method: 'POST', body: { max_results: 20 } });
-                if (res?.ok) await goDashboard();
+                await runFreshSearch();
             } catch (e) { alert(e.message); }
         });
 
@@ -538,6 +604,10 @@ const App = (() => {
     async function saveOnboardingForm(opts = {}) {
         const get = (id) => document.getElementById(id)?.value ?? '';
         const num = (v) => v === '' ? null : Number(v);
+        const positiveNum = (v) => {
+            const n = num(v);
+            return n && n > 0 ? n : null;
+        };
         const list = (v) => v ? v.split(',').map(s => s.trim()).filter(Boolean) : [];
         const intList = (v) => list(v).map(s => parseInt(s, 10)).filter(n => !isNaN(n));
 
@@ -548,19 +618,19 @@ const App = (() => {
         const patch = {
             work_location_label: get('f-work_location_label') || null,
             work_location_address: get('f-work_location_address') || null,
-            max_rent_including_charges_eur: num(get('f-max_rent')),
+            max_rent_including_charges_eur: positiveNum(get('f-max_rent')),
             min_bedrooms: num(get('f-min_bedrooms')),
-            min_rooms: num(get('f-min_rooms')),
-            min_surface_m2: num(get('f-min_surface')),
+            min_rooms: positiveNum(get('f-min_rooms')),
+            min_surface_m2: positiveNum(get('f-min_surface')),
             furnished_preference: get('f-furnished') || null,
-            commute_max_minutes: num(get('f-commute_minutes')) ?? 30,
+            commute_max_minutes: positiveNum(get('f-commute_minutes')) ?? 30,
             commute_modes: modes,
             preferred_arrondissements: intList(get('f-pref_arr')),
             excluded_arrondissements: intList(get('f-excl_arr')),
             room_requirements: {
-                living_room: { must_have: list(get('f-lr_must')), nice_to_have: [] },
-                bedroom: { must_have: list(get('f-br_must')), nice_to_have: [] },
-                kitchen: { must_have: list(get('f-kt_must')), nice_to_have: [] },
+                living_room: { must_have: list(get('f-lr_must')), nice_to_have: list(get('f-lr_nice')) },
+                bedroom: { must_have: list(get('f-br_must')), nice_to_have: list(get('f-br_nice')) },
+                kitchen: { must_have: list(get('f-kt_must')), nice_to_have: list(get('f-kt_nice')) },
             },
             nearby_requirements: nearby,
         };
@@ -568,6 +638,15 @@ const App = (() => {
         try {
             const res = await api('/api/intake/text-update', { method: 'POST', body: { patch } });
             state.intake = res;
+            applyProfilePayload(res);
+            if (
+                !opts.skipAutoSearch &&
+                res.confirmation_status === 'confirmed' &&
+                !(res.missing_fields || []).length
+            ) {
+                await runFreshSearch();
+                return;
+            }
             if (!opts.silent) render();
         } catch (e) {
             if (!opts.silent) alert(e.message);
@@ -662,10 +741,17 @@ const App = (() => {
     }
 
     function renderFeedScreen() {
+        if (state.searching) {
+            return `
+                <div class="screen-empty">
+                    <strong>Searching with the latest profile…</strong>
+                </div>
+            `;
+        }
         if (!state.matches.length) {
             return `
                 <div class="screen-empty">
-                    <strong>No matches yet</strong>
+                    <strong>${state.matchesStale ? 'Profile updated. Run a fresh search.' : 'No matches yet'}</strong>
                     <button id="btn-fresh-search-2" class="btn">Run search</button>
                 </div>
             `;
@@ -890,14 +976,27 @@ const App = (() => {
     }
 
     async function runFreshSearch() {
+        state.searching = true;
+        state.matchesStale = false;
+        state.matches = [];
+        state.view = 'dashboard';
+        state.dashboardScreen = 'feed';
+        render();
         try {
             const res = await api('/api/search-runs', { method: 'POST', body: { max_results: 20 } });
-            if (res?.ok) await goDashboard();
+            if (res?.ok) {
+                state.matches = res.matches || [];
+                await Promise.all([loadSaved(), loadDrafts(), loadProfiles()]);
+                state.searching = false;
+                render();
+            }
         } catch (e) {
+            state.searching = false;
             if (e.data?.error === 'search_profile_not_confirmed') {
                 state.view = 'onboarding'; render();
             } else {
                 alert(e.message);
+                render();
             }
         }
     }
@@ -1048,14 +1147,7 @@ const App = (() => {
     function handleVoiceEvent(msg) {
         if (!msg || !msg.type) return;
         if (msg.type === 'intake_state' || msg.type === 'profile_confirmed') {
-            // Refresh onboarding state in-place
-            (async () => {
-                await loadOnboardingState();
-                if (state.view === 'onboarding') render();
-                if (msg.type === 'profile_confirmed' && msg.state?.ok) {
-                    await goDashboard();
-                }
-            })();
+            refreshAfterVoiceProfileChange(msg);
         } else if (msg.type === 'search_results') {
             (async () => { await loadMatches(); if (state.view === 'dashboard') render(); })();
         } else if (msg.type === 'matches') {

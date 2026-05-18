@@ -79,4 +79,10 @@ def list_matches(
     matches = result.get("matches") or []
     if min_score is not None:
         matches = [m for m in matches if m["overall_score"] >= min_score]
-    return {"ok": True, "matches": matches, "search_run_id": result.get("search_run_id")}
+    return {
+        "ok": True,
+        "matches": matches,
+        "search_run_id": result.get("search_run_id"),
+        "stale": bool(result.get("stale")),
+        "message": result.get("message"),
+    }

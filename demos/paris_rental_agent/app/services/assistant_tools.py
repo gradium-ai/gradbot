@@ -10,6 +10,7 @@ logic.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -28,7 +29,7 @@ from ..models import (
     ViewingRequestDraft,
 )
 from .drafting import draft_viewing_request_text
-from .normalize import safe_external_url
+from .normalize import english_listing_title, safe_external_url
 from .requirement_extraction import compute_missing_fields, extract_requirements
 from .search_pipeline import run_search_for_user
 
@@ -64,6 +65,112 @@ RENTER_PROFILE_FIELDS = (
     "work_lon",
 )
 
+_INT_LIMITS: dict[str, tuple[int, int]] = {
+    "max_rent_including_charges_eur": (1, 50_000),
+    "min_bedrooms": (0, 10),
+    "min_rooms": (1, 20),
+    "min_surface_m2": (1, 500),
+    "commute_max_minutes": (1, 180),
+}
+
+_CLEARABLE_SEARCH_FIELDS = {
+    "max_rent_including_charges_eur",
+    "min_bedrooms",
+    "min_rooms",
+    "min_surface_m2",
+    "furnished_preference",
+}
+
+_ARRONDISSEMENT_FIELDS = {
+    "preferred_arrondissements",
+    "excluded_arrondissements",
+}
+
+
+_WORK_LOCATION_ALIASES = {
+    "work_location",
+    "workplace",
+    "work_address",
+    "workplace_address",
+    "office_address",
+}
+
+_SEARCH_FIELD_ALIASES = {
+    "budget": "max_rent_including_charges_eur",
+    "max_budget": "max_rent_including_charges_eur",
+    "maximum_budget": "max_rent_including_charges_eur",
+    "max_rent": "max_rent_including_charges_eur",
+    "maximum_rent": "max_rent_including_charges_eur",
+    "rent_budget": "max_rent_including_charges_eur",
+    "bedrooms": "min_bedrooms",
+    "minimum_bedrooms": "min_bedrooms",
+    "min_bedroom": "min_bedrooms",
+    "minimum_bedroom": "min_bedrooms",
+    "rooms": "min_rooms",
+    "minimum_rooms": "min_rooms",
+    "min_room": "min_rooms",
+    "minimum_room": "min_rooms",
+    "min_surface": "min_surface_m2",
+    "minimum_surface": "min_surface_m2",
+    "min_surface_area": "min_surface_m2",
+    "minimum_surface_area": "min_surface_m2",
+    "min_surface_area_m2": "min_surface_m2",
+    "minimum_surface_area_m2": "min_surface_m2",
+    "min_surface_area_sqm": "min_surface_m2",
+    "minimum_surface_area_sqm": "min_surface_m2",
+    "surface_area": "min_surface_m2",
+    "surface_area_m2": "min_surface_m2",
+    "surface_area_sqm": "min_surface_m2",
+    "arrondissements": "preferred_arrondissements",
+    "preferred_arrondissement": "preferred_arrondissements",
+    "preferred_areas": "preferred_arrondissements",
+    "excluded_arrondissement": "excluded_arrondissements",
+}
+
+
+def _looks_like_precise_address(value: Any) -> bool:
+    text = f" {str(value or '').lower().strip()} "
+    return bool(
+        any(ch.isdigit() for ch in text)
+        or any(
+            word in text
+            for word in (
+                " rue ",
+                " avenue ",
+                " boulevard ",
+                " blvd ",
+                " street ",
+                " st ",
+                " road ",
+                " rd ",
+                " place ",
+                " quai ",
+                " paris",
+                "750",
+            )
+        )
+    )
+
+
+def _normalize_profile_patch_aliases(patch: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(patch or {})
+    for alias in _WORK_LOCATION_ALIASES:
+        value = normalized.pop(alias, None)
+        if value in (None, ""):
+            continue
+        target = (
+            "work_location_address"
+            if _looks_like_precise_address(value)
+            else "work_location_label"
+        )
+        normalized.setdefault(target, value)
+    for alias, target in _SEARCH_FIELD_ALIASES.items():
+        value = normalized.pop(alias, None)
+        if value in (None, ""):
+            continue
+        normalized.setdefault(target, value)
+    return normalized
+
 
 def _coerce_nearby_requirements(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
@@ -92,7 +199,107 @@ def _coerce_nearby_requirements(value: Any) -> dict[str, Any]:
     return out
 
 
+def _merge_room_requirements(current: Any, patch: Any) -> dict[str, Any]:
+    rooms: dict[str, Any] = {}
+    if isinstance(current, dict):
+        rooms = {
+            room: {
+                "must_have": list((spec or {}).get("must_have") or []),
+                "nice_to_have": list((spec or {}).get("nice_to_have") or []),
+            }
+            for room, spec in current.items()
+            if isinstance(spec, dict)
+        }
+    if not isinstance(patch, dict):
+        return rooms
+
+    for room, spec in patch.items():
+        if not isinstance(spec, dict):
+            continue
+        target = rooms.setdefault(room, {"must_have": [], "nice_to_have": []})
+        for kind in ("must_have", "nice_to_have"):
+            values = spec.get(kind) or []
+            if isinstance(values, str):
+                values = [values]
+            for value in values:
+                label = str(value).strip()
+                if label and label not in target[kind]:
+                    target[kind].append(label)
+    return rooms
+
+
+def _coerce_int_field(key: str, value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return None
+    low, high = _INT_LIMITS[key]
+    if low <= coerced <= high:
+        return coerced
+    return None
+
+
+def _coerce_arrondissement_list(value: Any) -> list[int]:
+    if value is None:
+        return []
+
+    items = value if isinstance(value, (list, tuple, set)) else [value]
+    out: list[int] = []
+
+    def add(candidate: int) -> None:
+        if 1 <= candidate <= 20 and candidate not in out:
+            out.append(candidate)
+
+    for item in items:
+        if isinstance(item, int):
+            add(item - 75000 if 75001 <= item <= 75020 else item)
+            continue
+
+        text = str(item or "").lower()
+        if not text:
+            continue
+
+        for postal in re.findall(r"\b750(0[1-9]|1[0-9]|20)\b", text):
+            add(int(postal))
+
+        for ordinal in re.findall(r"\b([1-9]|1[0-9]|20)(?:st|nd|rd|th|e|er|eme|ème)?\b", text):
+            add(int(ordinal))
+
+    return out
+
+
+def repair_search_profile(sp: SearchProfile) -> bool:
+    """Normalize persisted profile values that predate current validation."""
+    changed = False
+    for key in _INT_LIMITS:
+        value = getattr(sp, key)
+        if value is None:
+            continue
+        repaired = _coerce_int_field(key, value)
+        if repaired is None:
+            repaired = 30 if key == "commute_max_minutes" else None
+        if repaired != value:
+            setattr(sp, key, repaired)
+            changed = True
+
+    if sp.furnished_preference not in (None, "required", "prefer", "any"):
+        sp.furnished_preference = None
+        changed = True
+
+    for key in _ARRONDISSEMENT_FIELDS:
+        value = getattr(sp, key)
+        repaired = _coerce_arrondissement_list(value)
+        if repaired != (value or []):
+            setattr(sp, key, repaired)
+            changed = True
+
+    return changed
+
+
 def _serialize_search_profile(p: SearchProfile, *, renter: Optional[RenterProfile] = None) -> dict[str, Any]:
+    repair_search_profile(p)
     out: dict[str, Any] = {
         "id": p.id,
         "user_id": p.user_id,
@@ -124,7 +331,7 @@ def _serialize_listing(l: Listing) -> dict[str, Any]:
         "id": l.id,
         "canonical_url": safe_external_url(l.canonical_url or ""),
         "source": l.source,
-        "title": l.title,
+        "title": english_listing_title(l.title),
         "description": l.description,
         "rent_eur": l.rent_eur,
         "charges_eur": l.charges_eur,
@@ -205,10 +412,22 @@ def _apply_patch_to_search_profile(
     for key, value in patch.items():
         if key not in allowed:
             continue
-        if value is None:
+
+        if key in _INT_LIMITS:
+            value = _coerce_int_field(key, value)
+            if value is None and key not in _CLEARABLE_SEARCH_FIELDS:
+                continue
+        elif value is None:
+            if key not in _CLEARABLE_SEARCH_FIELDS:
+                continue
+        if key == "furnished_preference" and value not in (None, "required", "prefer", "any"):
             continue
         if key == "nearby_requirements":
             value = _coerce_nearby_requirements(value)
+        if key == "room_requirements":
+            value = _merge_room_requirements(getattr(sp, key), value)
+        if key in _ARRONDISSEMENT_FIELDS:
+            value = _coerce_arrondissement_list(value)
         setattr(sp, key, value)
         sources[key] = "voice"
     return sources
@@ -337,6 +556,7 @@ def extract_requirements_from_transcript(
 def update_profile_draft(
     db: Session, user_id: str, patch: dict[str, Any], *, source: str = "text"
 ) -> dict[str, Any]:
+    patch = _normalize_profile_patch_aliases(patch)
     sp = _get_or_create_search_profile(db, user_id)
     rp = _get_or_create_renter_profile(db, user_id)
     intake = _get_or_create_intake(db, user_id, sp)
@@ -523,8 +743,37 @@ async def run_apartment_search(
     }
 
 
+def _profile_updated_after_search(
+    search_run: SearchRun,
+    search_profile: SearchProfile | None,
+    renter_profile: RenterProfile | None,
+) -> bool:
+    if search_profile is None:
+        return False
+    run_started_at = search_run.started_at
+    profile_timestamps = [
+        ts
+        for ts in (
+            search_profile.updated_at,
+            renter_profile.updated_at if renter_profile else None,
+        )
+        if ts is not None
+    ]
+    if not run_started_at or not profile_timestamps:
+        return False
+
+    def normalized(dt: datetime) -> datetime:
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+
+    latest_profile_update = max(normalized(ts) for ts in profile_timestamps)
+    return normalized(run_started_at) < latest_profile_update
+
+
 def list_top_matches(db: Session, user_id: str, *, limit: int = 20) -> dict[str, Any]:
     limit = max(1, min(limit, 50))
+    active_profile = get_active_search_profile(db, user_id)
     last_run = (
         db.query(SearchRun)
         .filter(SearchRun.user_id == user_id, SearchRun.status == "completed")
@@ -533,6 +782,17 @@ def list_top_matches(db: Session, user_id: str, *, limit: int = 20) -> dict[str,
     )
     if not last_run:
         return {"ok": True, "matches": [], "message": "No completed searches yet."}
+
+    renter_profile = db.query(RenterProfile).filter(RenterProfile.user_id == user_id).first()
+    if _profile_updated_after_search(last_run, active_profile, renter_profile):
+        return {
+            "ok": True,
+            "matches": [],
+            "search_run_id": last_run.id,
+            "stale": True,
+            "message": "Profile changed after the latest search. Run a fresh search.",
+        }
+
     rejected_listing_ids = {
         sl.listing_id
         for sl in db.query(SavedListing).filter(

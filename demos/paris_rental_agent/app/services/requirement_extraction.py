@@ -266,6 +266,16 @@ def _extract_work_location(text: str) -> dict[str, Any]:
 
 def _extract_room_features(text: str) -> dict[str, Any]:
     norm = _normalize(text)
+    explicit_must_have = bool(
+        re.search(
+            r"\b("
+            r"must[ -]?haves?|required|need|needs|require|requires|"
+            r"want|wants|want to have|really like to have|would really like|"
+            r"would like to have|i'd like to have|id like to have"
+            r")\b",
+            norm,
+        )
+    )
     rooms: dict[str, dict[str, list[str]]] = {
         "living_room": {"must_have": [], "nice_to_have": []},
         "bedroom": {"must_have": [], "nice_to_have": []},
@@ -274,8 +284,9 @@ def _extract_room_features(text: str) -> dict[str, Any]:
     found = False
     for kw, (room, kind, label) in ROOM_FEATURE_KEYWORDS.items():
         if kw in norm:
-            if label not in rooms[room][kind]:
-                rooms[room][kind].append(label)
+            target_kind = "must_have" if explicit_must_have else kind
+            if label not in rooms[room][target_kind]:
+                rooms[room][target_kind].append(label)
                 found = True
     return rooms if found else {}
 

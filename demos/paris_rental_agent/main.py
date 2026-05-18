@@ -31,6 +31,7 @@ from sqlalchemy.engine import make_url  # noqa: E402
 from app.bootstrap import DEMO_EMAIL, DEMO_PASSWORD, seed_demo_user  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import init_db  # noqa: E402
+from app.services.commute import is_configured as is_google_maps_configured  # noqa: E402
 from app.services.tavily_search import _resolve_tavily_key  # noqa: E402
 from app.routes.assistant import router as assistant_router  # noqa: E402
 from app.routes.auth import router as auth_router  # noqa: E402
@@ -66,6 +67,11 @@ def _startup() -> None:
         )
     else:
         logger.info("Tavily API key loaded — live search enabled.")
+    if not is_google_maps_configured():
+        logger.warning(
+            "Google Maps API key is not set — commute estimates will stay "
+            "unverified until GOOGLE_MAPS_API_KEY is configured."
+        )
 
 
 @asynccontextmanager
@@ -133,4 +139,5 @@ def healthz() -> dict:
         "ok": True,
         "env": settings.app_env,
         "tavily_configured": bool(_resolve_tavily_key()),
+        "google_maps_configured": is_google_maps_configured(),
     }

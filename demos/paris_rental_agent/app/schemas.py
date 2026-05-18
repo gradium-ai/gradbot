@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Literal, Optional
 
@@ -64,6 +65,34 @@ class SearchProfileBase(BaseModel):
     excluded_arrondissements: Optional[list[int]] = Field(default=None, max_length=20)
     room_requirements: Optional[dict[str, Any]] = None
     nearby_requirements: Optional[dict[str, Any]] = None
+
+    @field_validator("preferred_arrondissements", "excluded_arrondissements", mode="before")
+    @classmethod
+    def coerce_arrondissements(cls, value: Any) -> list[int] | None:
+        if value is None:
+            return None
+
+        items = value if isinstance(value, (list, tuple, set)) else [value]
+        out: list[int] = []
+
+        def add(candidate: int) -> None:
+            if 1 <= candidate <= 20 and candidate not in out:
+                out.append(candidate)
+
+        for item in items:
+            if isinstance(item, int):
+                add(item - 75000 if 75001 <= item <= 75020 else item)
+                continue
+
+            text = str(item or "").lower()
+            if not text:
+                continue
+            for postal in re.findall(r"\b750(0[1-9]|1[0-9]|20)\b", text):
+                add(int(postal))
+            for ordinal in re.findall(r"\b([1-9]|1[0-9]|20)(?:st|nd|rd|th|e|er|eme|ème)?\b", text):
+                add(int(ordinal))
+
+        return out
 
     @field_validator("nearby_requirements", mode="before")
     @classmethod
