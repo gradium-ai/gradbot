@@ -22,8 +22,8 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from app.db import init_db  # noqa: E402
-from app.jobs import run_saved_searches  # noqa: E402
+from src.db import init_db  # noqa: E402
+from src.jobs import run_saved_searches  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

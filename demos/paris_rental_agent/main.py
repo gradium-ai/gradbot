@@ -28,18 +28,18 @@ from fastapi import HTTPException  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from sqlalchemy.engine import make_url  # noqa: E402
 
-from app.bootstrap import DEMO_EMAIL, DEMO_PASSWORD, seed_demo_user  # noqa: E402
-from app.config import get_settings  # noqa: E402
-from app.db import init_db  # noqa: E402
-from app.services.commute import is_configured as is_google_maps_configured  # noqa: E402
-from app.services.tavily_search import _resolve_tavily_key  # noqa: E402
-from app.routes.assistant import router as assistant_router  # noqa: E402
-from app.routes.auth import router as auth_router  # noqa: E402
-from app.routes.intake import router as intake_router  # noqa: E402
-from app.routes.listings import router as listings_router  # noqa: E402
-from app.routes.profiles import router as profiles_router  # noqa: E402
-from app.routes.search import router as search_router  # noqa: E402
-from app.routes.voice import router as voice_router  # noqa: E402
+from src.bootstrap import DEMO_EMAIL, DEMO_PASSWORD, seed_demo_user  # noqa: E402
+from src.config import get_settings  # noqa: E402
+from src.db import init_db  # noqa: E402
+from src.services.commute import is_configured as is_google_maps_configured  # noqa: E402
+from src.services.tavily_search import _resolve_tavily_key  # noqa: E402
+from src.routes.assistant import router as assistant_router  # noqa: E402
+from src.routes.auth import router as auth_router  # noqa: E402
+from src.routes.intake import router as intake_router  # noqa: E402
+from src.routes.listings import router as listings_router  # noqa: E402
+from src.routes.profiles import router as profiles_router  # noqa: E402
+from src.routes.search import router as search_router  # noqa: E402
+from src.routes.voice import router as voice_router  # noqa: E402
 
 logger = logging.getLogger(__name__)
 gradbot.init_logging()

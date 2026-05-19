@@ -160,8 +160,8 @@ def test_profile_update_hides_stale_matches_until_fresh_search(client):
 
 
 def test_legacy_invalid_min_rooms_is_repaired(client):
-    from app.db import SessionLocal
-    from app.models import SearchProfile, User
+    from src.db import SessionLocal
+    from src.models import SearchProfile, User
 
     email = _signup(client)
     db = SessionLocal()
@@ -187,8 +187,8 @@ def test_legacy_invalid_min_rooms_is_repaired(client):
 
 
 def test_legacy_string_arrondissements_are_repaired(client):
-    from app.db import SessionLocal
-    from app.models import SearchProfile, User
+    from src.db import SessionLocal
+    from src.models import SearchProfile, User
 
     email = _signup(client)
     db = SessionLocal()

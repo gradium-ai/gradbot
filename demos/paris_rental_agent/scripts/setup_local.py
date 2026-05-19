@@ -16,9 +16,9 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
-from app.bootstrap import DEMO_EMAIL, DEMO_PASSWORD, seed_demo_user  # noqa: E402
-from app.config import get_settings  # noqa: E402
-from app.db import init_db  # noqa: E402
+from src.bootstrap import DEMO_EMAIL, DEMO_PASSWORD, seed_demo_user  # noqa: E402
+from src.config import get_settings  # noqa: E402
+from src.db import init_db  # noqa: E402
 
 
 def main() -> None:

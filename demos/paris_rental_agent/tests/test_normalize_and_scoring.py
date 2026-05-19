@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from app.services.normalize import english_listing_title, normalize_result
-from app.services.scoring import score_listing
+from src.services.normalize import english_listing_title, normalize_result
+from src.services.scoring import score_listing
 
 
 def test_normalize_basic_french_listing():
