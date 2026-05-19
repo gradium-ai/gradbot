@@ -25,13 +25,13 @@ into focused Paris rental queries, sends those queries to the
 [Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search),
 and uses the returned web results to find relevant apartment listings.
 
-The Tavily integration lives in `app/services/tavily_search.py`:
+The Tavily integration lives in `src/services/tavily_search.py`:
 
 - `build_queries()` creates search queries from budget, bedrooms, rooms,
   furnished preference, and preferred arrondissements.
 - `search_paris_rentals()` calls Tavily, deduplicates URLs, and returns raw web
   results.
-- `app/services/search_pipeline.py` normalizes those results, scores them
+- `src/services/search_pipeline.py` normalizes those results, scores them
   against the confirmed profile, and stores the matches.
 
 To use Tavily locally, create an API key from Tavily, then set
@@ -118,17 +118,17 @@ Then set `DATABASE_URL` in `.env`.
   routes, mounts the voice WebSocket route, and serves the static frontend.
 - `static/app.js` is a small single-page frontend for signup/login, onboarding,
   search results, saved listings, viewing drafts, text chat, and voice chat.
-- `app/routes/` contains the HTTP API for auth, intake, profiles, search,
+- `src/routes/` contains the HTTP API for auth, intake, profiles, search,
   listings, assistant chat, and voice.
-- `app/voice/gradbot_session.py` defines the Gradbot voice prompt, tools, and
+- `src/voice/gradbot_session.py` defines the Gradbot voice prompt, tools, and
   WebSocket tool dispatch.
-- `app/services/assistant_tools.py` is the shared application layer used by REST
+- `src/services/assistant_tools.py` is the shared application layer used by REST
   chat, voice tools, tests, and jobs.
-- `app/services/search_pipeline.py` runs live search, normalizes results, scores
+- `src/services/search_pipeline.py` runs live search, normalizes results, scores
   listings, stores matches, and marks stale results after profile changes.
-- `app/services/requirement_extraction.py`, `normalize.py`, `scoring.py`,
+- `src/services/requirement_extraction.py`, `normalize.py`, `scoring.py`,
   `commute.py`, and `drafting.py` keep domain logic isolated and testable.
-- SQLAlchemy models live in `app/models.py`; API schemas live in `app/schemas.py`.
+- SQLAlchemy models live in `src/models.py`; API schemas live in `src/schemas.py`.
 
 ## Tests
 

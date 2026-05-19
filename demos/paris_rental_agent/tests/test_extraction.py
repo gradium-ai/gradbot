@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.services.requirement_extraction import (
+from src.services.requirement_extraction import (
     extract_requirements,
     compute_missing_fields,
 )

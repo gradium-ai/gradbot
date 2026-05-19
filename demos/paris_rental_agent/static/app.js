@@ -6,6 +6,12 @@
  *   - dashboard (matches, saved, drafts, assistant)
  */
 
+// Mount prefix: when the demo is mounted under a sub-path (e.g.
+// /paris_rental_agent on the combined demos host), strip the SPA route
+// suffix (/, /login, /dashboard) to recover that prefix. Empty when
+// served at the root.
+const BASE = window.location.pathname.replace(/\/(login|dashboard)?\/?$/, '');
+
 const App = (() => {
     const state = {
         user: null,
@@ -63,7 +69,7 @@ const App = (() => {
 
     // ───────────────────────── API helpers ─────────────────────────
     async function api(path, opts = {}) {
-        const res = await fetch(path, {
+        const res = await fetch(BASE + path, {
             credentials: 'include',
             headers: {
                 'Content-Type': 'application/json',
@@ -254,7 +260,7 @@ const App = (() => {
         formEl.innerHTML = authForm(mode);
 
         // Try to pre-fill with the demo account
-        fetch('/api/demo-credentials').then(r => r.ok ? r.json() : null).then(d => {
+        fetch(BASE + '/api/demo-credentials').then(r => r.ok ? r.json() : null).then(d => {
             if (!d || !d.email) return;
             demoCreds = d;
             const emailEl = document.getElementById('auth-email');
@@ -1014,10 +1020,10 @@ const App = (() => {
 
     async function startVoice() {
         try {
-            const audioConfig = await fetch('/api/audio-config').then(r => r.json()).catch(() => ({pcm: false}));
+            const audioConfig = await fetch(BASE + '/api/audio-config').then(r => r.json()).catch(() => ({pcm: false}));
             const echo = document.getElementById('echo-cancel')?.checked ?? true;
             player = new SyncedAudioPlayer({
-                basePath: '/static/js',
+                basePath: BASE + '/static/js',
                 sampleRate: 24000,
                 pcmOutput: audioConfig.pcm || false,
                 echoCancellation: echo,
@@ -1036,7 +1042,7 @@ const App = (() => {
             await player.start();
 
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${location.host}/ws/voice`;
+            const wsUrl = `${protocol}//${location.host}${BASE}/ws/voice`;
             voiceWS = new WebSocket(wsUrl);
             voiceWS.onopen = () => {
                 voiceWS.send(JSON.stringify({ type: 'start', speed: readVoiceSpeed(), language: 'en' }));

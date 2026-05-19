@@ -29,7 +29,7 @@ if str(PROJECT_DIR) not in sys.path:
 @pytest.fixture(scope="session")
 def app():
     """FastAPI app (lazy import after env vars are set)."""
-    from app.db import init_db
+    from src.db import init_db
 
     init_db()
     from main import app as fastapi_app
@@ -46,7 +46,7 @@ def client(app):
 
 @pytest.fixture()
 def db_session():
-    from app.db import SessionLocal, init_db
+    from src.db import SessionLocal, init_db
 
     init_db()
     db = SessionLocal()
@@ -65,7 +65,7 @@ def fake_tavily(monkeypatch):
     so we patch ``search_paris_rentals`` to return a deterministic set of raw
     Paris rental results.
     """
-    from app.services import search_pipeline
+    from src.services import search_pipeline
 
     fake_results = [
         {
