@@ -193,7 +193,11 @@ const App = (() => {
     function render() {
         const root = document.getElementById('app');
         if (!state.user) { root.innerHTML = renderAuth(); wireAuth(); return; }
-        if (state.view === 'onboarding') { root.innerHTML = renderHeader() + renderOnboarding(); wireOnboarding(); return; }
+        if (state.view === 'onboarding') {
+            root.innerHTML = `<div class="parisian-rental">${renderHeader()}${renderOnboarding()}</div>`;
+            wireOnboarding();
+            return;
+        }
         if (state.view === 'dashboard') { root.innerHTML = renderDashboard(); wireDashboard(); return; }
         root.innerHTML = renderHeader() + '<div class="container"><div class="card">Unknown view.</div></div>';
     }
@@ -322,13 +326,51 @@ const App = (() => {
 
     function renderHeader() {
         return `
-            <div class="app-header">
-                <div class="brand"><div class="brand-dot"></div> Paris Rental Agent</div>
-                <div class="row" style="gap:12px;">
-                    <div class="user-chip"><span>${state.user?.email || ''}</span></div>
-                    <button id="btn-logout" class="btn ghost small">Log out</button>
+            <header class="app-header paris-topbar">
+                <div class="brand paris-brand">
+                    ${renderParisBrandMark()}
+                    <h1 class="paris-brand-title">Paris Rental Agent</h1>
                 </div>
-            </div>
+                <div class="paris-topbar-actions">
+                    <div class="user-chip paris-user-pill"><span>${state.user?.email || ''}</span></div>
+                    <button id="btn-logout" class="btn ghost small paris-logout-button" type="button">Log out</button>
+                </div>
+            </header>
+        `;
+    }
+
+    function renderParisBrandMark() {
+        return `
+            <svg class="paris-brand-mark" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                <path d="M32 7c4 9 7 18 8 27M32 7c-4 9-7 18-8 27M22 34h20M18 48h28M14 56h36M25 34l-9 22M39 34l9 22M28 20h8M26 26h12"
+                    stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        `;
+    }
+
+    function renderBalconyArt() {
+        return `
+            <svg class="paris-line-art" viewBox="0 0 180 160" fill="none" aria-hidden="true">
+                <rect x="47" y="20" width="86" height="96" rx="4" stroke="currentColor" stroke-width="2" opacity="0.55"/>
+                <path d="M58 31h28v61H58zM94 31h28v61H94z" stroke="currentColor" stroke-width="1.7" opacity="0.65"/>
+                <path d="M42 103h96M48 111h84M54 119h72" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <path d="M57 103v29M72 103v29M87 103v29M102 103v29M117 103v29" stroke="currentColor" stroke-width="1.5" opacity="0.55"/>
+                <path d="M34 90c-8-13-2-27 15-33M143 92c12-10 11-25-1-34M29 66c-6-6-6-14 2-21M151 69c8-7 8-16 1-24"
+                    stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity="0.28"/>
+                <circle cx="31" cy="81" r="3" fill="currentColor" opacity="0.28"/>
+                <circle cx="145" cy="80" r="3" fill="currentColor" opacity="0.28"/>
+            </svg>
+        `;
+    }
+
+    function renderMicIcon() {
+        return `
+            <svg class="paris-mic-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 14.5a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 1 0-7 0v5a3.5 3.5 0 0 0 3.5 3.5Z"
+                    stroke="currentColor" stroke-width="1.8"/>
+                <path d="M5 10.5a7 7 0 0 0 14 0M12 17.5V22M8.5 22h7"
+                    stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
         `;
     }
 
@@ -353,84 +395,93 @@ const App = (() => {
         const summary = state.intake?.summary || (state.intake?.raw_transcript ? '' : '');
 
         return `
-        <div class="container">
-            <div class="card" style="margin-bottom:20px;">
-                <h2>Tell us what you're looking for in Paris</h2>
-                <p style="color:var(--muted);margin-top:6px;">Speak naturally — budget, workplace, commute, bedrooms, furnished, and amenities. We'll fill in the form and you can correct anything.</p>
-            </div>
-            <div class="onboarding-grid">
-                <div class="grid" style="gap:20px;">
-                    <div class="card">
-                        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:14px;">
-                            <div class="card-title" style="margin:0;">Voice</div>
-                            <label class="toggle-pill">
-                                <input type="checkbox" id="toggle-transcript" ${state.showTranscript ? 'checked' : ''}>
-                                Transcript
-                            </label>
+        <main class="container parisian-shell">
+            <section class="card paris-hero-card">
+                <div class="paris-hero-art">${renderBalconyArt()}</div>
+                <div>
+                    <h2 class="paris-hero-title">Tell us what you're looking for in Paris</h2>
+                    <div class="paris-hero-accent" aria-hidden="true"></div>
+                    <p class="paris-hero-copy">Speak naturally — budget, workplace, commute, bedrooms, furnished, and amenities. We'll fill in the form and you can correct anything.</p>
+                </div>
+            </section>
+            <section class="onboarding-grid paris-content-grid">
+                <div class="grid paris-left-column">
+                    <aside class="card paris-card paris-voice-card">
+                        <div class="paris-card-inner">
+                        <div class="row paris-card-header">
+                            <div class="card-title paris-section-title"><span class="paris-section-title-icon" aria-hidden="true">⌁</span> Voice</div>
+                            <button class="toggle-pill paris-transcript-button" type="button" id="toggle-transcript" aria-pressed="${state.showTranscript ? 'true' : 'false'}">Transcript</button>
                         </div>
-                        <div class="voice-controls">
-                            <button id="mic-btn" class="mic-btn" aria-label="Start voice">●</button>
-                            <div class="voice-stack">
-                                <span id="voice-status" class="voice-pill"><span class="dot"></span> Tap the mic to start</span>
-                                <label style="font-size:13px;color:var(--muted);"><input type="checkbox" id="echo-cancel" checked style="width:auto;"> Echo cancellation</label>
-                                <label style="font-size:13px;color:var(--muted);">Speed
-                                    <input type="range" id="speed" min="0.5" max="2.0" step="0.1" value="1.0" style="width:auto;display:inline-block;vertical-align:middle;">
+                        <div class="voice-controls paris-voice-layout">
+                            <button id="mic-btn" class="mic-btn paris-mic-button" data-recording="false" aria-label="Start voice">${renderMicIcon()}</button>
+                            <div class="voice-stack paris-voice-controls">
+                                <span id="voice-status" class="voice-pill paris-tap-pill"><span class="dot paris-status-dot"></span> Tap the mic to start</span>
+                                <label class="paris-checkline"><input class="paris-checkbox" type="checkbox" id="echo-cancel" checked> Echo cancellation</label>
+                                <label class="paris-speed-row"><span>Speed</span>
+                                    <input class="paris-range" type="range" id="speed" min="0.5" max="2.0" step="0.1" value="1.0">
                                 </label>
                             </div>
                         </div>
-                        <p style="margin-top:12px;color:var(--muted);font-size:13px;">
+                        <p class="paris-voice-description">
                             The agent will ask you about your apartment, then fill in the form on the right.
                             You should review and correct it before confirming.
                         </p>
-                    </div>
+                        </div>
+                    </aside>
 
                     ${state.showTranscript ? `
-                    <div class="card">
-                        <div class="card-title">Transcript</div>
+                    <div class="card paris-card paris-transcript-card">
+                        <div class="paris-card-inner">
+                        <div class="card-title paris-section-title">Transcript</div>
                         <div class="transcript" id="transcript">${state.intake?.raw_transcript ? `<div class="msg msg-user"><span class="msg-text">${escapeHtml(state.intake.raw_transcript)}</span></div>` : '<em style="color:var(--muted);">Say something like "I\'m looking for a furnished one-bedroom near République, max €1500 including charges, no more than 30 minutes by metro or bike."</em>'}</div>
-                        <div class="row" style="margin-top:10px;">
-                            <textarea id="manual-transcript" placeholder="…or type your description here." style="min-height:60px;"></textarea>
+                        <div class="row paris-manual-row">
+                            <textarea class="paris-textarea" id="manual-transcript" placeholder="…or type your description here."></textarea>
                         </div>
-                        <div class="row" style="margin-top:8px;">
-                            <button id="btn-extract" class="btn">Re-extract from text</button>
+                        <div class="row paris-action-row">
+                            <button id="btn-extract" class="btn paris-primary-button">Re-extract from text</button>
                             <span class="spacer"></span>
+                        </div>
                         </div>
                     </div>` : ''}
                 </div>
 
-                <div class="grid" style="gap:20px;">
-                    <div class="card">
-                        <div class="card-title">Review the draft profile</div>
+                <div class="grid paris-right-column">
+                    <section class="card paris-card paris-profile-card">
+                        <div class="paris-card-inner">
+                        <div class="card-title paris-section-title"><span class="paris-section-title-icon" aria-hidden="true">▤</span> Review the draft profile</div>
                         ${summary ? `<div class="summary-banner"><strong>Agent summary:</strong> ${escapeHtml(summary)}</div>` : ''}
                         ${renderMissingBlock(missing, ambiguous)}
                         ${renderProfileForm(dp, conf, sources, missing)}
-                    </div>
+                        </div>
+                    </section>
 
-                    <div class="card">
-                        <div class="row" style="justify-content:space-between;">
+                    <section class="card paris-card paris-confirmation-card">
+                        <div class="paris-card-inner">
+                        <div class="row paris-confirm-row">
                             <div>
-                                <div class="card-title" style="margin:0;">Confirmation</div>
-                                <div style="font-size:13px;color:var(--muted);margin-top:4px;">Status: <strong>${status}</strong></div>
+                                <div class="card-title paris-section-title">Confirmation</div>
+                                <div class="paris-status-line">Status: <strong>${status}</strong></div>
                             </div>
-                            <div class="row">
-                                <button id="btn-confirm" class="btn ${missing.length ? '' : 'warm'}" ${missing.length ? 'disabled' : ''}>Confirm profile</button>
-                                <button id="btn-search" class="btn ghost" ${status === 'confirmed' ? '' : 'disabled'}>Run search</button>
+                            <div class="row paris-action-row">
+                                <button id="btn-confirm" class="btn paris-primary-button ${missing.length ? '' : 'warm'}" ${missing.length ? 'disabled' : ''}>Confirm profile</button>
+                                <button id="btn-search" class="btn ghost paris-secondary-button" ${status === 'confirmed' ? '' : 'disabled'}>Run search</button>
                             </div>
                         </div>
-                        ${missing.length ? `<p style="font-size:13px;color:var(--bad);margin-top:8px;">Missing required: ${missing.join(', ')}</p>` : ''}
-                    </div>
+                        ${missing.length ? `<p class="paris-required-note">Missing required: ${missing.join(', ')}</p>` : ''}
+                        </div>
+                    </section>
                 </div>
-            </div>
-        </div>
+            </section>
+        </main>
         `;
     }
 
     function renderMissingBlock(missing, ambiguous) {
         if (!missing.length && !ambiguous.length) return '';
         return `
-            <div style="display:grid;gap:6px;margin-bottom:12px;">
-                ${missing.length ? `<div style="font-size:13px;color:var(--bad);"><strong>Missing:</strong> ${missing.join(', ')}</div>` : ''}
-                ${ambiguous.length ? `<div style="font-size:13px;color:var(--warn);"><strong>Ambiguous:</strong> ${ambiguous.join(', ')}</div>` : ''}
+            <div class="paris-form-alert">
+                ${missing.length ? `<div><strong>Missing:</strong> ${missing.join(', ')}</div>` : ''}
+                ${ambiguous.length ? `<div><strong>Ambiguous:</strong> ${ambiguous.join(', ')}</div>` : ''}
             </div>
         `;
     }
@@ -438,41 +489,41 @@ const App = (() => {
     function renderProfileForm(dp, conf, sources, missing) {
         const tag = (field) => {
             const c = conf[field];
-            const src = sources[field] ? `<span class="confidence-tag">${sources[field]}</span>` : '';
+            const src = sources[field] ? `<span class="paris-badge paris-badge-source">${sources[field]}</span>` : '';
             if (typeof c !== 'number') return src;
             const cls = c >= 0.85 ? 'high' : c >= 0.7 ? 'med' : 'low';
-            return `<span class="confidence-tag ${cls}">${Math.round(c*100)}%</span>${src}`;
+            return `<span class="paris-badge paris-badge-confidence ${cls}">${Math.round(c*100)}%</span>${src}`;
         };
-        const cls = (field) => missing.includes(field) ? 'field missing' : 'field';
+        const cls = (field) => `paris-field ${missing.includes(field) ? 'missing' : ''}`;
         const arr = (v) => Array.isArray(v) ? v.join(', ') : (v || '');
         const rooms = dp.room_requirements || {};
         const nearby = dp.nearby_requirements || {};
         return `
-            <div class="fields">
-                <div class="${cls('work_location')} full">
-                    <label>Workplace address or landmark ${tag('work_location_label')}</label>
-                    <input id="f-work_location_label" value="${escapeAttr(dp.work_location_label || '')}" placeholder="e.g. République, La Défense, Station F">
-                    <input id="f-work_location_address" value="${escapeAttr(dp.work_location_address || '')}" placeholder="Optional precise address" style="margin-top:6px;">
+            <div class="fields paris-form-grid">
+                <div class="${cls('work_location')} paris-field-full">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Workplace address or landmark</span> ${tag('work_location_label')}</label>
+                    <input class="paris-input" id="f-work_location_label" value="${escapeAttr(dp.work_location_label || '')}" placeholder="e.g. République, La Défense, Station F">
+                    <input class="paris-input" id="f-work_location_address" value="${escapeAttr(dp.work_location_address || '')}" placeholder="Optional precise address">
                 </div>
                 <div class="${cls('max_rent_including_charges_eur')}">
-                    <label>Max rent incl. charges (€) ${tag('max_rent_including_charges_eur')}</label>
-                    <input id="f-max_rent" type="number" min="1" value="${dp.max_rent_including_charges_eur ?? ''}">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Max rent incl. charges (€)</span> ${tag('max_rent_including_charges_eur')}</label>
+                    <input class="paris-input" id="f-max_rent" type="number" min="1" value="${dp.max_rent_including_charges_eur ?? ''}">
                 </div>
-                <div class="field">
-                    <label>Bedrooms ${tag('min_bedrooms')}</label>
-                    <input id="f-min_bedrooms" type="number" min="0" value="${dp.min_bedrooms ?? ''}">
+                <div class="paris-field">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Bedrooms</span> ${tag('min_bedrooms')}</label>
+                    <input class="paris-input" id="f-min_bedrooms" type="number" min="0" value="${dp.min_bedrooms ?? ''}">
                 </div>
-                <div class="field">
-                    <label>Minimum rooms (optional) ${tag('min_rooms')}</label>
-                    <input id="f-min_rooms" type="number" min="1" value="${dp.min_rooms ?? ''}">
+                <div class="paris-field">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Minimum rooms (optional)</span> ${tag('min_rooms')}</label>
+                    <input class="paris-input" id="f-min_rooms" type="number" min="1" value="${dp.min_rooms ?? ''}">
                 </div>
-                <div class="field">
-                    <label>Min surface (m²) ${tag('min_surface_m2')}</label>
-                    <input id="f-min_surface" type="number" min="1" value="${dp.min_surface_m2 ?? ''}">
+                <div class="paris-field">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Min surface (m²)</span> ${tag('min_surface_m2')}</label>
+                    <input class="paris-input" id="f-min_surface" type="number" min="1" value="${dp.min_surface_m2 ?? ''}">
                 </div>
-                <div class="field">
-                    <label>Furnished ${tag('furnished_preference')}</label>
-                    <select id="f-furnished">
+                <div class="paris-field">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Furnished</span> ${tag('furnished_preference')}</label>
+                    <select class="paris-select" id="f-furnished">
                         <option value="" ${!dp.furnished_preference ? 'selected' : ''}>—</option>
                         <option value="required" ${dp.furnished_preference === 'required' ? 'selected' : ''}>Required</option>
                         <option value="prefer" ${dp.furnished_preference === 'prefer' ? 'selected' : ''}>Preferred</option>
@@ -480,54 +531,55 @@ const App = (() => {
                     </select>
                 </div>
                 <div class="${cls('commute_max_minutes')}">
-                    <label>Commute max (minutes) ${tag('commute_max_minutes')}</label>
-                    <input id="f-commute_minutes" type="number" min="1" value="${dp.commute_max_minutes ?? 30}">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Commute max (minutes)</span> ${tag('commute_max_minutes')}</label>
+                    <input class="paris-input" id="f-commute_minutes" type="number" min="1" value="${dp.commute_max_minutes ?? 30}">
                 </div>
                 <div class="${cls('commute_modes')}">
-                    <label>Commute modes ${tag('commute_modes')}</label>
-                    <div class="chip-row" id="f-commute_modes" data-value='${JSON.stringify(dp.commute_modes || ['metro','bike'])}'>
-                        ${['metro','bike','walk','bus'].map(m => `<span class="chip ${(dp.commute_modes||['metro','bike']).includes(m) ? 'on' : ''}" data-mode="${m}">${m}</span>`).join('')}
+                    <label class="paris-field-label-row"><span class="paris-field-label">Commute modes</span> ${tag('commute_modes')}</label>
+                    <div class="chip-row paris-chip-row" id="f-commute_modes" data-value='${JSON.stringify(dp.commute_modes || ['metro','bike'])}'>
+                        ${['metro','bike','walk','bus'].map(m => `<button type="button" class="chip paris-mode-chip ${(dp.commute_modes||['metro','bike']).includes(m) ? 'on is-selected' : ''}" aria-pressed="${(dp.commute_modes||['metro','bike']).includes(m)}" data-mode="${m}">${m}</button>`).join('')}
                     </div>
                 </div>
-                <div class="field full">
-                    <label>Living-room must-haves (comma-separated)</label>
-                    <input id="f-lr_must" value="${escapeAttr(arr((rooms.living_room||{}).must_have))}">
+                <div class="paris-divider" aria-hidden="true"></div>
+                <div class="paris-field paris-field-full">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Living-room must-haves (comma-separated)</span></label>
+                    <textarea class="paris-textarea" id="f-lr_must">${escapeHtml(arr((rooms.living_room||{}).must_have))}</textarea>
                 </div>
-                <div class="field full">
-                    <label>Living-room nice-to-haves</label>
-                    <input id="f-lr_nice" value="${escapeAttr(arr((rooms.living_room||{}).nice_to_have))}">
+                <div class="paris-field paris-field-full">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Living-room nice-to-haves</span></label>
+                    <input class="paris-input" id="f-lr_nice" value="${escapeAttr(arr((rooms.living_room||{}).nice_to_have))}">
                 </div>
-                <div class="field full">
-                    <label>Bedroom must-haves</label>
-                    <input id="f-br_must" value="${escapeAttr(arr((rooms.bedroom||{}).must_have))}">
+                <div class="paris-field paris-field-full">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Bedroom must-haves</span></label>
+                    <input class="paris-input" id="f-br_must" value="${escapeAttr(arr((rooms.bedroom||{}).must_have))}">
                 </div>
-                <div class="field full">
-                    <label>Bedroom nice-to-haves</label>
-                    <input id="f-br_nice" value="${escapeAttr(arr((rooms.bedroom||{}).nice_to_have))}">
+                <div class="paris-field paris-field-full">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Bedroom nice-to-haves</span></label>
+                    <input class="paris-input" id="f-br_nice" value="${escapeAttr(arr((rooms.bedroom||{}).nice_to_have))}">
                 </div>
-                <div class="field full">
-                    <label>Kitchen must-haves</label>
-                    <input id="f-kt_must" value="${escapeAttr(arr((rooms.kitchen||{}).must_have))}">
+                <div class="paris-field paris-field-full">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Kitchen must-haves</span></label>
+                    <input class="paris-input" id="f-kt_must" value="${escapeAttr(arr((rooms.kitchen||{}).must_have))}">
                 </div>
-                <div class="field full">
-                    <label>Kitchen nice-to-haves</label>
-                    <input id="f-kt_nice" value="${escapeAttr(arr((rooms.kitchen||{}).nice_to_have))}">
+                <div class="paris-field paris-field-full">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Kitchen nice-to-haves</span></label>
+                    <input class="paris-input" id="f-kt_nice" value="${escapeAttr(arr((rooms.kitchen||{}).nice_to_have))}">
                 </div>
-                <div class="field">
-                    <label>Preferred arrondissements</label>
-                    <input id="f-pref_arr" value="${escapeAttr(arr(dp.preferred_arrondissements))}" placeholder="e.g. 11, 3, 4">
+                <div class="paris-field">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Preferred arrondissements</span></label>
+                    <input class="paris-input" id="f-pref_arr" value="${escapeAttr(arr(dp.preferred_arrondissements))}" placeholder="e.g. 11, 3, 4">
                 </div>
-                <div class="field">
-                    <label>Excluded arrondissements</label>
-                    <input id="f-excl_arr" value="${escapeAttr(arr(dp.excluded_arrondissements))}" placeholder="e.g. 16, 8">
+                <div class="paris-field">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Excluded arrondissements</span></label>
+                    <input class="paris-input" id="f-excl_arr" value="${escapeAttr(arr(dp.excluded_arrondissements))}" placeholder="e.g. 16, 8">
                 </div>
-                <div class="field full">
-                    <label>Nearby amenities (comma-separated)</label>
-                    <input id="f-nearby" value="${escapeAttr(formatNearbyAmenities(nearby))}" placeholder="park, pharmacy, metro">
+                <div class="paris-field paris-field-full">
+                    <label class="paris-field-label-row"><span class="paris-field-label">Nearby amenities (comma-separated)</span></label>
+                    <input class="paris-input" id="f-nearby" value="${escapeAttr(formatNearbyAmenities(nearby))}" placeholder="park, pharmacy, metro">
                 </div>
             </div>
-            <div class="row" style="margin-top:14px;">
-                <button id="btn-save-form" class="btn ghost">Save text edits</button>
+            <div class="row paris-action-row paris-form-actions">
+                <button id="btn-save-form" class="btn ghost paris-secondary-button">Save text edits</button>
             </div>
         `;
     }
@@ -537,8 +589,8 @@ const App = (() => {
         // Voice mic
         const mic = document.getElementById('mic-btn');
         if (mic) mic.addEventListener('click', toggleVoice);
-        document.getElementById('toggle-transcript')?.addEventListener('change', (ev) => {
-            state.showTranscript = ev.target.checked;
+        document.getElementById('toggle-transcript')?.addEventListener('click', () => {
+            state.showTranscript = !state.showTranscript;
             render();
         });
 
@@ -588,7 +640,11 @@ const App = (() => {
         const modes = document.getElementById('f-commute_modes');
         if (modes) {
             modes.querySelectorAll('.chip').forEach(chip => {
-                chip.addEventListener('click', () => chip.classList.toggle('on'));
+                chip.addEventListener('click', () => {
+                    const selected = chip.classList.toggle('on');
+                    chip.classList.toggle('is-selected', selected);
+                    chip.setAttribute('aria-pressed', selected ? 'true' : 'false');
+                });
             });
         }
     }
@@ -1009,7 +1065,12 @@ const App = (() => {
         el.classList.toggle('on', kind === 'on');
         el.classList.toggle('error', kind === 'error');
         const mic = document.getElementById('mic-btn');
-        if (mic) mic.classList.toggle('live', kind === 'on');
+        if (mic) {
+            mic.classList.toggle('live', kind === 'on');
+            mic.dataset.recording = kind === 'on' ? 'true' : 'false';
+            mic.setAttribute('aria-pressed', kind === 'on' ? 'true' : 'false');
+            mic.setAttribute('aria-label', kind === 'on' ? 'Stop voice' : 'Start voice');
+        }
     }
 
     async function startVoice() {

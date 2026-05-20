@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from threading import Lock
 from typing import Iterator
 
 from sqlalchemy import create_engine, event
@@ -53,9 +54,13 @@ if _db_url.startswith("sqlite"):
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
+_init_lock = Lock()
+_initialized = False
+
 
 def get_db() -> Iterator[Session]:
     """FastAPI dependency: yields a SQLAlchemy session and closes it after use."""
+    ensure_db_initialized()
     db = SessionLocal()
     try:
         yield db
@@ -66,6 +71,7 @@ def get_db() -> Iterator[Session]:
 @contextmanager
 def session_scope() -> Iterator[Session]:
     """Context manager for use outside of FastAPI request handlers."""
+    ensure_db_initialized()
     db = SessionLocal()
     try:
         yield db
@@ -79,6 +85,21 @@ def session_scope() -> Iterator[Session]:
 
 def init_db() -> None:
     """Create all tables. Importing models registers them with Base."""
-    from . import models  # noqa: F401
+    global _initialized
 
-    Base.metadata.create_all(bind=engine)
+    if _initialized:
+        return
+
+    with _init_lock:
+        if _initialized:
+            return
+
+        from . import models  # noqa: F401
+
+        Base.metadata.create_all(bind=engine)
+        _initialized = True
+
+
+def ensure_db_initialized() -> None:
+    """Ensure tables exist when this app is mounted and its lifespan is skipped."""
+    init_db()
