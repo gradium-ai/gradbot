@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="520" viewBox="0 0 720 520" role="img" aria-labelledby="title desc">
+  <title id="title">Paris balcony line illustration</title>
+  <desc id="desc">A delicate Parisian balcony with tall windows, wrought-iron railings, planters and climbing vines.</desc>
+  <defs>
+    <filter id="softInk" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="0.12" />
+    </filter>
+    <linearGradient id="ink" x1="120" y1="40" x2="610" y2="470" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#b08b6d"/>
+      <stop offset="1" stop-color="#8d684e"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#ink)" stroke-linecap="round" stroke-linejoin="round" filter="url(#softInk)">
+    <!-- cornice and window frame -->
+    <path d="M233 67c52-7 220-8 278 0" stroke-width="2.6" opacity=".78"/>
+    <path d="M221 83c72 5 283 5 319 0" stroke-width="2" opacity=".55"/>
+    <path d="M251 105h226v228H251z" stroke-width="2.1" opacity=".72"/>
+    <path d="M265 119h86v197h-86zM377 119h86v197h-86z" stroke-width="1.8" opacity=".68"/>
+    <path d="M351 105v228M377 105v228" stroke-width="1.55" opacity=".54"/>
+    <path d="M275 154c18-5 42-5 67 0M390 154c21-6 39-5 55 0" stroke-width="1.1" opacity=".35"/>
+    <path d="M276 177c18-5 42-5 66 0M390 177c18-4 39-4 55 0" stroke-width="1" opacity=".28"/>
+
+    <!-- balcony slab -->
+    <path d="M127 337c133 10 382 10 489 0" stroke-width="3.1" opacity=".82"/>
+    <path d="M112 358c167 14 411 14 521 0" stroke-width="2.4" opacity=".72"/>
+    <path d="M138 393c132 8 346 8 477 0" stroke-width="2.1" opacity=".6"/>
+    <path d="M156 399l-16 48M604 398l17 48M133 448c126 13 376 12 494 0" stroke-width="1.9" opacity=".48"/>
+
+    <!-- wrought iron railing -->
+    <path d="M143 289c128 8 365 8 474 0" stroke-width="2.2" opacity=".8"/>
+    <path d="M145 323c133 9 367 9 471 0" stroke-width="1.8" opacity=".72"/>
+    <g stroke-width="1.35" opacity=".68">
+      <path d="M163 292v66M185 293v67M207 294v67M229 295v67M251 296v67M273 297v67M295 297v67M317 298v67M339 298v67M361 298v67M383 298v67M405 298v67M427 297v67M449 297v67M471 296v67M493 295v67M515 294v67M537 293v67M559 292v67M581 291v67"/>
+      <path d="M160 319c11-19 22-19 33 0c11 19 22 19 33 0c11-19 22-19 33 0c11 19 22 19 33 0c11-19 22-19 33 0c11 19 22 19 33 0c11-19 22-19 33 0c11 19 22 19 33 0c11-19 22-19 33 0c11 19 22 19 33 0c11-19 22-19 33 0c11 19 22 19 33 0" opacity=".54"/>
+      <path d="M163 344c10-12 20-12 30 0c10 12 20 12 30 0c10-12 20-12 30 0c10 12 20 12 30 0c10-12 20-12 30 0c10 12 20 12 30 0c10-12 20-12 30 0c10 12 20 12 30 0c10-12 20-12 30 0c10 12 20 12 30 0c10-12 20-12 30 0" opacity=".45"/>
+    </g>
+
+    <!-- central planter -->
+    <path d="M268 287c32-7 75-7 108 0l-10 58c-22 8-56 8-87 0z" stroke-width="1.8" opacity=".72"/>
+    <path d="M255 281c45 8 90 8 134 0" stroke-width="2" opacity=".72"/>
+    <g stroke-width="1.25" opacity=".64">
+      <path d="M293 283c-6-34 8-61 27-79M316 283c5-39 29-66 49-82M339 283c11-31 36-45 61-54M308 283c-18-29-44-43-71-46M360 282c24-19 51-25 79-22"/>
+      <path d="M319 205c-2-16 7-25 19-31c3 14-3 25-19 31zM365 201c7-16 20-20 35-16c-4 15-17 21-35 16zM397 229c9-12 23-13 35-7c-8 13-20 16-35 7zM236 237c-15-9-19-21-15-35c15 6 22 18 15 35zM268 247c-12-14-11-27 0-39c11 11 12 25 0 39zM345 245c-4-15 2-25 16-31c6 14 1 25-16 31z"/>
+      <circle cx="307" cy="240" r="7"/><circle cx="332" cy="232" r="6"/><circle cx="356" cy="254" r="6"/><circle cx="286" cy="259" r="5"/>
+    </g>
+
+    <!-- left climbing vine -->
+    <g stroke-width="1.45" opacity=".62">
+      <path d="M137 330c-35-68-23-148 49-210"/>
+      <path d="M174 133c-20-22-17-42 3-60c18 20 17 41-3 60zM159 178c-26-8-36-25-28-49c24 7 37 23 28 49zM193 197c-2-25 12-42 36-50c5 25-8 43-36 50zM139 246c-25-11-33-29-22-52c25 10 33 28 22 52zM198 263c1-27 17-42 43-45c0 26-16 43-43 45zM131 307c-24-4-39-18-43-40c25 2 41 15 43 40z"/>
+      <path d="M156 205c-19 3-36-3-51-19M180 226c22-15 43-19 64-10M143 278c-20 5-39 0-57-15" opacity=".52"/>
+    </g>
+
+    <!-- right potted plant and vine -->
+    <g stroke-width="1.45" opacity=".62">
+      <path d="M542 281c24-56 59-93 105-109M567 275c22-33 49-47 82-45M581 295c35 5 58 19 72 42"/>
+      <path d="M646 174c-18-17-18-35-2-52c18 15 19 34 2 52zM612 203c-20-12-25-29-14-50c20 10 27 27 14 50zM648 230c14-17 31-20 51-10c-13 18-30 22-51 10zM600 260c-18 7-35 3-50-13c18-9 36-5 50 13zM652 337c18 3 32 14 42 33c-20 0-35-11-42-33z"/>
+      <path d="M505 282c23-5 46-5 69 0l-8 44c-17 6-39 6-59 0zM497 276c29 5 56 5 82 0" stroke-width="1.8" opacity=".72"/>
+      <path d="M525 276c-7-27 0-49 22-66M547 276c7-24 25-40 53-48" opacity=".58"/>
+    </g>
+
+    <!-- faint brick hints -->
+    <g stroke-width="1.1" opacity=".22">
+      <path d="M584 129h82M606 154h78M574 194h77M620 221h73M590 257h86"/>
+      <path d="M622 110v24M657 141v25M596 185v24M668 243v24"/>
+    </g>
+  </g>
+</svg>
