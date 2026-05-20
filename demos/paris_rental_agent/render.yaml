@@ -17,8 +17,6 @@ services:
         generateValue: true
       - key: APP_ENV
         value: production
-      - key: ENABLE_DEMO_ACCOUNT
-        value: false
       - key: BASE_URL
         sync: false
       - key: TAVILY_API_KEY

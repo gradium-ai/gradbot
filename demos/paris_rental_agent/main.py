@@ -24,11 +24,9 @@ if str(_HERE) not in sys.path:
 
 import gradbot  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
-from fastapi import HTTPException  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from sqlalchemy.engine import make_url  # noqa: E402
 
-from src.bootstrap import DEMO_EMAIL, DEMO_PASSWORD, seed_demo_user  # noqa: E402
 from src.config import get_settings  # noqa: E402
 from src.db import init_db  # noqa: E402
 from src.services.commute import is_configured as is_google_maps_configured  # noqa: E402
@@ -58,8 +56,6 @@ def _startup() -> None:
     settings.validate_runtime_security()
     init_db()
     logger.info("DB initialized at %s", _safe_database_url(settings.database_url))
-    if settings.enable_demo_account:
-        seed_demo_user()
     if not _resolve_tavily_key():
         logger.warning(
             "Tavily API key is not set — /api/search-runs will return HTTP 503 "
@@ -81,14 +77,6 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Paris Rental Agent", lifespan=_lifespan)
-
-
-@app.get("/api/demo-credentials")
-def demo_credentials() -> dict:
-    """Return the demo account credentials so the login form can pre-fill them."""
-    if not settings.enable_demo_account:
-        raise HTTPException(status_code=404, detail="demo_account_disabled")
-    return {"email": DEMO_EMAIL, "password": DEMO_PASSWORD}
 
 
 # REST routes
@@ -115,11 +103,6 @@ gradbot.routes.setup(
 
 @app.get("/")
 def root() -> FileResponse:
-    return FileResponse(_STATIC_DIR / "index.html")
-
-
-@app.get("/login")
-def login_page() -> FileResponse:
     return FileResponse(_STATIC_DIR / "index.html")
 
 

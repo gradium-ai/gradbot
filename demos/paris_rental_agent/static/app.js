@@ -1,21 +1,23 @@
 /* Paris Rental Agent — single-page UI.
  *
  * Views:
- *   - auth (signup/login)
+ *   - consent (anonymous cookie session)
  *   - onboarding (voice + text + draft profile + confirm)
  *   - dashboard (matches, saved, drafts, assistant)
  */
 
 // Mount prefix: when the demo is mounted under a sub-path (e.g.
 // /paris_rental_agent on the combined demos host), strip the SPA route
-// suffix (/, /login, /dashboard) to recover that prefix. Empty when
+// suffix (/, /onboarding, /dashboard) to recover that prefix. Empty when
 // served at the root.
-const BASE = window.location.pathname.replace(/\/(login|dashboard)?\/?$/, '');
+const BASE = window.location.pathname.replace(/\/(onboarding|dashboard)?\/?$/, '');
 
 const App = (() => {
     const state = {
         user: null,
-        view: 'auth',
+        sessionToken: null,
+        sessionPersisted: false,
+        view: 'consent',
         intake: null,
         searchProfile: null,
         renterProfile: null,
@@ -68,11 +70,34 @@ const App = (() => {
     };
 
     // ───────────────────────── API helpers ─────────────────────────
+    function apiErrorMessage(data, fallback) {
+        const detail = data?.detail;
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail)) {
+            const messages = detail
+                .map((item) => {
+                    if (typeof item === 'string') return item;
+                    const field = Array.isArray(item?.loc) ? item.loc.filter((part) => part !== 'body').join('.') : '';
+                    const message = item?.msg || item?.message;
+                    return [field, message].filter(Boolean).join(': ');
+                })
+                .filter(Boolean);
+            if (messages.length) return messages.join(' ');
+        }
+        if (detail && typeof detail === 'object') {
+            return detail.message || detail.error || JSON.stringify(detail);
+        }
+        if (typeof data?.message === 'string') return data.message;
+        if (typeof data?.error === 'string') return data.error;
+        return fallback;
+    }
+
     async function api(path, opts = {}) {
         const res = await fetch(BASE + path, {
             credentials: 'include',
             headers: {
                 'Content-Type': 'application/json',
+                ...(state.sessionToken ? { Authorization: `Bearer ${state.sessionToken}` } : {}),
                 ...(opts.headers || {}),
             },
             ...opts,
@@ -81,7 +106,7 @@ const App = (() => {
         let data = null;
         try { data = await res.json(); } catch { /* */ }
         if (!res.ok) {
-            const err = new Error(data?.detail?.message || data?.detail || data?.message || `HTTP ${res.status}`);
+            const err = new Error(apiErrorMessage(data, `HTTP ${res.status}`));
             err.status = res.status;
             err.data = data;
             throw err;
@@ -94,18 +119,45 @@ const App = (() => {
         try {
             const me = await api('/api/auth/me');
             state.user = me;
-            await loadOnboardingState();
-            await loadProfiles();
-            if (state.searchProfile?.confirmation_status === 'confirmed') {
-                await goDashboard();
-            } else {
-                state.view = 'onboarding';
-                render();
-            }
+            state.sessionPersisted = true;
+            await enterSavedSession();
         } catch {
-            state.view = 'auth';
+            state.view = 'consent';
             render();
         }
+    }
+
+    async function enterSavedSession() {
+        await loadOnboardingState();
+        await loadProfiles();
+        if (state.searchProfile?.confirmation_status === 'confirmed') {
+            await goDashboard();
+            return;
+        }
+        if (!state.intake) {
+            try {
+                await api('/api/intake/start', { method: 'POST' });
+                await loadOnboardingState();
+            } catch {}
+        }
+        state.view = 'onboarding';
+        render();
+    }
+
+    async function acceptCookieSession() {
+        const me = await api('/api/auth/guest', { method: 'POST' });
+        state.user = me;
+        state.sessionToken = null;
+        state.sessionPersisted = true;
+        await enterSavedSession();
+    }
+
+    async function startTemporarySession() {
+        const me = await api('/api/auth/guest?persist=false', { method: 'POST' });
+        state.user = me;
+        state.sessionToken = me.token || null;
+        state.sessionPersisted = false;
+        await enterSavedSession();
     }
 
     async function loadProfiles() {
@@ -198,132 +250,78 @@ const App = (() => {
     // ───────────────────────── Render ─────────────────────────
     function render() {
         const root = document.getElementById('app');
-        if (!state.user) { root.innerHTML = renderAuth(); wireAuth(); return; }
+        if (!state.user) { root.innerHTML = renderConsent(); wireConsent(); return; }
         if (state.view === 'onboarding') { root.innerHTML = renderHeader() + renderOnboarding(); wireOnboarding(); return; }
         if (state.view === 'dashboard') { root.innerHTML = renderDashboard(); wireDashboard(); return; }
         root.innerHTML = renderHeader() + '<div class="container"><div class="card">Unknown view.</div></div>';
     }
 
-    // ───────────────────────── Auth view ─────────────────────────
-    function renderAuth() {
+    // ───────────────────────── Cookie consent view ─────────────────────────
+    function renderConsent() {
         return `
-            <div class="auth-shell">
-                <div class="card auth-card">
-                    <div class="brand" style="margin-bottom:16px;"><div class="brand-dot"></div> Paris Rental Agent</div>
-                    <h1>Find your Paris apartment.</h1>
-                    <p class="sub">Voice-first onboarding, real listings, all your search history in one place.</p>
-                    <div class="auth-tabs">
-                        <button id="tab-login" class="active">Log in</button>
-                        <button id="tab-signup">Sign up</button>
+            <div class="entry-shell">
+                <header class="entry-header">
+                    <div class="brand"><div class="brand-dot"></div> Paris Rental Agent</div>
+                </header>
+                <main class="entry-main">
+                    <section class="entry-copy">
+                        <h1>Find a Paris apartment that fits your life.</h1>
+                        <p>Tell the voice scout your budget, commute, neighborhood preferences, and must-haves. It turns your brief into a search profile, finds matches, and drafts viewing messages.</p>
+                        <div class="entry-actions">
+                            <span>Voice intake</span>
+                            <span>Search brief</span>
+                            <span>Shortlist</span>
+                        </div>
+                    </section>
+                    <section class="entry-preview" aria-label="Search preview">
+                        <div class="preview-card primary">
+                            <span>Current brief</span>
+                            <strong>Furnished 1-bed near metro, under EUR 1,500</strong>
+                        </div>
+                        <div class="preview-grid">
+                            <div class="preview-card"><span>Commute</span><strong>30 min</strong></div>
+                            <div class="preview-card"><span>Matches</span><strong>Ready</strong></div>
+                        </div>
+                        <div class="preview-card">
+                            <span>Next step</span>
+                            <strong>Speak naturally, then review and confirm.</strong>
+                        </div>
+                    </section>
+                </main>
+
+                <aside class="cookie-popover" role="dialog" aria-label="Cookie preferences" aria-modal="true">
+                    <div>
+                        <strong>Save your progress?</strong>
+                        <p>We can use one browser cookie to remember your profile, searches, shortlist, and drafts on this device. You can also continue without saving; that session starts fresh after reloads or future visits.</p>
                     </div>
-                    <div id="auth-form"></div>
-                    <div id="demo-banner" class="hidden" style="margin-top:14px;padding:10px 12px;border-radius:10px;background:#ecf5ee;border:1px solid #b7ddc4;font-size:13px;color:#1f5e3a;"></div>
-                </div>
+                    <div class="cookie-actions">
+                        <button id="skip-cookies" class="btn ghost" data-label="Decline and continue">Decline and continue</button>
+                        <button id="accept-cookies" class="btn" data-label="Accept cookies">Accept cookies</button>
+                    </div>
+                    <div class="error-msg" id="consent-error" aria-live="polite"></div>
+                </aside>
             </div>
         `;
     }
 
-    function authForm(mode, prefill) {
-        prefill = prefill || {};
-        return `
-            <div class="field">
-                <label>Email</label>
-                <input id="auth-email" type="email" autocomplete="email" placeholder="you@example.com" value="${escapeAttr(prefill.email || '')}">
-            </div>
-            ${mode === 'signup' ? `
-            <div class="field">
-                <label>Full name (optional)</label>
-                <input id="auth-name" type="text" autocomplete="name" placeholder="Marie Dupont">
-            </div>` : ''}
-            <div class="field">
-                <label>Password</label>
-                <input id="auth-pass" type="password" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}" placeholder="At least 6 characters" value="${escapeAttr(prefill.password || '')}">
-            </div>
-            <button id="auth-submit" class="btn" style="width:100%;margin-top:8px;">${mode === 'signup' ? 'Create account' : 'Log in'}</button>
-            <div class="error-msg" id="auth-error"></div>
-        `;
-    }
-
-    function demoBanner(creds) {
-        return `
-            <strong>Demo account ready.</strong> The form is pre-filled with
-            <code style="background:rgba(0,0,0,0.05);padding:1px 4px;border-radius:4px;">${escapeHtml(creds.email)}</code> /
-            <code style="background:rgba(0,0,0,0.05);padding:1px 4px;border-radius:4px;">${escapeHtml(creds.password)}</code>.
-            Just click <strong>Log in</strong>.
-        `;
-    }
-
-    function wireAuth() {
-        let mode = 'login';
-        let demoCreds = null;
-        const formEl = document.getElementById('auth-form');
-        formEl.innerHTML = authForm(mode);
-
-        // Try to pre-fill with the demo account
-        fetch(BASE + '/api/demo-credentials').then(r => r.ok ? r.json() : null).then(d => {
-            if (!d || !d.email) return;
-            demoCreds = d;
-            const emailEl = document.getElementById('auth-email');
-            const passEl = document.getElementById('auth-pass');
-            if (mode === 'login' && emailEl && passEl && !emailEl.value && !passEl.value) {
-                emailEl.value = d.email;
-                passEl.value = d.password;
+    function wireConsent() {
+        const start = async (buttonId, action) => {
+            const btn = document.getElementById(buttonId);
+            const errEl = document.getElementById('consent-error');
+            const label = btn.dataset.label || btn.textContent;
+            errEl.textContent = '';
+            btn.disabled = true;
+            btn.textContent = 'Starting…';
+            try {
+                await action();
+            } catch (e) {
+                errEl.textContent = e.message || 'Could not start a browser session.';
+                btn.disabled = false;
+                btn.textContent = label;
             }
-            const banner = document.getElementById('demo-banner');
-            if (banner && mode === 'login') {
-                banner.innerHTML = demoBanner(d);
-                banner.classList.remove('hidden');
-            }
-        }).catch(() => {});
-
-        const setMode = (m) => {
-            mode = m;
-            document.getElementById('tab-login').classList.toggle('active', m === 'login');
-            document.getElementById('tab-signup').classList.toggle('active', m === 'signup');
-            const prefill = (m === 'login' && demoCreds) ? demoCreds : {};
-            formEl.innerHTML = authForm(m, prefill);
-            const banner = document.getElementById('demo-banner');
-            if (banner) {
-                banner.innerHTML = demoCreds ? demoBanner(demoCreds) : '';
-                banner.classList.toggle('hidden', m !== 'login' || !demoCreds);
-            }
-            attach();
         };
-        document.getElementById('tab-login').addEventListener('click', () => setMode('login'));
-        document.getElementById('tab-signup').addEventListener('click', () => setMode('signup'));
-
-        function attach() {
-            document.getElementById('auth-submit').addEventListener('click', async () => {
-                const email = document.getElementById('auth-email').value.trim();
-                const pass = document.getElementById('auth-pass').value;
-                const errEl = document.getElementById('auth-error');
-                errEl.textContent = '';
-                if (!email || !pass) { errEl.textContent = 'Email and password are required.'; return; }
-                try {
-                    const url = mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
-                    const body = { email, password: pass };
-                    if (mode === 'signup') body.full_name = document.getElementById('auth-name').value.trim() || null;
-                    const me = await api(url, { method: 'POST', body });
-                    state.user = me;
-                    await loadOnboardingState();
-                    await loadProfiles();
-                    if (state.searchProfile?.confirmation_status === 'confirmed') {
-                        await goDashboard();
-                    } else {
-                        state.view = 'onboarding';
-                        // ensure intake exists
-                        try { await api('/api/intake/start', { method: 'POST' }); await loadOnboardingState(); } catch {}
-                        render();
-                    }
-                } catch (e) {
-                    errEl.textContent = e.message || 'Authentication failed.';
-                }
-            });
-            document.getElementById('auth-pass').addEventListener('keydown', (ev) => {
-                if (ev.key === 'Enter') document.getElementById('auth-submit').click();
-            });
-        }
-        attach();
+        document.getElementById('accept-cookies')?.addEventListener('click', () => start('accept-cookies', acceptCookieSession));
+        document.getElementById('skip-cookies')?.addEventListener('click', () => start('skip-cookies', startTemporarySession));
     }
 
     function renderHeader() {
@@ -331,18 +329,21 @@ const App = (() => {
             <div class="app-header">
                 <div class="brand"><div class="brand-dot"></div> Paris Rental Agent</div>
                 <div class="row" style="gap:12px;">
-                    <div class="user-chip"><span>${state.user?.email || ''}</span></div>
-                    <button id="btn-logout" class="btn ghost small">Log out</button>
+                    <div class="user-chip"><span>${state.sessionPersisted ? 'Saved in this browser' : 'Temporary session'}</span></div>
+                    <button id="btn-reset-session" class="btn ghost small">Reset</button>
                 </div>
             </div>
         `;
     }
 
     function wireHeader() {
-        const lg = document.getElementById('btn-logout');
-        if (lg) lg.addEventListener('click', async () => {
-            try { await api('/api/auth/logout', { method: 'POST' }); } catch {}
+        const reset = document.getElementById('btn-reset-session');
+        if (reset) reset.addEventListener('click', async () => {
+            try { await api('/api/auth/logout', { method: 'POST', body: { forget: true } }); } catch {}
             state.user = null;
+            state.sessionToken = null;
+            state.sessionPersisted = false;
+            state.view = 'consent';
             stopVoice();
             render();
         });
@@ -677,8 +678,8 @@ const App = (() => {
                     `).join('')}
                 </nav>
                 <div class="sidebar-footer">
-                    <div class="user-chip">${state.user?.email || ''}</div>
-                    <button id="btn-logout" class="btn ghost small">Log out</button>
+                    <div class="user-chip">${state.sessionPersisted ? 'Saved in this browser' : 'Temporary session'}</div>
+                    <button id="btn-reset-session" class="btn ghost small">Reset</button>
                 </div>
             </aside>
 
@@ -1042,7 +1043,8 @@ const App = (() => {
             await player.start();
 
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${location.host}${BASE}/ws/voice`;
+            const tokenParam = state.sessionToken ? `?token=${encodeURIComponent(state.sessionToken)}` : '';
+            const wsUrl = `${protocol}//${location.host}${BASE}/ws/voice${tokenParam}`;
             voiceWS = new WebSocket(wsUrl);
             voiceWS.onopen = () => {
                 voiceWS.send(JSON.stringify({ type: 'start', speed: readVoiceSpeed(), language: 'en' }));
@@ -1224,6 +1226,24 @@ const App = (() => {
         }
         return nearby;
     }
+
+    function cleanupTemporarySession() {
+        if (!state.sessionToken || state.sessionPersisted) return;
+        try {
+            fetch(BASE + '/api/auth/logout', {
+                method: 'POST',
+                keepalive: true,
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${state.sessionToken}`,
+                },
+                body: JSON.stringify({ forget: true }),
+            });
+        } catch {}
+    }
+
+    window.addEventListener('pagehide', cleanupTemporarySession);
 
     return { boot };
 })();

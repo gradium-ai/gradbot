@@ -37,7 +37,7 @@ The Tavily integration lives in `src/services/tavily_search.py`:
 To use Tavily locally, create an API key from Tavily, then set
 `TAVILY_API_KEY` in `.env`. The
 [Tavily API docs](https://docs.tavily.com/documentation/api-reference/introduction)
-cover authentication, the API base URL, and available endpoints.
+cover API-key authentication, the API base URL, and available endpoints.
 
 ```bash
 TAVILY_API_KEY=tvly-your-key
@@ -61,6 +61,7 @@ Run these commands from the repository root:
 cd demos/paris_rental_agent
 uv sync --dev
 cp .env.example .env
+# Edit .env and set SECRET_KEY to a strong private value.
 uv run uvicorn main:app --reload --port 8000
 ```
 
@@ -69,29 +70,20 @@ Open `http://localhost:8000`.
 The app uses a local SQLite database when `DATABASE_URL` is unset. Tables are
 created automatically on startup.
 
-To enable the fixed local demo account:
-
-```bash
-ENABLE_DEMO_ACCOUNT=true uv run python scripts/setup_local.py
-ENABLE_DEMO_ACCOUNT=true uv run uvicorn main:app --reload --port 8000
-```
-
-Otherwise, create an account through the signup screen.
-
 ## Configuration
 
-Copy `.env.example` to `.env` and fill only the integrations you need.
+Copy `.env.example` to `.env`, set a private local `SECRET_KEY`, and fill only
+the integrations you need.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `SECRET_KEY` | Production | JWT signing secret. Use a strong value outside local development. |
+| `SECRET_KEY` | Yes | JWT signing secret. Use a strong local value in `.env`; production should use a deployment secret manager. |
 | `DATABASE_URL` | No | Defaults to local SQLite. Use `postgresql+psycopg://...` for Postgres. |
 | `TAVILY_API_KEY` | Search | Required for live apartment search. |
 | `GRADIUM_API_KEY` | Voice | Required for Gradbot voice sessions. |
 | `GOOGLE_MAPS_API_KEY` | No | Enables verified commute calculations. |
 | `APP_ENV` | No | Defaults to `development`. |
 | `BASE_URL` | No | Defaults to `http://localhost:8000`. |
-| `ENABLE_DEMO_ACCOUNT` | No | Defaults to `false`. Set to `true` only for local demos. |
 
 For local voice/provider configuration, you can also copy:
 
@@ -116,7 +108,7 @@ Then set `DATABASE_URL` in `.env`.
 
 - `main.py` creates the FastAPI app, initializes the database, mounts REST
   routes, mounts the voice WebSocket route, and serves the static frontend.
-- `static/app.js` is a small single-page frontend for signup/login, onboarding,
+- `static/app.js` is a small single-page frontend for cookie-choice onboarding,
   search results, saved listings, viewing drafts, text chat, and voice chat.
 - `src/routes/` contains the HTTP API for auth, intake, profiles, search,
   listings, assistant chat, and voice.
@@ -136,7 +128,7 @@ Then set `DATABASE_URL` in `.env`.
 uv run pytest tests
 ```
 
-The test suite covers requirement extraction, profile intake, auth, search
+The test suite covers requirement extraction, profile intake, sessions, search
 gating, normalization, scoring, saved/rejected listings, viewing drafts, and
 per-user data isolation.
 
