@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+from types import SimpleNamespace
+
+from src.services import requirement_extraction
 from src.services.requirement_extraction import (
     extract_requirements,
+    extract_requirements_with_llm,
     compute_missing_fields,
 )
 
@@ -93,6 +99,146 @@ def test_french_phrases():
     assert p.get("furnished_preference") == "required"
     assert p.get("commute_max_minutes") == 25
     assert "metro" in (p.get("commute_modes") or [])
+
+
+def test_extracts_stt_surface_phrase_meter_square():
+    r = extract_requirements("The minimum surface area should be 50 meter square.")
+    assert r.profile_patch.get("min_surface_m2") == 50
+
+
+def test_extracts_stt_number_word_address_and_dollar_budget():
+    r = extract_requirements(
+        "Hi, I'm looking for a one bedroom apartment near Forty Rue de Louvre, "
+        "which is my work location. I'm looking for one bedroom and my maximum "
+        "rent that I'm okay paying is $2,000."
+    )
+    p = r.profile_patch
+    assert p.get("work_location_address") == "40 Rue de Louvre"
+    assert p.get("max_rent_including_charges_eur") == 2000
+    assert p.get("min_bedrooms") == 1
+    assert "work_location_address" not in r.ambiguous_fields
+    assert r.field_confidence.get("work_location_address", 0) >= 0.9
+
+
+def test_extracts_standalone_currency_budget_followup():
+    r = extract_requirements("$2,000.")
+    assert r.profile_patch.get("max_rent_including_charges_eur") == 2000
+
+
+def test_llm_extraction_merges_structured_patch(monkeypatch):
+    monkeypatch.setattr(
+        requirement_extraction,
+        "_llm_config",
+        lambda: SimpleNamespace(
+            llm=SimpleNamespace(
+                model="google/gemma-4-26B-A4B-it",
+                base_url="https://llm.example.test/v1",
+                api_key=None,
+                extra_config={"chat_template_kwargs": {"enable_thinking": False}},
+            )
+        ),
+    )
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "profile_patch": {
+                                        "max_rent_including_charges_eur": 1,
+                                        "commute_max_minutes": 999,
+                                        "not_allowed": "ignored",
+                                    },
+                                    "requirements": {
+                                        "work_location": {
+                                            "kind": "address",
+                                            "value": "40 Rue de Louvre",
+                                            "confidence": 0.65,
+                                        },
+                                        "budget": {
+                                            "max_rent_eur": "2,000",
+                                            "confidence": 0.95,
+                                        },
+                                        "apartment": {
+                                            "min_bedrooms": 1,
+                                            "confidence": 0.9,
+                                        },
+                                        "commute": {
+                                            "max_minutes": 30,
+                                            "modes": ["metro", "teleport"],
+                                            "logic": "any",
+                                            "confidence": 0.9,
+                                        },
+                                        "room_features": [
+                                            {
+                                                "room": "kitchen",
+                                                "feature": "dishwasher",
+                                                "importance": "must_have",
+                                            },
+                                            {
+                                                "room": "kitchen",
+                                                "feature": "oven",
+                                                "importance": "must_have",
+                                            },
+                                            {
+                                                "room": "database",
+                                                "feature": "delete keys",
+                                                "importance": "must_have",
+                                            },
+                                        ],
+                                    },
+                                    "summary": "One-bedroom near 40 Rue de Louvre, max 2000 euros.",
+                                    "ambiguous": [{"field": "work_location", "reason": "maybe unclear"}],
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers, json):
+            assert url == "https://llm.example.test/v1/chat/completions"
+            assert json["model"] == "google/gemma-4-26B-A4B-it"
+            assert "profile_patch" not in json["messages"][1]["content"]
+            return FakeResponse()
+
+    monkeypatch.setattr(requirement_extraction.httpx, "AsyncClient", FakeClient)
+
+    r = asyncio.run(
+        extract_requirements_with_llm(
+            "I need a one bedroom near Forty Rue de Louvre, max $2,000.",
+            existing_profile={},
+        )
+    )
+
+    assert r.profile_patch["work_location_address"] == "40 Rue de Louvre"
+    assert r.profile_patch["max_rent_including_charges_eur"] == 2000
+    assert r.profile_patch["commute_max_minutes"] == 30
+    assert r.profile_patch["commute_modes"] == ["metro"]
+    kitchen = r.profile_patch["room_requirements"]["kitchen"]
+    assert kitchen["must_have"] == ["dishwasher", "oven"]
+    assert "delete keys" not in kitchen["must_have"]
+    assert "not_allowed" not in r.profile_patch
+    assert r.field_sources["work_location_address"] == "llm"
+    assert r.field_sources["room_requirements"] == "llm"
+    assert "work_location_address" not in r.ambiguous_fields
+    assert r.field_confidence["work_location_address"] >= 0.9
 
 
 def test_missing_fields_when_empty():

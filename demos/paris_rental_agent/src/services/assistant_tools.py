@@ -30,7 +30,12 @@ from ..models import (
 )
 from .drafting import draft_viewing_request_text
 from .normalize import english_listing_title, safe_external_url
-from .requirement_extraction import compute_missing_fields, extract_requirements
+from .requirement_extraction import (
+    ExtractedRequirements,
+    compute_missing_fields,
+    extract_requirements,
+    extract_requirements_with_llm,
+)
 from .search_pipeline import run_search_for_user
 
 logger = logging.getLogger(__name__)
@@ -121,10 +126,37 @@ _SEARCH_FIELD_ALIASES = {
     "surface_area": "min_surface_m2",
     "surface_area_m2": "min_surface_m2",
     "surface_area_sqm": "min_surface_m2",
+    "max_commute_minutes": "commute_max_minutes",
+    "maximum_commute_minutes": "commute_max_minutes",
+    "commute_minutes": "commute_max_minutes",
+    "commute_time": "commute_max_minutes",
+    "max_commute_time": "commute_max_minutes",
+    "maximum_commute_time": "commute_max_minutes",
+    "commute_limit_minutes": "commute_max_minutes",
+    "max_travel_time_minutes": "commute_max_minutes",
     "arrondissements": "preferred_arrondissements",
     "preferred_arrondissement": "preferred_arrondissements",
     "preferred_areas": "preferred_arrondissements",
     "excluded_arrondissement": "excluded_arrondissements",
+}
+
+_ROOM_FEATURE_ALIASES = {
+    "dish washer": ("kitchen", "must_have", "dishwasher"),
+    "dishwasher": ("kitchen", "must_have", "dishwasher"),
+    "lave vaisselle": ("kitchen", "must_have", "dishwasher"),
+    "lave-vaisselle": ("kitchen", "must_have", "dishwasher"),
+    "oven": ("kitchen", "must_have", "oven"),
+    "four": ("kitchen", "must_have", "oven"),
+    "proper kitchen": ("kitchen", "must_have", "proper kitchen"),
+    "real kitchen": ("kitchen", "must_have", "proper kitchen"),
+    "natural light": ("living_room", "must_have", "natural light"),
+    "good light": ("living_room", "must_have", "natural light"),
+    "desk": ("living_room", "must_have", "desk space"),
+    "desk space": ("living_room", "must_have", "desk space"),
+    "balcony": ("living_room", "nice_to_have", "balcony"),
+    "balcon": ("living_room", "nice_to_have", "balcony"),
+    "storage": ("living_room", "nice_to_have", "storage"),
+    "wardrobe": ("bedroom", "nice_to_have", "wardrobe"),
 }
 
 
@@ -152,8 +184,82 @@ def _looks_like_precise_address(value: Any) -> bool:
     )
 
 
+def _iter_alias_labels(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        return [
+            part.strip()
+            for part in re.split(r",|\band\b|\bet\b", value, flags=re.IGNORECASE)
+            if part.strip()
+        ]
+    if isinstance(value, (list, tuple, set)):
+        labels: list[str] = []
+        for item in value:
+            labels.extend(_iter_alias_labels(str(item)))
+        return labels
+    return [str(value).strip()]
+
+
+def _room_requirements_from_alias_items(
+    value: Any,
+    *,
+    default_room: str | None = None,
+    default_kind: str = "must_have",
+) -> dict[str, Any]:
+    rooms: dict[str, Any] = {}
+    for raw_label in _iter_alias_labels(value):
+        key = re.sub(r"\s+", " ", raw_label.lower().strip())
+        mapped = _ROOM_FEATURE_ALIASES.get(key)
+        if mapped:
+            room, kind, label = mapped
+        elif default_room:
+            room, kind, label = default_room, default_kind, raw_label
+        else:
+            continue
+        target = rooms.setdefault(room, {"must_have": [], "nice_to_have": []})
+        if label not in target[kind]:
+            target[kind].append(label)
+    return rooms
+
+
 def _normalize_profile_patch_aliases(patch: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(patch or {})
+
+    if "furnished" in normalized and "furnished_preference" not in normalized:
+        furnished = normalized.pop("furnished")
+        if isinstance(furnished, bool):
+            normalized["furnished_preference"] = "required" if furnished else "any"
+        elif isinstance(furnished, str):
+            text = furnished.strip().lower()
+            if text in {"true", "yes", "required", "furnished", "meuble", "meublé"}:
+                normalized["furnished_preference"] = "required"
+            elif text in {"false", "no", "any", "unfurnished", "non meuble", "non meublé"}:
+                normalized["furnished_preference"] = "any"
+
+    room_alias_patch: dict[str, Any] = {}
+    amenities = normalized.pop("amenities", None)
+    room_alias_patch = _merge_room_requirements(
+        room_alias_patch,
+        _room_requirements_from_alias_items(amenities),
+    )
+    for alias in (
+        "kitchen_must_have",
+        "kitchen_must_haves",
+        "kitchen_must_have_items",
+        "kitchen_requirements",
+    ):
+        value = normalized.pop(alias, None)
+        room_alias_patch = _merge_room_requirements(
+            room_alias_patch,
+            _room_requirements_from_alias_items(value, default_room="kitchen"),
+        )
+    if room_alias_patch:
+        normalized["room_requirements"] = _merge_room_requirements(
+            normalized.get("room_requirements"),
+            room_alias_patch,
+        )
+
     for alias in _WORK_LOCATION_ALIASES:
         value = normalized.pop(alias, None)
         if value in (None, ""):
@@ -501,17 +607,19 @@ def get_profile_draft(db: Session, user_id: str) -> dict[str, Any]:
     }
 
 
-def extract_requirements_from_transcript(
-    db: Session, user_id: str, transcript: str, *, source: str = "voice"
+def _apply_extracted_requirements(
+    db: Session,
+    user_id: str,
+    transcript: str,
+    extracted: ExtractedRequirements,
+    *,
+    source: str = "voice",
 ) -> dict[str, Any]:
-    """Extract requirements from transcript and update the draft search profile."""
     sp = _get_or_create_search_profile(db, user_id)
     rp = _get_or_create_renter_profile(db, user_id)
     intake = _get_or_create_intake(db, user_id, sp)
 
-    existing = _profile_dict_for_extraction(sp, rp)
-    extracted = extract_requirements(transcript, existing_profile=existing)
-    patch = extracted.profile_patch
+    patch = _normalize_profile_patch_aliases(extracted.profile_patch)
 
     # Apply work location to renter profile
     work_patch: dict[str, Any] = {}
@@ -556,6 +664,8 @@ def extract_requirements_from_transcript(
         "ok": True,
         "intake_session_id": intake.id,
         "draft_profile": _profile_dict_for_extraction(sp, rp),
+        "applied_fields": sorted(changed_fields),
+        "ignored_fields": sorted(set(patch) - changed_fields),
         "summary": extracted.summary,
         "missing_fields": missing,
         "ambiguous_fields": extracted.ambiguous_fields,
@@ -563,6 +673,28 @@ def extract_requirements_from_transcript(
         "field_sources": intake.field_sources,
         "confirmation_status": sp.confirmation_status,
     }
+
+
+def extract_requirements_from_transcript(
+    db: Session, user_id: str, transcript: str, *, source: str = "voice"
+) -> dict[str, Any]:
+    """Extract requirements deterministically and update the draft search profile."""
+    sp = _get_or_create_search_profile(db, user_id)
+    rp = _get_or_create_renter_profile(db, user_id)
+    existing = _profile_dict_for_extraction(sp, rp)
+    extracted = extract_requirements(transcript, existing_profile=existing)
+    return _apply_extracted_requirements(db, user_id, transcript, extracted, source=source)
+
+
+async def extract_requirements_from_transcript_with_llm(
+    db: Session, user_id: str, transcript: str, *, source: str = "voice"
+) -> dict[str, Any]:
+    """Use the configured LLM to extract requirements, then validate/apply them."""
+    sp = _get_or_create_search_profile(db, user_id)
+    rp = _get_or_create_renter_profile(db, user_id)
+    existing = _profile_dict_for_extraction(sp, rp)
+    extracted = await extract_requirements_with_llm(transcript, existing_profile=existing)
+    return _apply_extracted_requirements(db, user_id, transcript, extracted, source=source)
 
 
 def update_profile_draft(
@@ -603,6 +735,8 @@ def update_profile_draft(
         "ok": True,
         "intake_session_id": intake.id,
         "draft_profile": _profile_dict_for_extraction(sp, rp),
+        "applied_fields": sorted(changed_fields),
+        "ignored_fields": sorted(set(patch) - changed_fields),
         "missing_fields": missing,
         "ambiguous_fields": intake.ambiguous_fields or [],
         "field_confidence": intake.field_confidence or {},
@@ -670,8 +804,6 @@ def get_user_context(db: Session, user_id: str) -> dict[str, Any]:
         "ok": True,
         "user": {
             "id": user.id,
-            "email": user.email,
-            "full_name": user.full_name,
         },
         "renter_profile": {
             "display_name": rp.display_name,
@@ -1010,7 +1142,7 @@ def draft_viewing_request(
     sp = _get_or_create_search_profile(db, user_id)
 
     subject, body = draft_viewing_request_text(
-        user_full_name=user.full_name if user else None,
+        user_full_name=rp.display_name if rp else None,
         renter_phone=rp.phone,
         listing=_serialize_listing(listing),
         profile=_serialize_search_profile(sp, renter=rp),

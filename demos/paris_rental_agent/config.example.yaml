@@ -26,7 +26,7 @@ session:
   assistant_speaks_first: true
 
 stt:
-  flush_duration_s: 0.5
+  flush_duration_s: 0.8
 
 tts:
   rewrite_rules: "en"

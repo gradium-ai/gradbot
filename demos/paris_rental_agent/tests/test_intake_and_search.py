@@ -1,36 +1,65 @@
-"""End-to-end tests for auth, intake, confirmation, search, save/reject, drafts, isolation."""
+"""End-to-end tests for sessions, intake, search, save/reject, drafts, isolation."""
 
 from __future__ import annotations
 
-import uuid
 
-
-def _signup(client, email=None, password="testpass123", name="Test User"):
-    email = email or f"u{uuid.uuid4().hex[:8]}@example.com"
-    res = client.post(
-        "/api/auth/signup",
-        json={"email": email, "password": password, "full_name": name},
-    )
+def _guest_session(client):
+    res = client.post("/api/auth/guest")
     assert res.status_code == 200, res.text
-    return email
+    return res.json()["id"]
 
 
-def test_signup_login_logout(client):
-    email = _signup(client)
+def test_guest_session_logout_clears_cookie(client):
+    user_id = _guest_session(client)
     me = client.get("/api/auth/me")
     assert me.status_code == 200
-    assert me.json()["email"] == email
+    assert me.json()["id"] == user_id
 
     client.post("/api/auth/logout")
     me2 = client.get("/api/auth/me")
     assert me2.status_code == 401
 
-    res = client.post("/api/auth/login", json={"email": email, "password": "testpass123"})
-    assert res.status_code == 200
+
+def test_guest_cookie_session_restores_same_user(client):
+    first = client.post("/api/auth/guest")
+    assert first.status_code == 200, first.text
+    first_user = first.json()
+
+    me = client.get("/api/auth/me")
+    assert me.status_code == 200
+    assert me.json()["id"] == first_user["id"]
+
+    second = client.post("/api/auth/guest")
+    assert second.status_code == 200, second.text
+    assert second.json()["id"] == first_user["id"]
+
+
+def test_temporary_guest_session_uses_bearer_token_without_cookie(client):
+    first = client.post("/api/auth/guest?persist=false")
+    assert first.status_code == 200, first.text
+    body = first.json()
+    token = body["token"]
+    assert body["persisted"] is False
+    assert "set-cookie" not in first.headers
+
+    without_token = client.get("/api/auth/me")
+    assert without_token.status_code == 401
+
+    headers = {"Authorization": f"Bearer {token}"}
+    me = client.get("/api/auth/me", headers=headers)
+    assert me.status_code == 200
+    assert me.json()["id"] == body["id"]
+
+    started = client.post("/api/intake/start", headers=headers)
+    assert started.status_code == 200, started.text
+
+    logout = client.post("/api/auth/logout", json={"forget": True}, headers=headers)
+    assert logout.status_code == 200
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
 
 
 def test_intake_full_flow_and_search_blocked(client):
-    _signup(client)
+    _guest_session(client)
 
     start = client.post("/api/intake/start").json()
     assert start["ok"] is True
@@ -82,7 +111,7 @@ def test_intake_full_flow_and_search_blocked(client):
 
 
 def test_save_reject_draft_persistence(client):
-    _signup(client)
+    _guest_session(client)
     client.post("/api/intake/start")
     client.post(
         "/api/intake/transcript",
@@ -119,7 +148,7 @@ def test_save_reject_draft_persistence(client):
 
 
 def test_profile_update_hides_stale_matches_until_fresh_search(client):
-    _signup(client)
+    _guest_session(client)
     client.post("/api/intake/start")
     client.post(
         "/api/intake/transcript",
@@ -163,10 +192,10 @@ def test_legacy_invalid_min_rooms_is_repaired(client):
     from src.db import SessionLocal
     from src.models import SearchProfile, User
 
-    email = _signup(client)
+    user_id = _guest_session(client)
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.email == email).one()
+        user = db.query(User).filter(User.id == user_id).one()
         sp = db.query(SearchProfile).filter(SearchProfile.user_id == user.id).one()
         sp.min_rooms = 0
         db.commit()
@@ -179,7 +208,7 @@ def test_legacy_invalid_min_rooms_is_repaired(client):
 
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.email == email).one()
+        user = db.query(User).filter(User.id == user_id).one()
         sp = db.query(SearchProfile).filter(SearchProfile.user_id == user.id).one()
         assert sp.min_rooms is None
     finally:
@@ -190,10 +219,10 @@ def test_legacy_string_arrondissements_are_repaired(client):
     from src.db import SessionLocal
     from src.models import SearchProfile, User
 
-    email = _signup(client)
+    user_id = _guest_session(client)
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.email == email).one()
+        user = db.query(User).filter(User.id == user_id).one()
         sp = db.query(SearchProfile).filter(SearchProfile.user_id == user.id).one()
         sp.preferred_arrondissements = ["2nd", "3rd", "75004"]
         sp.excluded_arrondissements = ["16th"]
@@ -209,7 +238,7 @@ def test_legacy_string_arrondissements_are_repaired(client):
 
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.email == email).one()
+        user = db.query(User).filter(User.id == user_id).one()
         sp = db.query(SearchProfile).filter(SearchProfile.user_id == user.id).one()
         assert sp.preferred_arrondissements == [2, 3, 4]
         assert sp.excluded_arrondissements == [16]
@@ -218,7 +247,7 @@ def test_legacy_string_arrondissements_are_repaired(client):
 
 
 def test_text_update_coerces_human_arrondissement_values(client):
-    _signup(client)
+    _guest_session(client)
     res = client.post(
         "/api/intake/text-update",
         json={
@@ -232,7 +261,7 @@ def test_text_update_coerces_human_arrondissement_values(client):
 
 
 def test_text_update_coerces_common_llm_field_aliases(client):
-    _signup(client)
+    _guest_session(client)
     res = client.post(
         "/api/intake/text-update",
         json={
@@ -248,10 +277,49 @@ def test_text_update_coerces_common_llm_field_aliases(client):
     assert dp["max_rent_including_charges_eur"] == 1800
     assert dp["min_surface_m2"] == 45
     assert dp["preferred_arrondissements"] == [2, 13]
+    assert "min_surface_m2" in res.json()["applied_fields"]
+
+
+def test_voice_transcript_meter_square_updates_surface(client):
+    _guest_session(client)
+    res = client.post(
+        "/api/intake/transcript",
+        json={"transcript": "The minimum surface area should be 50 meter square."},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["draft_profile"]["min_surface_m2"] == 50
+    assert "min_surface_m2" in body["applied_fields"]
+    assert "min_surface_m2" not in body["ignored_fields"]
+
+
+def test_voice_patch_min_surface_area_m2_alias_updates_surface(client):
+    _guest_session(client)
+    res = client.post(
+        "/api/intake/text-update",
+        json={"patch": {"min_surface_area_m2": 50}},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["draft_profile"]["min_surface_m2"] == 50
+    assert "min_surface_m2" in body["applied_fields"]
+
+
+def test_voice_patch_max_commute_minutes_alias_updates_commute(client):
+    _guest_session(client)
+    res = client.post(
+        "/api/intake/text-update",
+        json={"patch": {"max_commute_minutes": 40}},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["draft_profile"]["commute_max_minutes"] == 40
+    assert "commute_max_minutes" in body["applied_fields"]
+    assert "commute_max_minutes" not in body["ignored_fields"]
 
 
 def test_voice_style_work_location_alias_updates_profile(client):
-    _signup(client)
+    _guest_session(client)
     res = client.post(
         "/api/intake/text-update",
         json={"patch": {"work_location": "40 Rue de Louvre, 75002 Paris"}},
@@ -263,7 +331,7 @@ def test_voice_style_work_location_alias_updates_profile(client):
 
 
 def test_room_requirement_patch_merges_with_existing_requirements(client):
-    _signup(client)
+    _guest_session(client)
     first = client.post(
         "/api/intake/text-update",
         json={
@@ -292,6 +360,35 @@ def test_room_requirement_patch_merges_with_existing_requirements(client):
     assert rooms["kitchen"]["must_have"] == ["dishwasher"]
 
 
+def test_voice_patch_amenities_alias_updates_kitchen_must_haves(client):
+    _guest_session(client)
+    res = client.post(
+        "/api/intake/text-update",
+        json={"patch": {"amenities": ["dishwasher", "oven"]}},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    kitchen = body["draft_profile"]["room_requirements"]["kitchen"]
+    assert "dishwasher" in kitchen["must_have"]
+    assert "oven" in kitchen["must_have"]
+    assert "room_requirements" in body["applied_fields"]
+    assert "room_requirements" not in body["ignored_fields"]
+
+
+def test_voice_patch_furnished_alias_updates_preference(client):
+    _guest_session(client)
+    res = client.post(
+        "/api/intake/text-update",
+        json={"patch": {"furnished": True, "bedrooms": 1}},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["draft_profile"]["furnished_preference"] == "required"
+    assert body["draft_profile"]["min_bedrooms"] == 1
+    assert "furnished_preference" in body["applied_fields"]
+    assert "min_bedrooms" in body["applied_fields"]
+
+
 def test_user_data_isolation(client):
     from fastapi.testclient import TestClient
 
@@ -299,8 +396,8 @@ def test_user_data_isolation(client):
     app = client.app
     c1 = TestClient(app)
     c2 = TestClient(app)
-    e1 = _signup(c1)
-    e2 = _signup(c2)
+    e1 = _guest_session(c1)
+    e2 = _guest_session(c2)
     assert e1 != e2
 
     c1.post("/api/intake/start")

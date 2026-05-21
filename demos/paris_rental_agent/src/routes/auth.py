@@ -1,18 +1,20 @@
-"""Auth routes: signup, login, logout, me."""
+"""Auth routes for anonymous browser sessions."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import uuid
+from datetime import timedelta
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Body, Cookie, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
-from ..dependencies import get_current_user
+from ..dependencies import get_current_user, get_optional_user
 from ..models import RenterProfile, SearchProfile, User
-from ..schemas import LoginRequest, SignupRequest, UserOut
-from ..security import create_access_token, hash_password, verify_password
+from ..schemas import GuestSessionOut, UserOut
+from ..security import create_access_token, decode_access_token
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -32,7 +34,7 @@ def _set_cookie(response: Response, token: str) -> None:
 
 
 def _ensure_initial_records(db: Session, user: User) -> None:
-    """Create the renter profile and a draft search profile on signup."""
+    """Create the renter profile and a draft search profile for a new session."""
     if not user.renter_profile:
         db.add(RenterProfile(user_id=user.id))
     has_search_profile = (
@@ -42,60 +44,71 @@ def _ensure_initial_records(db: Session, user: User) -> None:
         db.add(SearchProfile(user_id=user.id))
 
 
-@router.post("/signup", response_model=UserOut)
-def signup(payload: SignupRequest, response: Response, db: Session = Depends(get_db)) -> UserOut:
-    existing = db.query(User).filter(User.email == payload.email.lower()).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="An account with this email already exists.",
+def _user_from_token(db: Session, token: Optional[str]) -> Optional[User]:
+    if not token:
+        return None
+    user_id = decode_access_token(token)
+    if not user_id:
+        return None
+    return db.query(User).filter(User.id == user_id).first()
+
+
+_SESSION_LABEL_DOMAIN = "@session.paris-rental.local"
+
+
+@router.post("/guest", response_model=GuestSessionOut)
+def guest_session(
+    response: Response,
+    persist: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    paris_rental_session: Optional[str] = Cookie(default=None),
+) -> GuestSessionOut:
+    """Create or refresh an anonymous browser session after cookie consent."""
+    user = _user_from_token(db, paris_rental_session)
+    if user:
+        _ensure_initial_records(db, user)
+        db.commit()
+        db.refresh(user)
+    else:
+        user = User(
+            session_label=f"session-{uuid.uuid4().hex}{_SESSION_LABEL_DOMAIN}",
+            session_secret=uuid.uuid4().hex,
         )
-    user = User(
-        email=payload.email.lower(),
-        password_hash=hash_password(payload.password),
-        full_name=payload.full_name,
+        db.add(user)
+        db.flush()
+        _ensure_initial_records(db, user)
+        db.commit()
+        db.refresh(user)
+
+    token = create_access_token(
+        user.id,
+        expires_delta=None if persist else timedelta(hours=8),
     )
-    db.add(user)
-    db.flush()
-    _ensure_initial_records(db, user)
-    db.commit()
-    db.refresh(user)
-    token = create_access_token(user.id)
-    _set_cookie(response, token)
-    return UserOut.model_validate(user)
-
-
-@router.post("/login", response_model=UserOut)
-def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)) -> UserOut:
-    user = db.query(User).filter(User.email == payload.email.lower()).first()
-    if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password.",
-        )
-    user.last_login_at = datetime.now(timezone.utc)
-    _ensure_initial_records(db, user)
-    db.commit()
-    db.refresh(user)
-    token = create_access_token(user.id)
-    _set_cookie(response, token)
-    return UserOut.model_validate(user)
+    if persist:
+        _set_cookie(response, token)
+    return GuestSessionOut(
+        **UserOut.model_validate(user).model_dump(),
+        token=None if persist else token,
+        persisted=persist,
+    )
 
 
 @router.post("/logout")
-def logout(response: Response) -> dict:
+def logout(
+    response: Response,
+    payload: Optional[dict] = Body(default=None),
+    current_user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+) -> dict:
     settings = get_settings()
     response.delete_cookie(settings.cookie_name, path="/")
+    forget = bool((payload or {}).get("forget"))
+    if forget and current_user:
+        db.delete(current_user)
+        db.commit()
     return {"ok": True}
 
 
 @router.get("/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)) -> UserOut:
     return UserOut.model_validate(current_user)
-
-
-@router.post("/voice-token")
-def voice_token(current_user: User = Depends(get_current_user)) -> dict:
-    """Return a short-lived token for WebSocket connections that can't read cookies."""
-    token = create_access_token(current_user.id, expires_delta=timedelta(minutes=5))
-    return {"token": token}

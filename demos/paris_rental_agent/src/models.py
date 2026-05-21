@@ -50,14 +50,15 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Column names stay compatible with existing local DBs from the old account flow.
+    session_label: Mapped[str] = mapped_column(
+        "email", String(255), unique=True, nullable=False, index=True
+    )
+    session_secret: Mapped[str] = mapped_column("password_hash", String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
-    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     renter_profile: Mapped[Optional["RenterProfile"]] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"

@@ -1,15 +1,24 @@
 """Extract apartment-search requirements from a free-form transcript.
 
-Deterministic regex/keyword extraction. Works without an LLM key. Designed to be
-called from REST endpoints, the chat assistant, and the Gradbot voice tool.
+Deterministic regex/keyword extraction plus an optional Gemma-assisted semantic
+extraction path. Works without an LLM key. Designed to be called from REST
+endpoints, the chat assistant, and the Gradbot voice tool.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Optional
+
+import gradbot
+import httpx
+
+logger = logging.getLogger(__name__)
 
 REQUIRED_FIELDS = [
     "work_location_address_or_label",
@@ -75,6 +84,37 @@ ARRONDISSEMENT_PATTERNS = [
     re.compile(r"\b750(\d{2})\b"),
 ]
 
+NUMBER_WORDS = {
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+    "thirty": 30,
+    "forty": 40,
+    "fifty": 50,
+    "sixty": 60,
+    "seventy": 70,
+    "eighty": 80,
+    "ninety": 90,
+}
+
 
 @dataclass
 class ExtractedRequirements:
@@ -104,6 +144,47 @@ def _normalize(text: str) -> str:
     return _strip_accents(text.lower())
 
 
+def _number_token_to_int(token: str) -> Optional[int]:
+    token = token.lower().replace("-", " ").strip()
+    if token.isdigit():
+        return int(token)
+    parts = token.split()
+    if not parts:
+        return None
+    total = 0
+    for part in parts:
+        value = NUMBER_WORDS.get(part)
+        if value is None:
+            return None
+        total += value
+    return total
+
+
+def _normalize_street_number_words(text: str) -> str:
+    number_words = "|".join(sorted(NUMBER_WORDS, key=len, reverse=True))
+
+    def repl(match: re.Match[str]) -> str:
+        value = _number_token_to_int(match.group("number"))
+        if value is None:
+            return match.group(0)
+        return f"{value} {match.group('street')}"
+
+    return re.sub(
+        rf"\b(?P<number>{number_words}(?:[\s-](?:one|two|three|four|five|six|seven|eight|nine))?)\s+"
+        rf"(?P<street>rue|avenue|boulevard|street|road|quai|place)\b",
+        repl,
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
+def _parse_money_amount(token: str) -> Optional[int]:
+    try:
+        return int(re.sub(r"[^\d]", "", token))
+    except ValueError:
+        return None
+
+
 def _extract_budget(text: str) -> tuple[Optional[int], float]:
     """Look for a max rent number in EUR. Returns (value, confidence)."""
     norm = text
@@ -111,17 +192,18 @@ def _extract_budget(text: str) -> tuple[Optional[int], float]:
 
     # Match "max 1500", "under 1600", "not more than 1700", "budget 1400"
     patterns: list[tuple[str, float]] = [
-        (r"(?:max(?:imum)?|up to|under|less than|not more than|budget(?: is)?|au max(?:imum)?|max\.|jusqu'à|jusqu'a|maximum de)\s*(?:de\s*)?(?:€|eur(?:os)?)?\s*(\d{3,5})\s*(?:€|eur(?:os)?|euros)?", 0.95),
-        (r"(\d{3,5})\s*(?:€|eur|euros)\s*(?:max|maximum)?\s*(?:par mois|/mois|monthly|per month|including charges|charges? comprises?|cc|tcc|c\.c\.)?", 0.85),
-        (r"around\s+(\d{3,5})\s*(?:€|eur|euros)?", 0.7),
+        (r"(?:max(?:imum)?|up to|under|less than|not more than|budget(?: is)?|maximum rent(?:[^0-9$€]{0,40})?|rent(?:[^0-9$€]{0,40})?|au max(?:imum)?|max\.|jusqu'à|jusqu'a|maximum de)\s*(?:de\s*)?(?:€|\$|eur(?:os)?|usd)?\s*([\d,]{3,6})\s*(?:€|\$|eur(?:os)?|euros|usd)?", 0.95),
+        (r"([\d,]{3,6})\s*(?:€|\$|eur|euros|usd)\s*(?:max|maximum)?\s*(?:par mois|/mois|monthly|per month|including charges|charges? comprises?|cc|tcc|c\.c\.)?", 0.85),
+        (r"(?:€|\$|eur|euros|usd)\s*([\d,]{3,6})", 0.85),
+        (r"around\s+([\d,]{3,6})\s*(?:€|\$|eur|euros|usd)?", 0.7),
     ]
     for pattern, conf in patterns:
         for m in re.finditer(pattern, norm, flags=re.IGNORECASE):
             try:
-                val = int(m.group(1))
-            except (ValueError, IndexError):
+                val = _parse_money_amount(m.group(1))
+            except IndexError:
                 continue
-            if 200 <= val <= 20000:
+            if val is not None and 200 <= val <= 20000:
                 candidates.append((val, conf))
 
     if not candidates:
@@ -142,10 +224,7 @@ def _extract_rooms_and_bedrooms(text: str) -> dict[str, Any]:
         return out
 
     # Words: one-bedroom, two bedrooms, etc.
-    word_to_n = {
-        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-        "un": 1, "une": 1, "deux": 2, "trois": 3, "quatre": 4, "cinq": 5,
-    }
+    word_to_n = NUMBER_WORDS | {"un": 1, "une": 1, "deux": 2, "trois": 3, "quatre": 4, "cinq": 5}
 
     m = re.search(r"\b(\d+|one|two|three|four|five|un|une|deux|trois|quatre|cinq)[\s-]+bedroom", norm)
     if m:
@@ -179,8 +258,8 @@ def _extract_rooms_and_bedrooms(text: str) -> dict[str, Any]:
 def _extract_surface(text: str) -> tuple[Optional[int], float]:
     norm = _normalize(text)
     patterns = [
-        (r"(?:at least|minimum|min|au moins|au minimum)\s*(\d{2,3})\s*(?:m2|m²|sqm|square meters)", 0.9),
-        (r"(\d{2,3})\s*(?:m2|m²|sqm|square meters)", 0.7),
+        (r"(?:at least|minimum|min|au moins|au minimum)\s*(\d{2,3})\s*(?:m2|m²|sqm|square meters?|meters? square)", 0.9),
+        (r"(\d{2,3})\s*(?:m2|m²|sqm|square meters?|meters? square)", 0.7),
     ]
     for pattern, conf in patterns:
         m = re.search(pattern, norm)
@@ -244,13 +323,15 @@ def _extract_commute(text: str) -> dict[str, Any]:
 
 def _extract_work_location(text: str) -> dict[str, Any]:
     """Try to locate a workplace mention. Conservative: only label, not address."""
-    norm_orig = text
+    norm_orig = _normalize_street_number_words(text)
     out: dict[str, Any] = {}
 
     patterns = [
         r"(?:my office is|i work)\s+(?:near|at|by|close to)\s+([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$|\s+(?:and|in)\b)",
         r"(?:office|workplace|work)\s+(?:is\s+)?(?:near|at|by|close to)\s+([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$|\s+(?:and|in)\b)",
         r"(?:near|close to)\s+(?:my\s+)?(?:office|workplace|work)\s+(?:near|at|by)\s+([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$)",
+        r"(?:near|close to)\s+([A-Za-zÀ-ÿ0-9' \-]+?),?\s+(?:which is|that is)\s+my\s+(?:work|workplace|office)(?:\s+location)?",
+        r"(?:near|close to)\s+([0-9]+\s+(?:rue|avenue|boulevard|street|road|quai|place)[A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$)",
         r"my\s+work\s+is\s+(?:at\s+)?([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$)",
     ]
     for pattern in patterns:
@@ -258,8 +339,12 @@ def _extract_work_location(text: str) -> dict[str, Any]:
         if m:
             label = m.group(1).strip(" .,")
             if 2 <= len(label) <= 80:
-                out["work_location_label"] = label
-                out["confidence"] = 0.7
+                if re.search(r"\d+\s+(?:rue|avenue|boulevard|street|road|quai|place)\b", label, flags=re.IGNORECASE):
+                    out["work_location_address"] = label
+                    out["confidence"] = 0.9
+                else:
+                    out["work_location_label"] = label
+                    out["confidence"] = 0.7
                 break
     return out
 
@@ -399,6 +484,504 @@ def _compute_missing(patch: dict[str, Any], existing: Optional[dict[str, Any]] =
     return missing
 
 
+_ALLOWED_PROFILE_FIELDS = {
+    "work_location_label",
+    "work_location_address",
+    "max_rent_including_charges_eur",
+    "min_bedrooms",
+    "min_rooms",
+    "min_surface_m2",
+    "furnished_preference",
+    "commute_max_minutes",
+    "commute_modes",
+    "commute_logic",
+    "preferred_arrondissements",
+    "excluded_arrondissements",
+    "room_requirements",
+    "nearby_requirements",
+}
+
+_SEMANTIC_AMBIGUOUS_FIELD_MAP = {
+    "work_location": "work_location_address",
+    "work_location_label": "work_location_label",
+    "work_location_address": "work_location_address",
+    "budget": "max_rent_including_charges_eur",
+    "max_rent": "max_rent_including_charges_eur",
+    "max_rent_eur": "max_rent_including_charges_eur",
+    "bedrooms": "min_bedrooms",
+    "rooms": "min_rooms",
+    "surface": "min_surface_m2",
+    "min_surface": "min_surface_m2",
+    "furnished": "furnished_preference",
+    "commute": "commute_max_minutes",
+    "commute_minutes": "commute_max_minutes",
+    "commute_modes": "commute_modes",
+    "areas": "preferred_arrondissements",
+    "arrondissements": "preferred_arrondissements",
+    "room_features": "room_requirements",
+    "amenities": "room_requirements",
+    "nearby": "nearby_requirements",
+}
+
+_ALLOWED_COMMUTE_MODES = {"metro", "bike", "walk", "bus", "rer", "tram"}
+_ALLOWED_COMMUTE_LOGIC = {"metro_or_bike", "any", "all"}
+_ALLOWED_FURNISHED_VALUES = {"required", "prefer", "any"}
+_ALLOWED_ROOMS = {"living_room", "bedroom", "kitchen"}
+_ALLOWED_FEATURE_IMPORTANCE = {"must_have", "nice_to_have"}
+_FEATURE_ALIASES = {
+    "dish washer": ("kitchen", "dishwasher"),
+    "dishwasher": ("kitchen", "dishwasher"),
+    "lave vaisselle": ("kitchen", "dishwasher"),
+    "lave-vaisselle": ("kitchen", "dishwasher"),
+    "oven": ("kitchen", "oven"),
+    "four": ("kitchen", "oven"),
+    "proper kitchen": ("kitchen", "proper kitchen"),
+    "real kitchen": ("kitchen", "proper kitchen"),
+    "open kitchen": ("kitchen", "open kitchen"),
+    "cuisine ouverte": ("kitchen", "open kitchen"),
+    "natural light": ("living_room", "natural light"),
+    "good light": ("living_room", "natural light"),
+    "lots of light": ("living_room", "natural light"),
+    "lumineux": ("living_room", "natural light"),
+    "desk": ("living_room", "desk space"),
+    "desk space": ("living_room", "desk space"),
+    "space for a desk": ("living_room", "desk space"),
+    "bureau": ("living_room", "desk space"),
+    "balcony": ("living_room", "balcony"),
+    "balcon": ("living_room", "balcony"),
+    "storage": ("living_room", "storage"),
+    "rangement": ("living_room", "storage"),
+    "double bed": ("bedroom", "double bed"),
+    "lit double": ("bedroom", "double bed"),
+    "wardrobe": ("bedroom", "wardrobe"),
+    "armoire": ("bedroom", "wardrobe"),
+    "sofa": ("living_room", "sofa"),
+    "canape": ("living_room", "sofa"),
+    "dining table": ("living_room", "dining table"),
+}
+_NEARBY_KIND_TO_FIELD = {
+    "supermarket": ("supermarket_m", 500),
+    "grocery": ("supermarket_m", 500),
+    "metro": ("metro_m", 700),
+    "station": ("metro_m", 700),
+    "park": ("park_m", 1000),
+    "hospital": ("hospital_m", 2000),
+    "gym": ("gym_m", 1500),
+    "school": ("school_m", 1500),
+    "pharmacy": ("pharmacy_m", 700),
+    "bakery": ("bakery_m", 500),
+}
+
+
+def _llm_config() -> gradbot.config.Config:
+    return gradbot.config.load(Path(__file__).resolve().parents[2])
+
+
+def _secret_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if hasattr(value, "get_secret_value"):
+        return value.get_secret_value()
+    return str(value)
+
+
+def _json_object_from_text(text: str) -> dict[str, Any]:
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        parsed = json.loads(cleaned)
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return {}
+        try:
+            parsed = json.loads(cleaned[start : end + 1])
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+
+def _coerce_confidence(value: Any, default: float = 0.8) -> float:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return default
+    return min(1.0, max(0.0, confidence))
+
+
+def _coerce_int_range(value: Any, low: int, high: int) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        value = re.sub(r"[^\d-]", "", value)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if low <= parsed <= high else None
+
+
+def _clean_text_value(value: Any, *, max_len: int = 120) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", value).strip()
+    text = re.sub(r"\s+", " ", text)
+    if not text or len(text) > max_len:
+        return ""
+    return text
+
+
+def _looks_like_street_address(value: str) -> bool:
+    return bool(
+        re.search(
+            r"\d+\s+(?:rue|avenue|boulevard|street|road|quai|place)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _semantic_field_confidence(value: Any, default: float = 0.8) -> float:
+    if isinstance(value, dict):
+        return _coerce_confidence(value.get("confidence"), default)
+    return default
+
+
+def _add_room_feature(
+    rooms: dict[str, dict[str, list[str]]],
+    *,
+    room: str,
+    feature: str,
+    importance: str,
+) -> bool:
+    room = room.lower().strip()
+    importance = importance.lower().strip()
+    feature_key = re.sub(r"\s+", " ", _strip_accents(feature.lower()).strip())
+    mapped = _FEATURE_ALIASES.get(feature_key)
+    if mapped:
+        mapped_room, feature = mapped
+        room = room if room in _ALLOWED_ROOMS else mapped_room
+    elif room not in _ALLOWED_ROOMS:
+        return False
+    else:
+        feature = _clean_text_value(feature, max_len=40)
+        if not feature or not re.fullmatch(r"[A-Za-zÀ-ÿ0-9' \-]+", feature):
+            return False
+    if room not in _ALLOWED_ROOMS or importance not in _ALLOWED_FEATURE_IMPORTANCE:
+        return False
+    target = rooms.setdefault(room, {"must_have": [], "nice_to_have": []})
+    if feature not in target[importance]:
+        target[importance].append(feature)
+    return True
+
+
+def _semantic_requirements_to_patch(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, float], list[str]]:
+    """Map LLM semantic requirements into the app's canonical profile patch.
+
+    This is the safety boundary: the model never writes arbitrary patch keys.
+    Every field is type-checked, range-checked, and enum-checked here.
+    """
+    requirements = data.get("requirements")
+    if not isinstance(requirements, dict):
+        return {}, {}, []
+
+    patch: dict[str, Any] = {}
+    confidence: dict[str, float] = {}
+    ambiguous: list[str] = []
+
+    work = requirements.get("work_location")
+    if isinstance(work, dict):
+        value = _clean_text_value(work.get("value"))
+        if value:
+            kind = str(work.get("kind") or "").lower().strip()
+            target = "work_location_address" if kind == "address" or _looks_like_street_address(value) else "work_location_label"
+            patch[target] = value
+            confidence[target] = _semantic_field_confidence(work, 0.8)
+            if target == "work_location_address" and _looks_like_street_address(value):
+                confidence[target] = max(confidence[target], 0.9)
+            elif confidence[target] < 0.75:
+                ambiguous.append(target)
+
+    budget = requirements.get("budget")
+    if isinstance(budget, dict):
+        value = _coerce_int_range(
+            budget.get("max_rent_eur", budget.get("max_rent_including_charges_eur")),
+            200,
+            20_000,
+        )
+        if value is not None:
+            patch["max_rent_including_charges_eur"] = value
+            confidence["max_rent_including_charges_eur"] = _semantic_field_confidence(budget, 0.85)
+
+    apartment = requirements.get("apartment")
+    if isinstance(apartment, dict):
+        field_ranges = {
+            "min_bedrooms": (0, 10),
+            "min_rooms": (1, 20),
+            "min_surface_m2": (1, 500),
+        }
+        for field, (low, high) in field_ranges.items():
+            value = _coerce_int_range(apartment.get(field), low, high)
+            if value is not None:
+                patch[field] = value
+                confidence[field] = _semantic_field_confidence(apartment, 0.8)
+        furnished = str(apartment.get("furnished_preference") or "").lower().strip()
+        if furnished in _ALLOWED_FURNISHED_VALUES:
+            patch["furnished_preference"] = furnished
+            confidence["furnished_preference"] = _semantic_field_confidence(apartment, 0.8)
+
+    commute = requirements.get("commute")
+    if isinstance(commute, dict):
+        minutes = _coerce_int_range(commute.get("max_minutes"), 1, 180)
+        if minutes is not None:
+            patch["commute_max_minutes"] = minutes
+            confidence["commute_max_minutes"] = _semantic_field_confidence(commute, 0.8)
+        modes = commute.get("modes")
+        if isinstance(modes, list):
+            clean_modes = []
+            for mode in modes:
+                mode_text = str(mode or "").lower().strip()
+                if mode_text in _ALLOWED_COMMUTE_MODES and mode_text not in clean_modes:
+                    clean_modes.append(mode_text)
+            if clean_modes:
+                patch["commute_modes"] = clean_modes
+                confidence["commute_modes"] = _semantic_field_confidence(commute, 0.8)
+        logic = str(commute.get("logic") or "").lower().strip()
+        if logic in _ALLOWED_COMMUTE_LOGIC:
+            patch["commute_logic"] = logic
+
+    areas = requirements.get("areas")
+    if isinstance(areas, dict):
+        for source, target in (
+            ("preferred_arrondissements", "preferred_arrondissements"),
+            ("excluded_arrondissements", "excluded_arrondissements"),
+        ):
+            values = areas.get(source)
+            if not isinstance(values, list):
+                continue
+            clean_values = []
+            for value in values:
+                arr = _coerce_int_range(value, 1, 20)
+                if arr is not None and arr not in clean_values:
+                    clean_values.append(arr)
+            if clean_values:
+                patch[target] = clean_values
+                confidence[target] = _semantic_field_confidence(areas, 0.8)
+
+    room_features = requirements.get("room_features")
+    rooms: dict[str, dict[str, list[str]]] = {}
+    if isinstance(room_features, list):
+        for item in room_features:
+            if not isinstance(item, dict):
+                continue
+            _add_room_feature(
+                rooms,
+                room=str(item.get("room") or ""),
+                feature=str(item.get("feature") or ""),
+                importance=str(item.get("importance") or "must_have"),
+            )
+    if rooms:
+        patch["room_requirements"] = rooms
+        confidence["room_requirements"] = 0.85
+
+    nearby_items = requirements.get("nearby")
+    nearby: dict[str, int] = {}
+    if isinstance(nearby_items, list):
+        for item in nearby_items:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("kind") or "").lower().strip()
+            mapped = _NEARBY_KIND_TO_FIELD.get(kind)
+            if not mapped:
+                continue
+            field, default_m = mapped
+            distance = _coerce_int_range(item.get("max_distance_m"), 50, 10_000) or default_m
+            nearby[field] = distance
+    if nearby:
+        patch["nearby_requirements"] = nearby
+        confidence["nearby_requirements"] = 0.8
+
+    raw_ambiguous = data.get("ambiguous")
+    if isinstance(raw_ambiguous, list):
+        for item in raw_ambiguous:
+            field = item.get("field") if isinstance(item, dict) else item
+            mapped = _SEMANTIC_AMBIGUOUS_FIELD_MAP.get(str(field or "").strip())
+            if mapped and mapped in _ALLOWED_PROFILE_FIELDS:
+                ambiguous.append(mapped)
+
+    raw_ambiguous_fields = data.get("ambiguous_fields")
+    if isinstance(raw_ambiguous_fields, list):
+        for item in raw_ambiguous_fields:
+            mapped = _SEMANTIC_AMBIGUOUS_FIELD_MAP.get(str(item or "").strip(), str(item or "").strip())
+            if mapped in _ALLOWED_PROFILE_FIELDS:
+                ambiguous.append(mapped)
+
+    if _looks_like_street_address(str(patch.get("work_location_address") or "")):
+        confidence["work_location_address"] = max(confidence.get("work_location_address", 0), 0.9)
+        ambiguous = [field for field in ambiguous if field != "work_location_address"]
+
+    return patch, confidence, sorted(set(ambiguous))
+
+
+def _merge_semantic_llm_extraction(
+    fallback: ExtractedRequirements,
+    data: dict[str, Any],
+    *,
+    existing_profile: Optional[dict[str, Any]],
+) -> ExtractedRequirements:
+    llm_patch, llm_confidence, llm_ambiguous = _semantic_requirements_to_patch(data)
+    if not llm_patch:
+        return fallback
+
+    patch = dict(fallback.profile_patch)
+    patch.update(llm_patch)
+
+    confidence = dict(fallback.field_confidence)
+    confidence.update(llm_confidence)
+    for key in llm_patch:
+        confidence.setdefault(key, 0.8)
+
+    sources = dict(fallback.field_sources)
+    for key in llm_patch:
+        sources[key] = "llm"
+
+    ambiguous = list(fallback.ambiguous_fields) + llm_ambiguous
+    ambiguous = sorted(set(ambiguous))
+
+    if _looks_like_street_address(str(patch.get("work_location_address") or "")):
+        confidence["work_location_address"] = max(confidence.get("work_location_address", 0), 0.9)
+        ambiguous = [field for field in ambiguous if field != "work_location_address"]
+
+    summary = data.get("summary") if isinstance(data.get("summary"), str) else ""
+    if not summary:
+        summary = _build_summary({**(existing_profile or {}), **patch})
+
+    return ExtractedRequirements(
+        profile_patch=patch,
+        summary=summary,
+        missing_fields=_compute_missing(patch, existing_profile),
+        ambiguous_fields=ambiguous,
+        field_confidence=confidence,
+        field_sources=sources,
+    )
+
+
+async def extract_requirements_with_llm(
+    transcript: str,
+    *,
+    existing_profile: Optional[dict[str, Any]] = None,
+) -> ExtractedRequirements:
+    """Use the configured chat LLM for voice-tolerant extraction, with regex fallback."""
+    fallback = extract_requirements(transcript, existing_profile=existing_profile)
+    try:
+        cfg = _llm_config()
+    except Exception as exc:
+        logger.warning("LLM requirement extraction config unavailable; using deterministic fallback: %s", exc)
+        return fallback
+    model = cfg.llm.model
+    base_url = (cfg.llm.base_url or "").rstrip("/")
+    if not model or not base_url:
+        return fallback
+
+    system = (
+        "Extract Paris rental-search requirements from noisy STT text. Return only JSON. "
+        "Do not output database fields, profile_patch, SQL, commands, deletes, or null-clears. "
+        "Do not invent missing values. Normalize common STT variants, for example "
+        "'Forty Rue de Louvre' -> '40 Rue de Louvre', '$2,000' -> 2000, and "
+        "'50 meter square' -> 50. Put extracted values only under the semantic "
+        "'requirements' object described by the user message. For kitchen amenities "
+        "such as dishwasher or oven, use room_features with room='kitchen' and "
+        "importance='must_have' when the user says must-have, need, add, or would like."
+    )
+    user = {
+        "transcript": transcript,
+        "existing_profile": existing_profile or {},
+        "output_schema": {
+            "requirements": {
+                "work_location": {
+                    "kind": "address|label",
+                    "value": "string",
+                    "confidence": 0.0,
+                },
+                "budget": {
+                    "max_rent_eur": 0,
+                    "confidence": 0.0,
+                },
+                "apartment": {
+                    "min_bedrooms": 0,
+                    "min_rooms": 0,
+                    "min_surface_m2": 0,
+                    "furnished_preference": "required|prefer|any",
+                    "confidence": 0.0,
+                },
+                "commute": {
+                    "max_minutes": 0,
+                    "modes": ["metro|bike|walk|bus|rer|tram"],
+                    "logic": "metro_or_bike|any|all",
+                    "confidence": 0.0,
+                },
+                "areas": {
+                    "preferred_arrondissements": [13, 18],
+                    "excluded_arrondissements": [],
+                    "confidence": 0.0,
+                },
+                "room_features": [
+                    {
+                        "room": "living_room|bedroom|kitchen",
+                        "feature": "dishwasher|oven|natural light|desk space|...",
+                        "importance": "must_have|nice_to_have",
+                    }
+                ],
+                "nearby": [
+                    {
+                        "kind": "supermarket|metro|park|hospital|gym|school|pharmacy|bakery",
+                        "max_distance_m": 500,
+                    }
+                ],
+            },
+            "summary": "short human summary",
+            "ambiguous": [{"field": "semantic field name", "reason": "short reason"}],
+        },
+    }
+
+    body: dict[str, Any] = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
+        ],
+        "temperature": 0,
+        "max_tokens": 800,
+    }
+    if cfg.llm.extra_config:
+        body.update(cfg.llm.extra_config)
+
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    api_key = _secret_value(cfg.llm.api_key)
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            response = await client.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json=body,
+            )
+            response.raise_for_status()
+        payload = response.json()
+        content = payload["choices"][0]["message"]["content"]
+        data = _json_object_from_text(content)
+        return _merge_semantic_llm_extraction(fallback, data, existing_profile=existing_profile)
+    except Exception as exc:
+        logger.warning("LLM requirement extraction failed; using deterministic fallback: %s", exc)
+        return fallback
+
+
 def extract_requirements(
     transcript: str,
     *,
@@ -464,6 +1047,12 @@ def extract_requirements(
 
     # Work location
     work = _extract_work_location(transcript)
+    if "work_location_address" in work:
+        patch["work_location_address"] = work["work_location_address"]
+        confidence["work_location_address"] = work.get("confidence", 0.7)
+        sources["work_location_address"] = "voice"
+        if work.get("confidence", 0.7) < 0.75:
+            ambiguous.append("work_location_address")
     if "work_location_label" in work:
         patch["work_location_label"] = work["work_location_label"]
         confidence["work_location_label"] = work.get("confidence", 0.7)

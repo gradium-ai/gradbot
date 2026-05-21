@@ -6,28 +6,18 @@ import re
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
-
-
-# ─────────── Auth ───────────
-class SignupRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=6, max_length=128)
-    full_name: Optional[str] = Field(default=None, max_length=255)
-
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=1, max_length=128)
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
-    email: str
-    full_name: Optional[str] = None
     created_at: datetime
-    last_login_at: Optional[datetime] = None
+
+
+class GuestSessionOut(UserOut):
+    token: Optional[str] = None
+    persisted: bool = True
 
 
 # ─────────── Profiles ───────────

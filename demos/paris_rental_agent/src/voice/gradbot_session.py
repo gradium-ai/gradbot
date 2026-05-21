@@ -29,7 +29,8 @@ _SEARCH_LOCKS: dict[str, asyncio.Lock] = {}
 SYSTEM_PROMPT = """You are a Paris rental apartment hunting assistant.
 
 Help the user create and manage a Paris rental search profile through voice and text.
-For a brand-new empty intake only, if you speak first, ask: "What kind of apartment are you looking for in Paris? You can mention your budget, workplace, commute limit, number of bedrooms, furnished preference, and anything you want nearby."
+For a brand-new empty intake only, if you speak first, ask exactly one short question: "What kind of apartment are you looking for in Paris?"
+Do not call any tools before that first question. After asking it, wait for the user.
 Do not repeat that broad opener after the user has already provided search details, after the profile is confirmed, or while replying to a user's message.
 Extract structured requirements from the user's spoken answer using extract_requirements_from_transcript.
 Fill the visible draft profile.
@@ -52,9 +53,11 @@ CRITICAL RULES:
 - Do not upload documents.
 - Drafting is allowed; sending is not implemented.
 - When you call a tool, do it silently FIRST, then speak to the user about the result.
+- After profile extraction or update tools, only say a field was added or changed if that field appears in applied_fields. If ignored_fields is non-empty, briefly ask the user to repeat that detail.
 - When a user interrupts you or speaks while you are talking, answer the latest user message directly.
 - Do not restart, quote, or repeat your previous sentence after an interruption.
 - If prior assistant text is provided as conversation context, treat it only as context; never begin by repeating it.
+- If the latest user message is a short interruption or greeting, acknowledge it briefly and continue from the current app state; do not continue or replay the previous partial sentence.
 - Present at most 3 listings by voice unless the user asks for more.
 
 WHILE WAITING FOR APARTMENT SEARCH RESULTS:
@@ -122,8 +125,9 @@ def _load_start_context(user_id: str) -> dict[str, Any]:
 def _build_prompt(start_context: dict[str, Any]) -> str:
     if start_context["fresh_intake"]:
         mode = (
-            "This is a brand-new empty intake. If you speak first, ask the broad "
-            "apartment-search opener once, then wait."
+            "CURRENT PHASE: FRESH INTAKE FIRST TURN. If you speak first, do not call "
+            "tools. Ask exactly: \"What kind of apartment are you looking for in Paris?\" "
+            "Then wait for the user."
         )
     elif start_context["confirmation_status"] == "confirmed":
         mode = (
@@ -149,27 +153,22 @@ def _build_prompt(start_context: dict[str, Any]) -> str:
     )
 
 
-def _search_results_instruction(summary: dict[str, Any]) -> str:
-    return (
-        "\n\nAPARTMENT SEARCH TOOL RESULT IS NOW AVAILABLE:\n"
-        + json.dumps(summary, ensure_ascii=False)
-        + "\nUse only this result when speaking about listings. If there are no matches or "
-        "the tool returned an error, say so briefly and suggest reviewing the profile. "
-        "If there are matches, mention how many were found and describe the top match "
-        "in one short sentence. Do not invent fields that are not present.\n"
-    )
+def build_tools(*, include_start_profile_intake: bool = True) -> list[gradbot.ToolDef]:
+    tools = []
+    if include_start_profile_intake:
+        tools.append(
+            gradbot.ToolDef(
+                name="start_profile_intake",
+                description=(
+                    "Create or resume the user's profile intake session only when the user "
+                    "explicitly asks to start over or restart the intake. Never call this for "
+                    "the automatic first greeting."
+                ),
+                parameters_json=json.dumps({"type": "object", "properties": {}, "required": []}),
+            )
+        )
 
-
-def build_tools() -> list[gradbot.ToolDef]:
-    return [
-        gradbot.ToolDef(
-            name="start_profile_intake",
-            description=(
-                "Create or resume the user's profile intake session. Use this when the user has "
-                "no active draft or explicitly wants to start over. Do not call it before every reply."
-            ),
-            parameters_json=json.dumps({"type": "object", "properties": {}, "required": []}),
-        ),
+    tools.extend([
         gradbot.ToolDef(
             name="extract_requirements_from_transcript",
             description=(
@@ -202,7 +201,12 @@ def build_tools() -> list[gradbot.ToolDef]:
                 "Patch the draft profile with explicit field values from the user. For workplace "
                 "updates, use work_location_address for a street address such as '40 Rue de Louvre' "
                 "or work_location_label for a landmark/neighborhood such as 'République'. Use "
-                "'voice' as source unless the user is correcting via text."
+                "'voice' as source unless the user is correcting via text. Use min_surface_m2 for "
+                "minimum surface area in square meters. Use commute_max_minutes for commute time, "
+                "not max_commute_minutes. Use furnished_preference, not furnished. "
+                "For kitchen must-haves, use room_requirements like "
+                "{\"kitchen\":{\"must_have\":[\"dishwasher\",\"oven\"],\"nice_to_have\":[]}}; "
+                "do not use amenities."
             ),
             parameters_json=json.dumps({
                 "type": "object",
@@ -332,7 +336,8 @@ def build_tools() -> list[gradbot.ToolDef]:
             description="Return a quick summary for returning users.",
             parameters_json=json.dumps({"type": "object", "properties": {}, "required": []}),
         ),
-    ]
+    ])
+    return tools
 
 
 def _make_config(
@@ -340,21 +345,41 @@ def _make_config(
     language: str = "en",
     config: gradbot.config.Config,
     start_context: dict[str, Any],
-    extra_instructions: str = "",
+    assistant_speaks_first: bool = False,
 ) -> gradbot.SessionConfig:
     voice_id = VOICE_ID_FR if language == "fr" else VOICE_ID_EN
     lang_enum = gradbot.LANGUAGES.get(language, gradbot.LANGUAGES["en"])
+    config_kwargs = config.session_kwargs | {
+        "rewrite_rules": lang_enum.rewrite_rules,
+        "assistant_speaks_first": assistant_speaks_first,
+        "silence_timeout_s": 0.0,
+    }
     return gradbot.SessionConfig(
         voice_id=voice_id,
-        instructions=_build_prompt(start_context) + extra_instructions,
+        instructions=_build_prompt(start_context),
         language=lang_enum,
-        tools=build_tools(),
-        **{
-            "rewrite_rules": lang_enum.rewrite_rules,
-            "assistant_speaks_first": bool(start_context["fresh_intake"]),
-            "silence_timeout_s": 0.0,
-        }
-        | config.session_kwargs,
+        tools=build_tools(include_start_profile_intake=not bool(start_context["fresh_intake"])),
+        **config_kwargs,
+    )
+
+
+async def _refresh_session_config(
+    input_handle,
+    *,
+    user_id: str,
+    config: gradbot.config.Config,
+    session_state: dict[str, Any],
+) -> None:
+    """Refresh prompt context after durable app state changes."""
+    refreshed_context = _load_start_context(user_id)
+    session_state["start_context"] = refreshed_context
+    await input_handle.send_config(
+        _make_config(
+            language=str(session_state.get("language") or "en"),
+            config=config,
+            start_context=refreshed_context,
+            assistant_speaks_first=False,
+        )
     )
 
 
@@ -382,7 +407,12 @@ async def handle_voice_session(
             start_context["fresh_intake"],
             start_context["confirmation_status"],
         )
-        return _make_config(language=language, config=config, start_context=start_context)
+        return _make_config(
+            language=language,
+            config=config,
+            start_context=start_context,
+            assistant_speaks_first=bool(start_context["fresh_intake"]),
+        )
 
     async def on_tool_call(handle: gradbot.ToolHandle, input_handle, ws: WebSocket) -> None:
         name = handle.name
@@ -437,15 +467,27 @@ async def _dispatch_tool(
         if name == "start_profile_intake":
             res = assistant_tools.start_profile_intake(db, user_id)
             await ws.send_json({"type": "intake_state", "state": res})
+            await _refresh_session_config(
+                input_handle,
+                user_id=user_id,
+                config=config,
+                session_state=session_state,
+            )
             await handle.send_json(_compact(res))
             return
 
         if name == "extract_requirements_from_transcript":
             transcript = args.get("transcript", "")
-            res = assistant_tools.extract_requirements_from_transcript(
+            res = await assistant_tools.extract_requirements_from_transcript_with_llm(
                 db, user_id, transcript, source="voice"
             )
             await ws.send_json({"type": "intake_state", "state": res})
+            await _refresh_session_config(
+                input_handle,
+                user_id=user_id,
+                config=config,
+                session_state=session_state,
+            )
             await handle.send_json(_compact(res))
             return
 
@@ -463,12 +505,24 @@ async def _dispatch_tool(
             source = args.get("source", "voice")
             res = assistant_tools.update_profile_draft(db, user_id, patch, source=source)
             await ws.send_json({"type": "intake_state", "state": res})
+            await _refresh_session_config(
+                input_handle,
+                user_id=user_id,
+                config=config,
+                session_state=session_state,
+            )
             await handle.send_json(_compact(res))
             return
 
         if name == "confirm_profile":
             res = assistant_tools.confirm_profile(db, user_id)
             await ws.send_json({"type": "profile_confirmed", "state": res})
+            await _refresh_session_config(
+                input_handle,
+                user_id=user_id,
+                config=config,
+                session_state=session_state,
+            )
             await handle.send_json(_compact(res))
             return
 
@@ -500,17 +554,13 @@ async def _dispatch_tool(
                 )
             summary = _voice_summarize_search(res)
             await ws.send_json({"type": "search_results", "result": res})
-            refreshed_context = _load_start_context(user_id)
-            session_state["start_context"] = refreshed_context
-            await input_handle.send_config(
-                _make_config(
-                    language=str(session_state.get("language") or "en"),
-                    config=config,
-                    start_context=refreshed_context,
-                    extra_instructions=_search_results_instruction(summary),
-                )
+            await _refresh_session_config(
+                input_handle,
+                user_id=user_id,
+                config=config,
+                session_state=session_state,
             )
-            logger.info("Switched voice prompt to search-result context for user=%s", user_id)
+            logger.info("Refreshed voice prompt after search for user=%s", user_id)
             await handle.send_json(summary)
             return
 
@@ -529,6 +579,12 @@ async def _dispatch_tool(
         if name == "save_listing":
             res = assistant_tools.save_listing(db, user_id, args.get("listing_id", ""))
             await ws.send_json({"type": "listing_saved", "result": res})
+            await _refresh_session_config(
+                input_handle,
+                user_id=user_id,
+                config=config,
+                session_state=session_state,
+            )
             await handle.send_json(_compact(res))
             return
 
@@ -537,6 +593,12 @@ async def _dispatch_tool(
                 db, user_id, args.get("listing_id", ""), args.get("reason")
             )
             await ws.send_json({"type": "listing_rejected", "result": res})
+            await _refresh_session_config(
+                input_handle,
+                user_id=user_id,
+                config=config,
+                session_state=session_state,
+            )
             await handle.send_json(_compact(res))
             return
 
@@ -551,6 +613,12 @@ async def _dispatch_tool(
                 db, user_id, args.get("listing_id", ""), args.get("language") or "en"
             )
             await ws.send_json({"type": "draft_created", "result": res})
+            await _refresh_session_config(
+                input_handle,
+                user_id=user_id,
+                config=config,
+                session_state=session_state,
+            )
             await handle.send_json(_compact(res))
             return
 
