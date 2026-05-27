@@ -476,10 +476,11 @@ const App = (() => {
                                 <div class="paris-confirm-status">Status: <strong>${escapeHtml(status)}</strong></div>
                             </div>
                             <div class="paris-confirm-actions">
-                                <button id="btn-confirm" class="paris-button-primary ${missing.length ? '' : 'warm'}" type="button" ${missing.length ? 'disabled' : ''}>Confirm profile</button>
-                                <button id="btn-search" class="paris-button-light" type="button" ${status === 'confirmed' ? '' : 'disabled'}>Run search</button>
+                                <button id="btn-confirm" class="paris-button-primary ${missing.length ? '' : 'warm'}" type="button" ${missing.length || state.searching ? 'disabled' : ''}>Confirm profile</button>
+                                <button id="btn-search" class="paris-button-light" type="button" ${status === 'confirmed' && !state.searching ? '' : 'disabled'}>${state.searching ? 'Searching...' : 'Run search'}</button>
                             </div>
                         </div>
+                        ${state.searching ? `<p class="paris-form-alert paris-confirm-alert">Searching with the confirmed profile...</p>` : ''}
                         ${missing.length ? `<p class="paris-form-alert paris-confirm-alert">Missing required: ${missing.map(escapeHtml).join(', ')}</p>` : ''}
                     </div>
                 </section>
@@ -639,7 +640,9 @@ const App = (() => {
                     alert('Could not confirm: ' + (res.missing_fields || []).join(', '));
                     return;
                 }
-                stopVoice();
+                state.intake = { ...(state.intake || {}), ...res };
+                applyProfilePayload(res);
+                await Promise.all([loadOnboardingState(), loadProfiles()]);
                 await runFreshSearch();
             } catch (e) {
                 if (e.data?.missing_fields) alert('Missing: ' + e.data.missing_fields.join(', '));
@@ -757,8 +760,8 @@ const App = (() => {
                     </div>
                     ${activeScreen === 'feed' || activeScreen === 'search' ? `
                         <div class="topbar-actions">
-                            <button id="btn-fresh-search" class="btn">Run search</button>
-                            <button id="btn-edit-profile" class="btn ghost">Update</button>
+                            <button id="btn-fresh-search" class="btn" ${state.searching ? 'disabled' : ''}>${state.searching ? 'Searching...' : 'Run search'}</button>
+                            <button id="btn-edit-profile" class="btn ghost" ${state.searching ? 'disabled' : ''}>Update</button>
                         </div>
                     ` : ''}
                 </header>
@@ -829,6 +832,7 @@ const App = (() => {
         return `
             <div class="search-screen-grid">
                 <section class="profile-panel">
+                    ${state.searching ? `<div class="paris-form-alert paris-confirm-alert">Searching with the confirmed profile...</div>` : ''}
                     <div class="profile-chips profile-chips-large">
                         ${profileBits.map(([label, value]) => `
                             <span class="profile-chip"><strong>${label}</strong> ${escapeHtml(value)}</span>
@@ -1037,7 +1041,7 @@ const App = (() => {
         state.matchesStale = false;
         state.matches = [];
         state.view = 'dashboard';
-        state.dashboardScreen = 'feed';
+        state.dashboardScreen = 'search';
         render();
         try {
             const res = await api('/api/search-runs', { method: 'POST', body: { max_results: 20 } });
@@ -1045,6 +1049,7 @@ const App = (() => {
                 state.matches = res.matches || [];
                 await Promise.all([loadSaved(), loadDrafts(), loadProfiles()]);
                 state.searching = false;
+                state.dashboardScreen = 'feed';
                 render();
             }
         } catch (e) {
@@ -1217,7 +1222,7 @@ const App = (() => {
             state.matchesStale = false;
             state.matches = [];
             state.view = 'dashboard';
-            state.dashboardScreen = 'feed';
+            state.dashboardScreen = 'search';
             render();
         } else if (msg.type === 'search_results') {
             state.searching = false;
@@ -1299,23 +1304,9 @@ const App = (() => {
         return nearby;
     }
 
-    function cleanupTemporarySession() {
-        if (!state.sessionToken || state.sessionPersisted) return;
-        try {
-            fetch(BASE + '/api/auth/logout', {
-                method: 'POST',
-                keepalive: true,
-                credentials: 'include',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${state.sessionToken}`,
-                },
-                body: JSON.stringify({ forget: true }),
-            });
-        } catch {}
-    }
-
-    window.addEventListener('pagehide', cleanupTemporarySession);
+    // Temporary sessions keep their token only in memory, so reloads already
+    // start fresh. Avoid logging out on pagehide because it can race an active
+    // voice WebSocket or another tab using the same temporary session.
 
     return { boot };
 })();
