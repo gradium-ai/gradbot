@@ -52,3 +52,20 @@ def test_refreshed_voice_config_does_not_auto_speak():
     )
 
     assert config.assistant_speaks_first is False
+
+
+def test_profile_tool_result_omits_summary_and_guides_voice_reply():
+    result = gradbot_session._profile_tool_result(
+        {
+            "ok": True,
+            "summary": "I've noted the user's apartment search.",
+            "draft_profile": {"max_rent_including_charges_eur": 2000},
+            "applied_fields": ["max_rent_including_charges_eur"],
+            "missing_fields": [],
+        }
+    )
+
+    assert "summary" not in result
+    assert "draft_profile" not in result
+    assert result["applied_fields"] == ["max_rent_including_charges_eur"]
+    assert "Do not repeat" in result["voice_instruction"]

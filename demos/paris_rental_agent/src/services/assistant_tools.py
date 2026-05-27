@@ -237,6 +237,17 @@ def _normalize_profile_patch_aliases(patch: dict[str, Any]) -> dict[str, Any]:
             elif text in {"false", "no", "any", "unfurnished", "non meuble", "non meublé"}:
                 normalized["furnished_preference"] = "any"
 
+    if "furnished_preference" in normalized:
+        furnished_preference = normalized["furnished_preference"]
+        if isinstance(furnished_preference, str):
+            text = furnished_preference.strip().lower()
+            if text in {"true", "yes", "required", "require", "must", "must_have", "furnished", "meuble", "meublé"}:
+                normalized["furnished_preference"] = "required"
+            elif text in {"preferred", "prefer", "preference", "nice_to_have"}:
+                normalized["furnished_preference"] = "prefer"
+            elif text in {"false", "no", "any", "not_required", "not required", "unfurnished", "non meuble", "non meublé"}:
+                normalized["furnished_preference"] = "any"
+
     room_alias_patch: dict[str, Any] = {}
     amenities = normalized.pop("amenities", None)
     room_alias_patch = _merge_room_requirements(

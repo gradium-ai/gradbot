@@ -34,7 +34,7 @@ Do not call any tools before that first question. After asking it, wait for the 
 Do not repeat that broad opener after the user has already provided search details, after the profile is confirmed, or while replying to a user's message.
 Extract structured requirements from the user's spoken answer using extract_requirements_from_transcript.
 Fill the visible draft profile.
-Summarize what you understood in 1-2 sentences.
+After profile extraction or updates, briefly acknowledge the draft changed and ask the user to review the visible profile.
 Ask the user to review and correct the profile by text.
 Ask follow-up questions only for missing or ambiguous required fields, one question at a time.
 Never assume the extracted profile is correct until the user confirms it.
@@ -54,6 +54,7 @@ CRITICAL RULES:
 - Drafting is allowed; sending is not implemented.
 - When you call a tool, do it silently FIRST, then speak to the user about the result.
 - After profile extraction or update tools, only say a field was added or changed if that field appears in applied_fields. If ignored_fields is non-empty, briefly ask the user to repeat that detail.
+- After profile extraction or update tools, do not repeat a profile summary you already spoke earlier in the same turn. If previous assistant text already summarized the profile, only say the draft profile was updated and ask the user to review or correct it.
 - When a user interrupts you or speaks while you are talking, answer the latest user message directly.
 - Do not restart, quote, or repeat your previous sentence after an interruption.
 - If prior assistant text is provided as conversation context, treat it only as context; never begin by repeating it.
@@ -478,7 +479,7 @@ async def _dispatch_tool(
 
         if name == "extract_requirements_from_transcript":
             transcript = args.get("transcript", "")
-            res = await assistant_tools.extract_requirements_from_transcript_with_llm(
+            res = assistant_tools.extract_requirements_from_transcript(
                 db, user_id, transcript, source="voice"
             )
             await ws.send_json({"type": "intake_state", "state": res})
@@ -488,7 +489,7 @@ async def _dispatch_tool(
                 config=config,
                 session_state=session_state,
             )
-            await handle.send_json(_compact(res))
+            await handle.send_json(_profile_tool_result(res))
             return
 
         if name == "get_profile_draft":
@@ -511,7 +512,7 @@ async def _dispatch_tool(
                 config=config,
                 session_state=session_state,
             )
-            await handle.send_json(_compact(res))
+            await handle.send_json(_profile_tool_result(res))
             return
 
         if name == "confirm_profile":
@@ -637,6 +638,18 @@ def _compact(res: dict[str, Any]) -> dict[str, Any]:
     out = dict(res)
     out.pop("draft_profile", None)  # condense
     return _truncate_strings(out, max_len=1200)
+
+
+def _profile_tool_result(res: dict[str, Any]) -> dict[str, Any]:
+    """Condense profile updates so the model does not restate prior summaries."""
+    out = _compact(res)
+    out.pop("summary", None)
+    out["voice_instruction"] = (
+        "Do not repeat or paraphrase any profile summary already spoken in this turn. "
+        "Briefly say the draft profile was updated on screen, ask the user to review "
+        "and correct it by text, and ask at most one missing-field question if needed."
+    )
+    return out
 
 
 def _truncate_strings(obj: Any, *, max_len: int) -> Any:

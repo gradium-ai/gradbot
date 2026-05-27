@@ -389,6 +389,18 @@ def test_voice_patch_furnished_alias_updates_preference(client):
     assert "min_bedrooms" in body["applied_fields"]
 
 
+def test_voice_patch_furnished_preference_furnished_means_required(client):
+    _guest_session(client)
+    res = client.post(
+        "/api/intake/text-update",
+        json={"patch": {"furnished_preference": "furnished"}},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["draft_profile"]["furnished_preference"] == "required"
+    assert "furnished_preference" in body["applied_fields"]
+
+
 def test_user_data_isolation(client):
     from fastapi.testclient import TestClient
 
