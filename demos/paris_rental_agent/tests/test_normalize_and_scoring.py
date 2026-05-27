@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from src.services.normalize import english_listing_title, normalize_result
 from src.services.scoring import score_listing
+from src.services.tavily_search import build_queries, is_obvious_collection_url
 
 
 def test_normalize_basic_french_listing():
@@ -45,6 +46,38 @@ def test_english_listing_title_translates_common_french_search_titles():
         english_listing_title("Location immobilière Paris (75) - Bien'ici")
         == "Rental property Paris (75) - Bien'ici"
     )
+
+
+def test_tavily_filters_obvious_collection_urls():
+    assert is_obvious_collection_url(
+        "https://www.pap.fr/annonce/locations-appartement-paris-75-g439"
+    )
+    assert is_obvious_collection_url(
+        "https://www.pap.fr/annonce/recherche-location-appartement-paris-75-g439-10"
+    )
+    assert is_obvious_collection_url(
+        "https://www.seloger.com/recherche/location/appartement/paris-75000/paris-12eme-arrondissement-75012/ad09fr37"
+    )
+    assert is_obvious_collection_url(
+        "https://www.bienici.com/recherche/location/paris-75000/appartement"
+    )
+    assert is_obvious_collection_url(
+        "https://www.lodgis.com/fr/paris,location-meublee/location-1-chambre-meuble-paris_15565.cat.html"
+    )
+    assert not is_obvious_collection_url(
+        "https://www.pap.fr/annonces/appartement-paris-11e-r123456789"
+    )
+    assert not is_obvious_collection_url(
+        "https://www.bienici.com/annonce/location/paris-11e/appartement/2pieces/foo"
+    )
+
+
+def test_tavily_queries_target_detail_listing_paths():
+    queries = build_queries({"min_bedrooms": 1, "max_rent_including_charges_eur": 1500})
+
+    assert any("site:pap.fr/annonces" in query for query in queries)
+    assert any("site:seloger.com/annonces/locations/appartement" in query for query in queries)
+    assert any("site:bienici.com/annonce/location" in query for query in queries)
 
 
 def test_score_strong_match_passes_filters():

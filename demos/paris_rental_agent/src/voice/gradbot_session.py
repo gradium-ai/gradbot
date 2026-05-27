@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -21,14 +22,35 @@ from ..services import assistant_tools
 
 logger = logging.getLogger(__name__)
 
-VOICE_ID_EN = "ubuXFxVQwVYnZQhy"  # Eva
+VOICE_ID_EN = "_6Aslh2DxfmnRLmP"
 VOICE_ID_FR = "b35yykvVppLXyw_l"  # Elise
+SILENCE_CHECK_TIMEOUT_S = 10.0
+SUPPORTED_PROPERTY_TERMS = ("apartment", "apartments", "flat", "flats", "studio", "studios")
+UNSUPPORTED_PROPERTY_TERMS = (
+    "castle",
+    "castles",
+    "chateau",
+    "chateaux",
+    "house",
+    "houses",
+    "villa",
+    "villas",
+    "mansion",
+    "mansions",
+    "palace",
+    "palaces",
+    "farmhouse",
+    "farmhouses",
+    "townhouse",
+    "townhouses",
+)
 _SEARCH_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 SYSTEM_PROMPT = """You are a Paris rental apartment hunting assistant.
 
 Help the user create and manage a Paris rental search profile through voice and text.
+This MVP is ONLY for Paris apartment rentals: apartments, flats, and studios. It is not for castles, houses, villas, mansions, palaces, commercial property, buying, or hotels.
 For a brand-new empty intake only, if you speak first, ask exactly one short question: "What kind of apartment are you looking for in Paris?"
 Do not call any tools before that first question. After asking it, wait for the user.
 Do not repeat that broad opener after the user has already provided search details, after the profile is confirmed, or while replying to a user's message.
@@ -39,12 +61,14 @@ Ask the user to review and correct the profile by text.
 Ask follow-up questions only for missing or ambiguous required fields, one question at a time.
 Never assume the extracted profile is correct until the user confirms it.
 Do not run a search until the profile is confirmed via confirm_profile, unless the user explicitly asks to search with the current draft.
+If the user approves the draft profile or says yes when asked whether to search after reviewing the draft, call confirm_profile first, then run_apartment_search.
 If the user asks to add, remove, or correct profile details such as amenities, room must-haves, budget, commute, or workplace, update the profile only; do not run a search unless they explicitly ask to search.
 After confirmation, help the user search, compare, save, reject, and draft viewing messages.
 
 CRITICAL RULES:
 - Keep voice responses to 1-2 SHORT sentences. This is a phone call.
 - Ask one question at a time.
+- If the user asks for an out-of-scope property type such as a castle, house, villa, mansion, palace, hotel, office, or purchase, do not call tools and do not update the profile. Briefly say this search is only for Paris apartments/flats/studios, then ask what kind of apartment they want.
 - Never invent prices, commute times, amenities, availability, or address precision.
 - Never claim a commute is within 30 minutes unless a real commute provider has verified it.
 - In this MVP, commute is usually unknown and needs verification.
@@ -55,10 +79,13 @@ CRITICAL RULES:
 - When you call a tool, do it silently FIRST, then speak to the user about the result.
 - After profile extraction or update tools, only say a field was added or changed if that field appears in applied_fields. If ignored_fields is non-empty, briefly ask the user to repeat that detail.
 - After profile extraction or update tools, do not repeat a profile summary you already spoke earlier in the same turn. If previous assistant text already summarized the profile, only say the draft profile was updated and ask the user to review or correct it.
+- After save_listing, reject_listing, or draft_viewing_request, always give one short completion acknowledgement. If several of those tool results arrive together, combine them into one sentence.
 - When a user interrupts you or speaks while you are talking, answer the latest user message directly.
 - Do not restart, quote, or repeat your previous sentence after an interruption.
 - If prior assistant text is provided as conversation context, treat it only as context; never begin by repeating it.
 - If the latest user message is a short interruption or greeting, acknowledge it briefly and continue from the current app state; do not continue or replay the previous partial sentence.
+- If the latest user message is one or two unrelated stray words after a save/reject/draft action, ignore the stray words and finish acknowledging the completed action.
+- If the latest user message is "...", the user has been silent for a while. Do not call tools. Give one short, calm check-in based on the current state, such as asking if they are still there or saying you can continue when ready. Do not repeat the previous assistant message.
 - Present at most 3 listings by voice unless the user asks for more.
 
 WHILE WAITING FOR APARTMENT SEARCH RESULTS:
@@ -98,6 +125,35 @@ def _profile_has_user_details(draft: dict[str, Any], raw_transcript: Optional[st
                 continue
         return True
     return False
+
+
+def _normalize_scope_text(text: str) -> str:
+    return (
+        text.lower()
+        .replace("â", "a")
+        .replace("à", "a")
+        .replace("á", "a")
+        .replace("ç", "c")
+        .replace("é", "e")
+        .replace("è", "e")
+        .replace("ê", "e")
+        .replace("ô", "o")
+    )
+
+
+def _unsupported_property_type(text: str) -> Optional[str]:
+    """Return out-of-scope property type, unless an in-scope term is also present."""
+    norm = _normalize_scope_text(text)
+    if any(re.search(rf"\b{re.escape(term)}\b", norm) for term in SUPPORTED_PROPERTY_TERMS):
+        return None
+    for term in UNSUPPORTED_PROPERTY_TERMS:
+        pattern = rf"\b{re.escape(term)}\b"
+        if not re.search(pattern, norm):
+            continue
+        if re.search(rf"\b(?:not|no|without)\s+(?:a|an)?\s*{re.escape(term)}\b", norm):
+            continue
+        return term
+    return None
 
 
 def _load_start_context(user_id: str) -> dict[str, Any]:
@@ -174,8 +230,12 @@ def build_tools(*, include_start_profile_intake: bool = True) -> list[gradbot.To
             name="extract_requirements_from_transcript",
             description=(
                 "Extract apartment-search requirements from what the user just said. Call this "
-                "AFTER the user describes their apartment needs. The transcript should be the "
-                "raw user message verbatim."
+                "AFTER the user describes in-scope apartment, flat, or studio needs. Do NOT call "
+                "this for out-of-scope property types such as castles, houses, villas, mansions, "
+                "palaces, hotels, offices, or purchases; instead, tell the user this MVP only "
+                "supports Paris apartment rentals. The transcript should be the raw user message "
+                "verbatim. For explicit corrections to an existing field, prefer "
+                "update_profile_draft instead."
             ),
             parameters_json=json.dumps({
                 "type": "object",
@@ -201,7 +261,8 @@ def build_tools(*, include_start_profile_intake: bool = True) -> list[gradbot.To
             description=(
                 "Patch the draft profile with explicit field values from the user. For workplace "
                 "updates, use work_location_address for a street address such as '40 Rue de Louvre' "
-                "or work_location_label for a landmark/neighborhood such as 'République'. Use "
+                "or a direct correction such as '40 Roudeloup', or work_location_label for a "
+                "landmark/neighborhood such as 'République'. Use "
                 "'voice' as source unless the user is correcting via text. Use min_surface_m2 for "
                 "minimum surface area in square meters. Use commute_max_minutes for commute time, "
                 "not max_commute_minutes. Use furnished_preference, not furnished. "
@@ -250,10 +311,13 @@ def build_tools(*, include_start_profile_intake: bool = True) -> list[gradbot.To
                 "Run a fresh apartment search and return top matches. Call only when the user "
                 "explicitly asks to search or run the search. Do not call this for profile edits "
                 "like adding amenities or room must-haves. Blocked unless the profile is "
-                "confirmed (set allow_unconfirmed_profile=true only if the user explicitly asks "
-                "to search with the draft). This search can take several seconds. After calling "
-                "it, keep the conversation useful with one brief Paris rental tip while waiting, "
-                "but do not mention any specific listings until the tool result arrives."
+                "confirmed. If the draft is complete and the user says yes/approve/search after "
+                "reviewing it, call confirm_profile first, then call this with "
+                "allow_unconfirmed_profile=false. Set allow_unconfirmed_profile=true only if the "
+                "user explicitly says to search without confirming, search anyway, or use the "
+                "current draft. This search can take several seconds. After calling it, keep the "
+                "conversation useful with one brief Paris rental tip while waiting, but do not "
+                "mention any specific listings until the tool result arrives."
             ),
             parameters_json=json.dumps({
                 "type": "object",
@@ -353,7 +417,7 @@ def _make_config(
     config_kwargs = config.session_kwargs | {
         "rewrite_rules": lang_enum.rewrite_rules,
         "assistant_speaks_first": assistant_speaks_first,
-        "silence_timeout_s": 0.0,
+        "silence_timeout_s": SILENCE_CHECK_TIMEOUT_S,
     }
     return gradbot.SessionConfig(
         voice_id=voice_id,
@@ -479,6 +543,10 @@ async def _dispatch_tool(
 
         if name == "extract_requirements_from_transcript":
             transcript = args.get("transcript", "")
+            unsupported_property = _unsupported_property_type(transcript)
+            if unsupported_property:
+                await handle.send_json(_unsupported_property_tool_result(unsupported_property))
+                return
             res = assistant_tools.extract_requirements_from_transcript(
                 db, user_id, transcript, source="voice"
             )
@@ -586,7 +654,7 @@ async def _dispatch_tool(
                 config=config,
                 session_state=session_state,
             )
-            await handle.send_json(_compact(res))
+            await handle.send_json(_action_tool_result(res, "saved"))
             return
 
         if name == "reject_listing":
@@ -600,7 +668,7 @@ async def _dispatch_tool(
                 config=config,
                 session_state=session_state,
             )
-            await handle.send_json(_compact(res))
+            await handle.send_json(_action_tool_result(res, "rejected"))
             return
 
         if name == "list_saved_listings":
@@ -620,7 +688,7 @@ async def _dispatch_tool(
                 config=config,
                 session_state=session_state,
             )
-            await handle.send_json(_compact(res))
+            await handle.send_json(_action_tool_result(res, "drafted"))
             return
 
         if name == "what_changed_since_last_visit":
@@ -645,9 +713,50 @@ def _profile_tool_result(res: dict[str, Any]) -> dict[str, Any]:
     out = _compact(res)
     out.pop("summary", None)
     out["voice_instruction"] = (
+        "Do not call update_profile_draft immediately after this result; this tool already "
+        "updated the visible draft. "
         "Do not repeat or paraphrase any profile summary already spoken in this turn. "
         "Briefly say the draft profile was updated on screen, ask the user to review "
         "and correct it by text, and ask at most one missing-field question if needed."
+    )
+    return out
+
+
+def _unsupported_property_tool_result(property_type: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": "unsupported_property_type",
+        "property_type": property_type,
+        "voice_instruction": (
+            "Do not say the profile was updated. Do not call another tool. Briefly say this "
+            "MVP only supports Paris apartment, flat, or studio rentals, not "
+            f"{property_type}s. Ask what kind of apartment the user wants."
+        ),
+    }
+
+
+def _action_tool_result(res: dict[str, Any], action: str) -> dict[str, Any]:
+    """Tell the model how to close action-tool turns without drifting."""
+    out = _compact(res)
+    out.pop("draft", None)
+    out.pop("saved_listing", None)
+    if not out.get("ok"):
+        out["voice_instruction"] = (
+            "Briefly say that action did not complete and ask the user which listing "
+            "they meant. Do not invent a listing."
+        )
+        return out
+
+    action_text = {
+        "saved": "saved that listing",
+        "rejected": "rejected that listing",
+        "drafted": "drafted the viewing message",
+    }.get(action, f"completed {action}")
+    out["message"] = f"Action completed: {action_text}."
+    out["voice_instruction"] = (
+        f"Briefly say you {action_text}. If multiple save/reject/draft tool results "
+        "are present in this turn, combine them into one concise acknowledgement. "
+        "Do not ask what the user meant unless the tool failed."
     )
     return out
 

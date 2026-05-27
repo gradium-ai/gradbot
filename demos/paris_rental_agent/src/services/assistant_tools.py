@@ -108,6 +108,8 @@ _SEARCH_FIELD_ALIASES = {
     "maximum_rent": "max_rent_including_charges_eur",
     "rent_budget": "max_rent_including_charges_eur",
     "bedrooms": "min_bedrooms",
+    "num_bedrooms": "min_bedrooms",
+    "number_of_bedrooms": "min_bedrooms",
     "minimum_bedrooms": "min_bedrooms",
     "min_bedroom": "min_bedrooms",
     "minimum_bedroom": "min_bedrooms",

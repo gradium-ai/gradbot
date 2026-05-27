@@ -12,6 +12,7 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import yaml
@@ -74,6 +75,35 @@ PARIS_RENTAL_DOMAINS = [
 TAVILY_API_URL = "https://api.tavily.com/search"
 
 
+def is_obvious_collection_url(url: str) -> bool:
+    """Return true for search/category pages that are not individual listings."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return True
+    host = parsed.netloc.lower().removeprefix("www.")
+    path = parsed.path.lower()
+    if not host or not path:
+        return True
+
+    if "pap.fr" in host:
+        # PAP collection URLs look like /annonce/locations-appartement-paris-75-g439.
+        return path.startswith("/annonce/") or path.startswith("/recherche/")
+    if "seloger.com" in host:
+        return path.startswith("/recherche/")
+    if "bienici.com" in host:
+        return path.startswith("/recherche/")
+    if "lodgis.com" in host:
+        return path.endswith(".cat.html") or "/location-1-chambre-meuble-paris" in path
+    if "figaroimmobilier.fr" in host:
+        return "/annonces/" not in path and "/locations/" not in path
+    if "studapart.com" in host:
+        return path in {"", "/"} or path.startswith("/fr/search")
+    if "jinka.fr" in host:
+        return path in {"", "/"} or "/recherche" in path
+    return False
+
+
 def build_queries(profile: dict[str, Any]) -> list[str]:
     """Generate a small set of focused queries from a search profile."""
     rooms_label = "studio"
@@ -102,9 +132,9 @@ def build_queries(profile: dict[str, Any]) -> list[str]:
     if furnished:
         queries.append(f"{base} {furnished} {budget_str}".strip())
     queries.append(f"{base} charges comprises {budget_str}".strip())
-    queries.append(f"PAP location appartement Paris {rooms_label}".strip())
-    queries.append(f"Bienici location appartement Paris {furnished}".strip())
-    queries.append(f"location appartement Paris proche métro {rooms_label}".strip())
+    queries.append(f"site:pap.fr/annonces appartement Paris {rooms_label} {budget_str}".strip())
+    queries.append(f"site:seloger.com/annonces/locations/appartement Paris {rooms_label} {budget_str}".strip())
+    queries.append(f"site:bienici.com/annonce/location Paris appartement {furnished}".strip())
     if arr_str:
         queries.append(f"location appartement {arr_str} {rooms_label} {furnished}".strip())
 
@@ -176,6 +206,9 @@ async def search_paris_rentals(profile: dict[str, Any]) -> list[dict[str, Any]]:
             for r in results:
                 url = (r.get("url") or "").strip()
                 if not url or url in seen_urls:
+                    continue
+                if is_obvious_collection_url(url):
+                    logger.info("Skipping non-listing collection URL from Tavily: %s", url)
                     continue
                 seen_urls.add(url)
                 raw_results.append(

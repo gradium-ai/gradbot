@@ -219,6 +219,13 @@ const App = (() => {
         render();
     }
 
+    async function openProfileEditor() {
+        state.searching = false;
+        await Promise.all([loadOnboardingState(), loadProfiles()]);
+        state.view = 'onboarding';
+        render();
+    }
+
     async function loadMatches() {
         try {
             const m = await api('/api/matches?include_rejected=false&limit=20');
@@ -1015,16 +1022,40 @@ const App = (() => {
                 });
                 state.chatSessionId = res.conversation_session_id;
                 state.chatLog.push({ role: 'assistant', content: res.reply });
-                // If a search ran, refresh matches
-                if (res.tool_calls?.some(tc => tc.name === 'run_apartment_search')) {
-                    await loadMatches();
+                const toolNames = new Set((res.tool_calls || []).map(tc => tc.name));
+                if (
+                    toolNames.has('open_profile_editor') ||
+                    toolNames.has('update_profile_draft') ||
+                    toolNames.has('extract_requirements_from_transcript')
+                ) {
+                    await openProfileEditor();
+                    return;
                 }
-                if (res.tool_calls?.some(tc => tc.name === 'draft_viewing_request')) {
+                if (toolNames.has('run_apartment_search')) {
+                    await loadMatches();
+                    await Promise.all([loadSaved(), loadDrafts(), loadProfiles()]);
+                    state.searching = false;
+                    state.view = 'dashboard';
+                    state.dashboardScreen = 'feed';
+                }
+                if (toolNames.has('list_top_matches')) {
+                    await loadMatches();
+                    state.searching = false;
+                    state.view = 'dashboard';
+                    state.dashboardScreen = 'feed';
+                }
+                if (toolNames.has('draft_viewing_request')) {
                     await loadDrafts();
+                    state.view = 'dashboard';
                     state.dashboardScreen = 'drafts';
                 }
-                if (res.tool_calls?.some(tc => tc.name === 'save_listing')) {
+                if (toolNames.has('save_listing')) {
                     await loadSaved();
+                }
+                if (toolNames.has('reject_listing')) {
+                    await loadMatches();
+                    state.view = 'dashboard';
+                    state.dashboardScreen = 'feed';
                 }
                 render();
             } catch (e) {
@@ -1240,7 +1271,14 @@ const App = (() => {
                 render();
             }
         } else if (msg.type === 'matches') {
-            // no-op; rendered after next refresh
+            if (msg.result?.ok) {
+                state.matches = msg.result.matches || [];
+                state.matchesStale = Boolean(msg.result.stale);
+                state.searching = false;
+                state.view = 'dashboard';
+                state.dashboardScreen = 'feed';
+                render();
+            }
         } else if (msg.type === 'listing_saved') {
             (async () => { await loadSaved(); if (state.view === 'dashboard') render(); })();
         } else if (msg.type === 'listing_rejected') {

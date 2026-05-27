@@ -328,7 +328,8 @@ def _extract_work_location(text: str) -> dict[str, Any]:
 
     patterns = [
         r"(?:my office is|i work)\s+(?:near|at|by|close to)\s+([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$|\s+(?:and|in)\b)",
-        r"(?:office|workplace|work)\s+(?:is\s+)?(?:near|at|by|close to)\s+([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$|\s+(?:and|in)\b)",
+        r"(?:office|workplace|work)\s+(?:is\s+)?(?:located\s+)?(?:near|at|by|close to)\s+([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$|\s+(?:and|in)\b)",
+        r"(?:my\s+)?(?:office|workplace|work)\s*,?\s+(?:which|that)\s+is\s+([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$|\s+(?:and|in)\b)",
         r"(?:near|close to)\s+(?:my\s+)?(?:office|workplace|work)\s+(?:near|at|by)\s+([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$)",
         r"(?:near|close to)\s+([A-Za-zÀ-ÿ0-9' \-]+?),?\s+(?:which is|that is)\s+my\s+(?:work|workplace|office)(?:\s+location)?",
         r"(?:near|close to)\s+([0-9]+\s+(?:rue|avenue|boulevard|street|road|quai|place)[A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$)",
@@ -347,6 +348,51 @@ def _extract_work_location(text: str) -> dict[str, Any]:
                     out["confidence"] = 0.7
                 break
     return out
+
+
+def _extract_corrected_work_location(
+    text: str,
+    existing_profile: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    """Capture short address corrections when the profile already has a workplace."""
+    existing = existing_profile or {}
+    has_work_location = bool(
+        existing.get("work_location_address") or existing.get("work_location_label")
+    )
+    norm = _normalize(text)
+    if not has_work_location and not re.search(r"\b(workplace|office|work|address)\b", norm):
+        return {}
+    if not re.search(
+        r"\b(no|wrong|right|correct|correction|actually|address|name)\b|"
+        r"haven'?t got|didn'?t get|got .* wrong",
+        norm,
+    ):
+        return {}
+
+    number_words = "|".join(sorted(NUMBER_WORDS, key=len, reverse=True))
+    patterns = [
+        rf"(?:it'?s|it is|should be|address is|correct(?: address)? is)\s+"
+        rf"(?P<number>\d+|{number_words})\s+"
+        rf"(?P<name>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' \-]{{1,60}}?)(?:[\.,;]|$)",
+        rf"(?:at|to)\s+(?P<number>\d+|{number_words})\s+"
+        rf"(?P<name>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' \-]{{1,60}}?)(?:[\.,;]|$)",
+    ]
+    forbidden_names = {"minute", "minutes", "meter", "meters", "metre", "metres", "euro", "euros"}
+    for pattern in patterns:
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if not m:
+            continue
+        number = _number_token_to_int(m.group("number").lower())
+        if number is None:
+            continue
+        name = re.sub(r"\s+", " ", m.group("name")).strip(" .,")
+        if not name or name.lower() in forbidden_names:
+            continue
+        return {
+            "work_location_address": f"{number} {name}",
+            "confidence": 0.9,
+        }
+    return {}
 
 
 def _extract_room_features(text: str) -> dict[str, Any]:
@@ -1047,6 +1093,8 @@ def extract_requirements(
 
     # Work location
     work = _extract_work_location(transcript)
+    if not work:
+        work = _extract_corrected_work_location(transcript, existing_profile)
     if "work_location_address" in work:
         patch["work_location_address"] = work["work_location_address"]
         confidence["work_location_address"] = work.get("confidence", 0.7)

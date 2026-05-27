@@ -147,6 +147,54 @@ def test_save_reject_draft_persistence(client):
     assert len(drafts_list["drafts"]) >= 1
 
 
+def test_text_update_accepts_model_bedroom_alias(client):
+    _guest_session(client)
+    client.post("/api/intake/start")
+
+    updated = client.post(
+        "/api/intake/text-update",
+        json={"patch": {"num_bedrooms": 2}},
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["draft_profile"]["min_bedrooms"] == 2
+
+
+def test_chat_update_search_profile_opens_profile_editor(client):
+    _guest_session(client)
+    res = client.post(
+        "/api/assistant/chat",
+        json={"message": "Can I update my search profile?"},
+    )
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["tool_calls"][0]["name"] == "open_profile_editor"
+    assert "opened your search profile" in body["reply"]
+
+
+def test_chat_show_more_apartments_lists_latest_matches(client):
+    _guest_session(client)
+    client.post("/api/intake/start")
+    client.post(
+        "/api/intake/transcript",
+        json={"transcript": "Furnished 1-bedroom, max 1500 euros, my office is near République, 30 minutes by metro or bike."},
+    )
+    client.post("/api/intake/confirm")
+    run = client.post("/api/search-runs", json={"max_results": 5})
+    assert run.status_code == 200, run.text
+
+    res = client.post(
+        "/api/assistant/chat",
+        json={"message": "Can you show me more apartments?"},
+    )
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["tool_calls"][0]["name"] == "list_top_matches"
+    assert body["tool_calls"][0]["result"]["matches"]
+
+
 def test_profile_update_hides_stale_matches_until_fresh_search(client):
     _guest_session(client)
     client.post("/api/intake/start")
