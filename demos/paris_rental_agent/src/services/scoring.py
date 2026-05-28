@@ -174,7 +174,20 @@ def _source_score(listing: dict[str, Any]) -> tuple[float, list[str]]:
     if listing.get("is_mock"):
         return 0.5, []
     src = (listing.get("source") or "").lower()
-    trusted = ("pap.fr", "seloger", "bienici", "leboncoin", "lodgis")
+    trusted = (
+        "pap.fr",
+        "seloger",
+        "bienici",
+        "leboncoin",
+        "lodgis",
+        "immobilienscout24",
+        "immowelt",
+        "kleinanzeigen",
+        "wg-gesucht",
+        "wunderflats",
+        "housinganywhere",
+        "spotahome",
+    )
     if any(t in src for t in trusted):
         return 1.0, [f"trusted source: {listing.get('source')}"]
     return 0.7, []

@@ -28,6 +28,7 @@ from ..models import (
     User,
     ViewingRequestDraft,
 )
+from .cities import city_label, normalize_city
 from .drafting import draft_viewing_request_text
 from .normalize import english_listing_title, safe_external_url
 from .requirement_extraction import (
@@ -44,6 +45,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────── helpers ───────────────────────
 SEARCH_PROFILE_FIELDS = (
     "name",
+    "city",
     "is_active",
     "max_rent_including_charges_eur",
     "min_bedrooms",
@@ -101,6 +103,9 @@ _WORK_LOCATION_ALIASES = {
 }
 
 _SEARCH_FIELD_ALIASES = {
+    "location_city": "city",
+    "search_city": "city",
+    "rental_city": "city",
     "budget": "max_rent_including_charges_eur",
     "max_budget": "max_rent_including_charges_eur",
     "maximum_budget": "max_rent_including_charges_eur",
@@ -180,7 +185,17 @@ def _looks_like_precise_address(value: Any) -> bool:
                 " place ",
                 " quai ",
                 " paris",
+                " berlin",
                 "750",
+                "101",
+                "102",
+                "103",
+                "104",
+                "105",
+                "106",
+                "107",
+                "108",
+                "109",
             )
         )
     )
@@ -392,6 +407,10 @@ def _coerce_arrondissement_list(value: Any) -> list[int]:
 def repair_search_profile(sp: SearchProfile) -> bool:
     """Normalize persisted profile values that predate current validation."""
     changed = False
+    repaired_city = normalize_city(getattr(sp, "city", None))
+    if getattr(sp, "city", None) != repaired_city:
+        sp.city = repaired_city
+        changed = True
     for key in _INT_LIMITS:
         value = getattr(sp, key)
         if value is None:
@@ -423,6 +442,8 @@ def _serialize_search_profile(p: SearchProfile, *, renter: Optional[RenterProfil
         "id": p.id,
         "user_id": p.user_id,
         "name": p.name,
+        "city": normalize_city(getattr(p, "city", None)),
+        "city_label": city_label(getattr(p, "city", None)),
         "is_active": p.is_active,
         "confirmation_status": p.confirmation_status,
         "last_confirmed_at": p.last_confirmed_at.isoformat() if p.last_confirmed_at else None,
@@ -488,9 +509,11 @@ def get_active_search_profile(db: Session, user_id: str) -> Optional[SearchProfi
 def _get_or_create_search_profile(db: Session, user_id: str) -> SearchProfile:
     sp = get_active_search_profile(db, user_id)
     if sp is None:
-        sp = SearchProfile(user_id=user_id)
+        sp = SearchProfile(user_id=user_id, city="paris")
         db.add(sp)
         db.flush()
+    elif not getattr(sp, "city", None):
+        sp.city = "paris"
     return sp
 
 
@@ -532,7 +555,14 @@ def _apply_patch_to_search_profile(
         if key not in allowed:
             continue
 
-        if key in _INT_LIMITS:
+        if key == "city":
+            value = normalize_city(value)
+            if value != getattr(sp, "city", "paris"):
+                sp.preferred_arrondissements = []
+                sp.excluded_arrondissements = []
+                sources["preferred_arrondissements"] = "voice"
+                sources["excluded_arrondissements"] = "voice"
+        elif key in _INT_LIMITS:
             value = _coerce_int_field(key, value)
             if value is None and key not in _CLEARABLE_SEARCH_FIELDS:
                 continue

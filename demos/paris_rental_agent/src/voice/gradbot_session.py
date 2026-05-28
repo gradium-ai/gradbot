@@ -19,6 +19,7 @@ from fastapi import WebSocket
 from ..db import SessionLocal
 from ..models import User
 from ..services import assistant_tools
+from ..services.cities import city_label, normalize_city
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +48,11 @@ UNSUPPORTED_PROPERTY_TERMS = (
 _SEARCH_LOCKS: dict[str, asyncio.Lock] = {}
 
 
-SYSTEM_PROMPT = """You are a Paris rental apartment hunting assistant.
+SYSTEM_PROMPT_TEMPLATE = """You are a {city_label} rental apartment hunting assistant.
 
-Help the user create and manage a Paris rental search profile through voice and text.
-This MVP is ONLY for Paris apartment rentals: apartments, flats, and studios. It is not for castles, houses, villas, mansions, palaces, commercial property, buying, or hotels.
-For a brand-new empty intake only, if you speak first, ask exactly one short question: "What kind of apartment are you looking for in Paris?"
+Help the user create and manage a {city_label} rental search profile through voice and text.
+This MVP is ONLY for {city_label} apartment rentals: apartments, flats, and studios. It is not for castles, houses, villas, mansions, palaces, commercial property, buying, or hotels.
+For a brand-new empty intake only, if you speak first, ask exactly one short question: "What kind of apartment are you looking for in {city_label}?"
 Do not call any tools before that first question. After asking it, wait for the user.
 Do not repeat that broad opener after the user has already provided search details, after the profile is confirmed, or while replying to a user's message.
 Extract structured requirements from the user's spoken answer using extract_requirements_from_transcript.
@@ -68,7 +69,7 @@ After confirmation, help the user search, compare, save, reject, and draft viewi
 CRITICAL RULES:
 - Keep voice responses to 1-2 SHORT sentences. This is a phone call.
 - Ask one question at a time.
-- If the user asks for an out-of-scope property type such as a castle, house, villa, mansion, palace, hotel, office, or purchase, do not call tools and do not update the profile. Briefly say this search is only for Paris apartments/flats/studios, then ask what kind of apartment they want.
+- If the user asks for an out-of-scope property type such as a castle, house, villa, mansion, palace, hotel, office, or purchase, do not call tools and do not update the profile. Briefly say this search is only for {city_label} apartments/flats/studios, then ask what kind of apartment they want.
 - Never invent prices, commute times, amenities, availability, or address precision.
 - Never claim a commute is within 30 minutes unless a real commute provider has verified it.
 - In this MVP, commute is usually unknown and needs verification.
@@ -91,9 +92,13 @@ CRITICAL RULES:
 WHILE WAITING FOR APARTMENT SEARCH RESULTS:
 - If run_apartment_search has been called and its result has not arrived yet, do not discuss specific listings, prices, scores, commute times, or availability.
 - Do not ask a new question while the search is running.
-- Instead, share one short, practical Paris rental tip, such as preparing a rental dossier, checking whether charges are included, reviewing furnished versus unfurnished terms, checking energy ratings, or watching for payment-before-viewing scams.
+- Instead, share one short, practical {city_label} rental tip, such as preparing a rental dossier, checking whether utilities or charges are included, reviewing furnished versus unfurnished terms, checking energy ratings, or watching for payment-before-viewing scams.
 - When the tool result arrives, switch back to the actual matches and only use information from the tool result.
 """
+
+
+def _system_prompt(city: str) -> str:
+    return SYSTEM_PROMPT_TEMPLATE.format(city_label=city_label(city))
 
 
 def _profile_has_user_details(draft: dict[str, Any], raw_transcript: Optional[str]) -> bool:
@@ -168,6 +173,7 @@ def _load_start_context(user_id: str) -> dict[str, Any]:
             and not _profile_has_user_details(draft_profile, draft.get("raw_transcript"))
         )
         return {
+            "city": draft_profile.get("city") or "paris",
             "fresh_intake": fresh_intake,
             "confirmation_status": confirmation_status or "draft",
             "missing_fields": draft.get("missing_fields") or [],
@@ -180,10 +186,12 @@ def _load_start_context(user_id: str) -> dict[str, Any]:
 
 
 def _build_prompt(start_context: dict[str, Any]) -> str:
+    city = normalize_city(start_context.get("city"))
+    label = city_label(city)
     if start_context["fresh_intake"]:
         mode = (
             "CURRENT PHASE: FRESH INTAKE FIRST TURN. If you speak first, do not call "
-            "tools. Ask exactly: \"What kind of apartment are you looking for in Paris?\" "
+            f"tools. Ask exactly: \"What kind of apartment are you looking for in {label}?\" "
             "Then wait for the user."
         )
     elif start_context["confirmation_status"] == "confirmed":
@@ -199,8 +207,10 @@ def _build_prompt(start_context: dict[str, Any]) -> str:
         )
 
     return (
-        SYSTEM_PROMPT
+        _system_prompt(city)
         + "\n\nCURRENT USER STATE:\n"
+        + f"- city: {city}\n"
+        + f"- city_label: {label}\n"
         + f"- confirmation_status: {start_context['confirmation_status']}\n"
         + f"- fresh_empty_intake: {start_context['fresh_intake']}\n"
         + f"- saved_listings_count: {start_context['saved_listings_count']}\n"
@@ -210,7 +220,10 @@ def _build_prompt(start_context: dict[str, Any]) -> str:
     )
 
 
-def build_tools(*, include_start_profile_intake: bool = True) -> list[gradbot.ToolDef]:
+def build_tools(
+    *, include_start_profile_intake: bool = True, city: str = "paris"
+) -> list[gradbot.ToolDef]:
+    label = city_label(city)
     tools = []
     if include_start_profile_intake:
         tools.append(
@@ -233,7 +246,7 @@ def build_tools(*, include_start_profile_intake: bool = True) -> list[gradbot.To
                 "AFTER the user describes in-scope apartment, flat, or studio needs. Do NOT call "
                 "this for out-of-scope property types such as castles, houses, villas, mansions, "
                 "palaces, hotels, offices, or purchases; instead, tell the user this MVP only "
-                "supports Paris apartment rentals. The transcript should be the raw user message "
+                f"supports {label} apartment rentals. The transcript should be the raw user message "
                 "verbatim. For explicit corrections to an existing field, prefer "
                 "update_profile_draft instead."
             ),
@@ -262,7 +275,8 @@ def build_tools(*, include_start_profile_intake: bool = True) -> list[gradbot.To
                 "Patch the draft profile with explicit field values from the user. For workplace "
                 "updates, use work_location_address for a street address such as '40 Rue de Louvre' "
                 "or a direct correction such as '40 Roudeloup', or work_location_label for a "
-                "landmark/neighborhood such as 'République'. Use "
+                "landmark/neighborhood such as 'République'. For city changes, use city with "
+                "'paris' or 'berlin'. Use "
                 "'voice' as source unless the user is correcting via text. Use min_surface_m2 for "
                 "minimum surface area in square meters. Use commute_max_minutes for commute time, "
                 "not max_commute_minutes. Use furnished_preference, not furnished. "
@@ -278,7 +292,8 @@ def build_tools(*, include_start_profile_intake: bool = True) -> list[gradbot.To
                         "description": (
                             "A JSON string of fields to patch (e.g. "
                             "'{\"max_rent_including_charges_eur\":1500}' or "
-                            "'{\"work_location_address\":\"40 Rue de Louvre, 75002 Paris\"}')."
+                            "'{\"work_location_address\":\"40 Rue de Louvre, 75002 Paris\"}' or "
+                            "'{\"city\":\"berlin\"}')."
                         ),
                     },
                     "source": {
@@ -316,7 +331,7 @@ def build_tools(*, include_start_profile_intake: bool = True) -> list[gradbot.To
                 "allow_unconfirmed_profile=false. Set allow_unconfirmed_profile=true only if the "
                 "user explicitly says to search without confirming, search anyway, or use the "
                 "current draft. This search can take several seconds. After calling it, keep the "
-                "conversation useful with one brief Paris rental tip while waiting, but do not "
+                f"conversation useful with one brief {label} rental tip while waiting, but do not "
                 "mention any specific listings until the tool result arrives."
             ),
             parameters_json=json.dumps({
@@ -423,7 +438,10 @@ def _make_config(
         voice_id=voice_id,
         instructions=_build_prompt(start_context),
         language=lang_enum,
-        tools=build_tools(include_start_profile_intake=not bool(start_context["fresh_intake"])),
+        tools=build_tools(
+            include_start_profile_intake=not bool(start_context["fresh_intake"]),
+            city=normalize_city(start_context.get("city")),
+        ),
         **config_kwargs,
     )
 
@@ -545,7 +563,8 @@ async def _dispatch_tool(
             transcript = args.get("transcript", "")
             unsupported_property = _unsupported_property_type(transcript)
             if unsupported_property:
-                await handle.send_json(_unsupported_property_tool_result(unsupported_property))
+                city = normalize_city((session_state.get("start_context") or {}).get("city"))
+                await handle.send_json(_unsupported_property_tool_result(unsupported_property, city=city))
                 return
             res = assistant_tools.extract_requirements_from_transcript(
                 db, user_id, transcript, source="voice"
@@ -722,14 +741,15 @@ def _profile_tool_result(res: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _unsupported_property_tool_result(property_type: str) -> dict[str, Any]:
+def _unsupported_property_tool_result(property_type: str, *, city: str = "paris") -> dict[str, Any]:
+    label = city_label(city)
     return {
         "ok": False,
         "error": "unsupported_property_type",
         "property_type": property_type,
         "voice_instruction": (
             "Do not say the profile was updated. Do not call another tool. Briefly say this "
-            "MVP only supports Paris apartment, flat, or studio rentals, not "
+            f"MVP only supports {label} apartment, flat, or studio rentals, not "
             f"{property_type}s. Ask what kind of apartment the user wants."
         ),
     }

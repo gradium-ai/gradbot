@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from src.services.normalize import english_listing_title, normalize_result
 from src.services.scoring import score_listing
 from src.services.tavily_search import build_queries, is_obvious_collection_url
@@ -27,6 +29,23 @@ def test_normalize_handles_missing_data():
     out = normalize_result(raw)
     assert out["title"] == "Studio"
     assert "rent_eur" in out["missing_fields"]
+
+
+def test_normalize_basic_german_berlin_listing():
+    raw = {
+        "url": "https://www.immobilienscout24.de/expose/123456789",
+        "title": "Möblierte 2-Zimmer-Wohnung in Berlin Mitte",
+        "content": "Helle Wohnung, 45 m², 1.400 € Warmmiete, nah am Alexanderplatz.",
+        "source": "immobilienscout24.de",
+    }
+
+    out = normalize_result(raw)
+
+    assert out["surface_m2"] == 45
+    assert out["rooms"] == 2
+    assert out["bedrooms"] == 1
+    assert out["furnished"] is True
+    assert out["total_monthly_eur"] == 1400
 
 
 def test_english_listing_title_translates_common_french_search_titles():
@@ -72,12 +91,85 @@ def test_tavily_filters_obvious_collection_urls():
     )
 
 
+def test_tavily_filters_berlin_collection_urls_and_keeps_detail_urls():
+    assert is_obvious_collection_url(
+        "https://www.spotahome.com/de/s/berlin/for-rent%3Aapartments"
+    )
+    assert is_obvious_collection_url(
+        "https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten"
+    )
+    assert is_obvious_collection_url(
+        "https://www.wunderflats.com/en/furnished-apartments/berlin"
+    )
+    assert is_obvious_collection_url(
+        "https://housinganywhere.com/s/Berlin--Germany/apartment-for-rent"
+    )
+
+    assert not is_obvious_collection_url(
+        "https://www.spotahome.com/berlin/for-rent%3Aapartments/608504"
+    )
+    assert not is_obvious_collection_url(
+        "https://www.immobilienscout24.de/expose/123456789"
+    )
+    assert not is_obvious_collection_url(
+        "https://www.immowelt.de/expose/2abcde"
+    )
+    assert not is_obvious_collection_url(
+        "https://www.wunderflats.com/en/furnished-apartment/bright-flat-berlin"
+    )
+    assert not is_obvious_collection_url(
+        "https://housinganywhere.com/room/1234567/de/Berlin/foo"
+    )
+
+
 def test_tavily_queries_target_detail_listing_paths():
     queries = build_queries({"min_bedrooms": 1, "max_rent_including_charges_eur": 1500})
 
     assert any("site:pap.fr/annonces" in query for query in queries)
     assert any("site:seloger.com/annonces/locations/appartement" in query for query in queries)
     assert any("site:bienici.com/annonce/location" in query for query in queries)
+
+
+def test_tavily_queries_support_berlin_market():
+    queries = build_queries({
+        "city": "berlin",
+        "min_bedrooms": 1,
+        "max_rent_including_charges_eur": 1500,
+        "furnished_preference": "required",
+    })
+
+    joined = " ".join(queries)
+    assert "Berlin" in joined
+    assert "Wohnung" in joined
+    assert any("site:immobilienscout24.de/expose" in query for query in queries)
+    assert any("site:immowelt.de/expose" in query for query in queries)
+    assert any("site:spotahome.com/berlin/for-rent:apartments" in query for query in queries)
+
+
+def test_commute_cache_is_scoped_by_city(monkeypatch):
+    from src.services import commute
+
+    calls = []
+    commute._CACHE.clear()
+    monkeypatch.setattr(commute, "_resolve_google_maps_key", lambda: "test-key")
+
+    async def fake_call(_client, _api_key, _origin, destinations, mode, *, city):
+        calls.append((city, mode, tuple(destinations)))
+        duration = 10 if city == "paris" else 20
+        return [{"duration_minutes": duration, "status": "ok"} for _ in destinations]
+
+    monkeypatch.setattr(commute, "_call_routes_matrix", fake_call)
+
+    paris = asyncio.run(
+        commute.compute_commute_batch("Central", ["Center"], city="paris")
+    )
+    berlin = asyncio.run(
+        commute.compute_commute_batch("Central", ["Center"], city="berlin")
+    )
+
+    assert paris["Center"]["metro_min"] == 10
+    assert berlin["Center"]["metro_min"] == 20
+    assert {call[0] for call in calls} == {"paris", "berlin"}
 
 
 def test_score_strong_match_passes_filters():

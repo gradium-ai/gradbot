@@ -123,6 +123,30 @@ def test_voice_config_rejects_out_of_scope_property_types():
     assert "castles" in extract_tool.description
 
 
+def test_voice_config_can_target_berlin_market():
+    start_context = {
+        "city": "berlin",
+        "fresh_intake": True,
+        "confirmation_status": "draft",
+        "missing_fields": [],
+        "last_search_result_count": 0,
+        "saved_listings_count": 0,
+        "drafts_count": 0,
+    }
+
+    config = gradbot_session._make_config(
+        language="en",
+        config=SimpleNamespace(session_kwargs={}),
+        start_context=start_context,
+        assistant_speaks_first=True,
+    )
+
+    assert '"What kind of apartment are you looking for in Berlin?"' in config.instructions
+    assert "ONLY for Berlin apartment rentals" in config.instructions
+    extract_tool = next(tool for tool in config.tools if tool.name == "extract_requirements_from_transcript")
+    assert "supports Berlin apartment rentals" in extract_tool.description
+
+
 def test_unsupported_property_type_guard():
     assert gradbot_session._unsupported_property_type("I'm looking for a castle") == "castle"
     assert gradbot_session._unsupported_property_type("I want a château in Paris") == "chateau"
@@ -139,6 +163,12 @@ def test_unsupported_property_tool_result_pushes_back_without_update():
     assert result["error"] == "unsupported_property_type"
     assert "Do not say the profile was updated" in result["voice_instruction"]
     assert "only supports Paris apartment" in result["voice_instruction"]
+
+
+def test_unsupported_property_tool_result_uses_selected_city():
+    result = gradbot_session._unsupported_property_tool_result("castle", city="berlin")
+
+    assert "only supports Berlin apartment" in result["voice_instruction"]
 
 
 def test_profile_tool_result_omits_summary_and_guides_voice_reply():

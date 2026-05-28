@@ -195,6 +195,70 @@ def test_chat_show_more_apartments_lists_latest_matches(client):
     assert body["tool_calls"][0]["result"]["matches"]
 
 
+def test_search_profile_defaults_to_paris_and_can_switch_to_berlin(client):
+    _guest_session(client)
+
+    profile = client.get("/api/search-profile")
+    assert profile.status_code == 200, profile.text
+    assert profile.json()["city"] == "paris"
+
+    client.post(
+        "/api/intake/text-update",
+        json={
+            "patch": {
+                "preferred_arrondissements": [2, 3],
+                "excluded_arrondissements": [16],
+            }
+        },
+    )
+    updated = client.patch("/api/search-profile", json={"city": "berlin"})
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["city"] == "berlin"
+    assert body["preferred_arrondissements"] == []
+    assert body["excluded_arrondissements"] == []
+
+
+def test_berlin_search_passes_city_to_search_backend(client, monkeypatch):
+    from src.services import search_pipeline
+
+    seen = {}
+
+    async def fake_city_search(profile):
+        seen["city"] = profile.get("city")
+        return [
+            {
+                "url": "https://example.test/listing/berlin-flat",
+                "title": "Furnished 1-bedroom apartment Berlin Mitte",
+                "content": "Furnished apartment, 40 m2, 1 bedroom. Rent 1400 euros. Berlin Mitte.",
+                "source": "immobilienscout24.de",
+                "is_mock": False,
+            }
+        ]
+
+    monkeypatch.setattr(search_pipeline, "search_city_rentals", fake_city_search)
+
+    _guest_session(client)
+    client.patch("/api/search-profile", json={"city": "berlin"})
+    client.post("/api/intake/start")
+    client.post(
+        "/api/intake/transcript",
+        json={
+            "transcript": (
+                "I'm looking for a furnished one-bedroom in Berlin, max 1500 euros, "
+                "my office is near Alexanderplatz, 30 minutes by metro or bike."
+            )
+        },
+    )
+    confirmed = client.post("/api/intake/confirm")
+    assert confirmed.status_code == 200, confirmed.text
+
+    run = client.post("/api/search-runs", json={"max_results": 5})
+    assert run.status_code == 200, run.text
+    assert seen["city"] == "berlin"
+    assert run.json()["matches"][0]["listing"]["source"] == "immobilienscout24.de"
+
+
 def test_profile_update_hides_stale_matches_until_fresh_search(client):
     _guest_session(client)
     client.post("/api/intake/start")

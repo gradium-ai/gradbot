@@ -1,4 +1,4 @@
-"""Tavily integration for Paris rental listings.
+"""Tavily integration for supported city rental listings.
 
 The Tavily API key is required. Set it via the ``TAVILY_API_KEY`` env var or
 under a ``tavily.api_key`` block in either ``demos/paris_rental_agent/config.yaml``
@@ -9,15 +9,17 @@ or ``demos/config.yaml``. If no key is configured, search raises
 from __future__ import annotations
 
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import httpx
 import yaml
 
 from ..config import get_settings
+from .cities import city_label, normalize_city
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +63,35 @@ def _resolve_tavily_key() -> str:
                 return key.strip()
     return ""
 
-PARIS_RENTAL_DOMAINS = [
+RENTAL_DOMAINS_BY_CITY = {
+    "paris": [
+        "pap.fr",
+        "seloger.com",
+        "bienici.com",
+        "leboncoin.fr",
+        "jinka.fr",
+        "studapart.com",
+        "lodgis.com",
+        "figaroimmobilier.fr",
+    ],
+    "berlin": [
+        "immobilienscout24.de",
+        "immowelt.de",
+        "kleinanzeigen.de",
+        "wg-gesucht.de",
+        "wunderflats.com",
+        "housinganywhere.com",
+        "spotahome.com",
+    ],
+}
+
+PARIS_RENTAL_DOMAINS = RENTAL_DOMAINS_BY_CITY["paris"]
+
+BERLIN_RENTAL_DOMAINS = RENTAL_DOMAINS_BY_CITY["berlin"]
+
+ALL_RENTAL_DOMAINS = sorted({domain for domains in RENTAL_DOMAINS_BY_CITY.values() for domain in domains})
+
+TRUSTED_RENTAL_DOMAINS = [
     "pap.fr",
     "seloger.com",
     "bienici.com",
@@ -82,41 +112,66 @@ def is_obvious_collection_url(url: str) -> bool:
     except ValueError:
         return True
     host = parsed.netloc.lower().removeprefix("www.")
-    path = parsed.path.lower()
+    path = unquote(parsed.path.lower())
     if not host or not path:
         return True
 
     if "pap.fr" in host:
-        # PAP collection URLs look like /annonce/locations-appartement-paris-75-g439.
-        return path.startswith("/annonce/") or path.startswith("/recherche/")
+        # PAP detail URLs use /annonces/...-r123456, while search pages often
+        # use /annonce/... or /recherche/...
+        return not (path.startswith("/annonces/") and re.search(r"-r\d+\b", path))
     if "seloger.com" in host:
-        return path.startswith("/recherche/")
+        return not path.startswith("/annonces/")
     if "bienici.com" in host:
-        return path.startswith("/recherche/")
+        return not path.startswith("/annonce/")
+    if "leboncoin.fr" in host:
+        return not (path.startswith("/ad/") or "/ad/" in path)
     if "lodgis.com" in host:
-        return path.endswith(".cat.html") or "/location-1-chambre-meuble-paris" in path
+        return path.endswith(".cat.html") or not path.endswith(".html")
     if "figaroimmobilier.fr" in host:
         return "/annonces/" not in path and "/locations/" not in path
     if "studapart.com" in host:
-        return path in {"", "/"} or path.startswith("/fr/search")
+        return not re.search(r"/(?:fr|en)/(?:logement|accommodation)/", path)
     if "jinka.fr" in host:
         return path in {"", "/"} or "/recherche" in path
+    if "immobilienscout24.de" in host:
+        return not re.search(r"/expose/\d+", path)
+    if "immowelt.de" in host:
+        return not re.search(r"/expose/[a-z0-9]+", path)
+    if "kleinanzeigen.de" in host:
+        return not path.startswith("/s-anzeige/")
+    if "wg-gesucht.de" in host:
+        return not re.search(r"\.\d+\.\d+\.\d+\.\d+\.html$", path)
+    if "wunderflats.com" in host:
+        return not path.startswith("/en/furnished-apartment/")
+    if "housinganywhere.com" in host:
+        return not re.search(r"/room/\d+", path)
+    if "spotahome.com" in host:
+        return not re.search(r"/berlin/for-rent:apartments/\d+", path)
     return False
 
 
 def build_queries(profile: dict[str, Any]) -> list[str]:
     """Generate a small set of focused queries from a search profile."""
+    city = normalize_city(profile.get("city"))
+    city_name = city_label(city)
     rooms_label = "studio"
     if profile.get("min_bedrooms"):
         n = profile["min_bedrooms"]
-        rooms_label = "1 chambre" if n == 1 else f"{n} chambres"
+        if city == "berlin":
+            rooms_label = "1 Zimmer Wohnung" if n == 1 else f"{n} Zimmer Wohnung"
+        else:
+            rooms_label = "1 chambre" if n == 1 else f"{n} chambres"
     elif profile.get("min_rooms"):
         n = profile["min_rooms"]
-        rooms_label = "studio" if n == 1 else f"{n} pièces"
+        if city == "berlin":
+            rooms_label = "Studio" if n == 1 else f"{n} Zimmer Wohnung"
+        else:
+            rooms_label = "studio" if n == 1 else f"{n} pièces"
 
     furnished = ""
     if profile.get("furnished_preference") == "required":
-        furnished = "meublé"
+        furnished = "möbliert" if city == "berlin" else "meublé"
 
     budget_str = ""
     if profile.get("max_rent_including_charges_eur"):
@@ -124,19 +179,29 @@ def build_queries(profile: dict[str, Any]) -> list[str]:
 
     arrondissements = profile.get("preferred_arrondissements") or []
     arr_str = ""
-    if arrondissements:
+    if city == "paris" and arrondissements:
         arr_str = " ".join(f"Paris {a}e" for a in arrondissements)
 
     queries = []
-    base = f"location appartement Paris {rooms_label}".strip()
-    if furnished:
-        queries.append(f"{base} {furnished} {budget_str}".strip())
-    queries.append(f"{base} charges comprises {budget_str}".strip())
-    queries.append(f"site:pap.fr/annonces appartement Paris {rooms_label} {budget_str}".strip())
-    queries.append(f"site:seloger.com/annonces/locations/appartement Paris {rooms_label} {budget_str}".strip())
-    queries.append(f"site:bienici.com/annonce/location Paris appartement {furnished}".strip())
-    if arr_str:
-        queries.append(f"location appartement {arr_str} {rooms_label} {furnished}".strip())
+    if city == "berlin":
+        base = f"Wohnung mieten Berlin {rooms_label}".strip()
+        if furnished:
+            queries.append(f"{base} {furnished} {budget_str}".strip())
+        queries.append(f"{base} Warmmiete {budget_str}".strip())
+        queries.append(f"site:immobilienscout24.de/expose Wohnung Berlin {rooms_label} {budget_str}".strip())
+        queries.append(f"site:immowelt.de/expose Berlin Wohnung mieten {rooms_label} {budget_str}".strip())
+        queries.append(f"site:wunderflats.com/en/furnished-apartment Berlin {rooms_label} {budget_str}".strip())
+        queries.append(f"site:spotahome.com/berlin/for-rent:apartments Berlin {rooms_label} {budget_str}".strip())
+    else:
+        base = f"location appartement Paris {rooms_label}".strip()
+        if furnished:
+            queries.append(f"{base} {furnished} {budget_str}".strip())
+        queries.append(f"{base} charges comprises {budget_str}".strip())
+        queries.append(f"site:pap.fr/annonces appartement Paris {rooms_label} {budget_str}".strip())
+        queries.append(f"site:seloger.com/annonces/locations/appartement Paris {rooms_label} {budget_str}".strip())
+        queries.append(f"site:bienici.com/annonce/location Paris appartement {furnished}".strip())
+        if arr_str:
+            queries.append(f"location appartement {arr_str} {rooms_label} {furnished}".strip())
 
     seen: set[str] = set()
     out: list[str] = []
@@ -145,11 +210,11 @@ def build_queries(profile: dict[str, Any]) -> list[str]:
         if norm and norm.lower() not in seen:
             seen.add(norm.lower())
             out.append(norm)
-    return out[:5]
+    return out[:6]
 
 
 async def _tavily_request(
-    client: httpx.AsyncClient, api_key: str, query: str
+    client: httpx.AsyncClient, api_key: str, query: str, *, city: str
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Call Tavily for one query. Returns (results, error_message)."""
     payload = {
@@ -159,7 +224,7 @@ async def _tavily_request(
         "max_results": 5,
         "include_answer": False,
         "include_raw_content": True,
-        "include_domains": PARIS_RENTAL_DOMAINS,
+        "include_domains": RENTAL_DOMAINS_BY_CITY.get(city, PARIS_RENTAL_DOMAINS),
     }
     try:
         r = await client.post(TAVILY_API_URL, json=payload, timeout=20.0)
@@ -176,7 +241,7 @@ async def _tavily_request(
         return [], str(e)
 
 
-async def search_paris_rentals(profile: dict[str, Any]) -> list[dict[str, Any]]:
+async def search_city_rentals(profile: dict[str, Any]) -> list[dict[str, Any]]:
     """Run Tavily search and return raw results.
 
     Raises:
@@ -190,6 +255,7 @@ async def search_paris_rentals(profile: dict[str, Any]) -> list[dict[str, Any]]:
             "demos/paris_rental_agent/config.yaml or set the TAVILY_API_KEY env var."
         )
 
+    city = normalize_city(profile.get("city"))
     queries = build_queries(profile)
     if not queries:
         return []
@@ -200,7 +266,7 @@ async def search_paris_rentals(profile: dict[str, Any]) -> list[dict[str, Any]]:
 
     async with httpx.AsyncClient() as client:
         for q in queries:
-            results, err = await _tavily_request(client, api_key, q)
+            results, err = await _tavily_request(client, api_key, q, city=city)
             if err:
                 errors.append(err)
             for r in results:
@@ -224,6 +290,11 @@ async def search_paris_rentals(profile: dict[str, Any]) -> list[dict[str, Any]]:
     if not raw_results and errors:
         raise TavilySearchError("; ".join(errors[:3]))
     return raw_results
+
+
+async def search_paris_rentals(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    """Backward-compatible alias for tests and older imports."""
+    return await search_city_rentals({**profile, "city": "paris"})
 
 
 def _domain_of(url: str) -> str:

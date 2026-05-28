@@ -1,4 +1,4 @@
-"""FastAPI app entry-point for the Paris rental apartment hunting agent.
+"""FastAPI app entry-point for the city rental apartment hunting agent.
 
 Run locally either way:
     # from the repo root (Render-style):
@@ -76,7 +76,7 @@ async def _lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Paris Rental Agent", lifespan=_lifespan)
+app = FastAPI(title="Rental Agent", lifespan=_lifespan)
 
 
 # REST routes

@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for the Paris rental agent."""
+"""SQLAlchemy ORM models for the rental agent."""
 
 from __future__ import annotations
 
@@ -98,7 +98,8 @@ class SearchProfile(Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    name: Mapped[str] = mapped_column(String(255), default="Main Paris search")
+    name: Mapped[str] = mapped_column(String(255), default="Main apartment search")
+    city: Mapped[str] = mapped_column(String(32), default="paris")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     confirmation_status: Mapped[str] = mapped_column(String(32), default="draft")
     last_confirmed_at: Mapped[Optional[datetime]] = mapped_column(

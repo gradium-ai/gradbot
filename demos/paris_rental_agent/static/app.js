@@ -31,6 +31,7 @@ const App = (() => {
         showTranscript: false,
         searching: false,
         matchesStale: false,
+        pendingCity: 'paris',
     };
 
     const AMENITY_DEFAULTS = {
@@ -68,6 +69,19 @@ const App = (() => {
         pharmacy: 'pharmacy_m',
         bakery: 'bakery_m',
     };
+    const CITY_OPTIONS = [
+        ['paris', 'Paris'],
+        ['berlin', 'Berlin'],
+    ];
+
+    function currentCity() {
+        return state.searchProfile?.city || state.intake?.draft_profile?.city || state.pendingCity || 'paris';
+    }
+
+    function currentCityLabel() {
+        const found = CITY_OPTIONS.find(([id]) => id === currentCity());
+        return found ? found[1] : 'Paris';
+    }
 
     // ───────────────────────── API helpers ─────────────────────────
     function apiErrorMessage(data, fallback) {
@@ -149,6 +163,7 @@ const App = (() => {
         state.user = me;
         state.sessionToken = null;
         state.sessionPersisted = true;
+        await applyPendingCity();
         await enterSavedSession();
     }
 
@@ -157,7 +172,18 @@ const App = (() => {
         state.user = me;
         state.sessionToken = me.token || null;
         state.sessionPersisted = false;
+        await applyPendingCity();
         await enterSavedSession();
+    }
+
+    async function applyPendingCity() {
+        if ((state.pendingCity || 'paris') === 'paris') return;
+        try {
+            state.searchProfile = await api('/api/search-profile', {
+                method: 'PATCH',
+                body: { city: state.pendingCity },
+            });
+        } catch {}
     }
 
     async function loadProfiles() {
@@ -265,14 +291,16 @@ const App = (() => {
 
     // ───────────────────────── Cookie consent view ─────────────────────────
     function renderConsent() {
+        const cityLabel = currentCityLabel();
         return `
             <div class="entry-shell">
                 <header class="entry-header">
-                    <div class="brand"><div class="brand-dot"></div> Paris Rental Agent</div>
+                    <div class="brand"><div class="brand-dot"></div> ${escapeHtml(cityLabel)} Rental Agent</div>
+                    ${renderCitySelect()}
                 </header>
                 <main class="entry-main">
                     <section class="entry-copy">
-                        <h1>Find a Paris apartment that fits your life.</h1>
+                        <h1>Find a ${escapeHtml(cityLabel)} apartment that fits your life.</h1>
                         <p>Tell the voice scout your budget, commute, neighborhood preferences, and must-haves. It turns your brief into a search profile, finds matches, and drafts viewing messages.</p>
                         <div class="entry-actions">
                             <span>Voice intake</span>
@@ -312,6 +340,7 @@ const App = (() => {
     }
 
     function wireConsent() {
+        wireCitySelector();
         const start = async (buttonId, action) => {
             const btn = document.getElementById(buttonId);
             const errEl = document.getElementById('consent-error');
@@ -333,6 +362,7 @@ const App = (() => {
 
     function renderHeader() {
         const sessionLabel = state.sessionPersisted ? 'Saved browser session' : 'Temporary session';
+        const label = currentCityLabel();
         return `
             <header class="paris-topbar">
                 <div class="paris-brand">
@@ -345,9 +375,10 @@ const App = (() => {
                             stroke-linejoin="round"
                         />
                     </svg>
-                    <h1 class="paris-brand-title">Paris Rental Agent</h1>
+                    <h1 class="paris-brand-title">${escapeHtml(label)} Rental Agent</h1>
                 </div>
                 <div class="paris-topbar-actions">
+                    ${renderCitySelect()}
                     <div class="paris-user-pill">${escapeHtml(sessionLabel)}</div>
                     <button id="btn-reset-session" class="paris-button-light" type="button">Log out</button>
                 </div>
@@ -356,6 +387,7 @@ const App = (() => {
     }
 
     function wireHeader() {
+        wireCitySelector();
         const reset = document.getElementById('btn-reset-session');
         if (reset) reset.addEventListener('click', async () => {
             try { await api('/api/auth/logout', { method: 'POST', body: { forget: true } }); } catch {}
@@ -368,6 +400,55 @@ const App = (() => {
         });
     }
 
+    function renderCitySelect() {
+        const city = currentCity();
+        return `
+            <label class="city-select-wrap">
+                <span>City</span>
+                <select id="city-select" class="city-select" aria-label="Rental city">
+                    ${CITY_OPTIONS.map(([value, label]) => `
+                        <option value="${value}" ${city === value ? 'selected' : ''}>${label}</option>
+                    `).join('')}
+                </select>
+            </label>
+        `;
+    }
+
+    function wireCitySelector() {
+        const select = document.getElementById('city-select');
+        if (!select) return;
+        select.addEventListener('change', async () => {
+            await setCity(select.value);
+        });
+    }
+
+    async function setCity(city) {
+        const normalized = CITY_OPTIONS.some(([value]) => value === city) ? city : 'paris';
+        if (normalized === currentCity()) return;
+        if (!state.user) {
+            state.pendingCity = normalized;
+            render();
+            return;
+        }
+        stopVoice();
+        state.searching = false;
+        state.matches = [];
+        state.matchesStale = false;
+        try {
+            const updated = await api('/api/search-profile', {
+                method: 'PATCH',
+                body: { city: normalized },
+            });
+            state.searchProfile = { ...(state.searchProfile || {}), ...updated };
+            await Promise.all([loadOnboardingState(), loadProfiles()]);
+            state.view = 'onboarding';
+            render();
+        } catch (e) {
+            alert(e.message || 'Could not switch city.');
+            render();
+        }
+    }
+
     // ───────────────────────── Onboarding ─────────────────────────
     function renderOnboarding() {
         const dp = state.intake?.draft_profile || {};
@@ -377,9 +458,10 @@ const App = (() => {
         const sources = state.intake?.field_sources || {};
         const status = state.intake?.confirmation_status || 'draft';
         const summary = state.intake?.summary || (state.intake?.raw_transcript ? '' : '');
+        const cityLabel = currentCityLabel();
         const transcriptHtml = state.intake?.raw_transcript
             ? `<div class="msg msg-user"><span class="msg-text">${escapeHtml(state.intake.raw_transcript)}</span></div>`
-            : `<em class="paris-transcript-empty">Say something like "I'm looking for a furnished one-bedroom near République, max €1500 including charges, no more than 30 minutes by metro or bike."</em>`;
+            : `<em class="paris-transcript-empty">Say something like "I'm looking for a furnished one-bedroom in ${escapeHtml(cityLabel)}, max €1500 including charges, no more than 30 minutes by metro or bike."</em>`;
 
         return `
         <div class="parisian-shell">
@@ -391,7 +473,7 @@ const App = (() => {
                     aria-hidden="true"
                 >
                 <div>
-                    <h2 class="paris-hero-title">Tell us what you're looking for in Paris</h2>
+                    <h2 class="paris-hero-title">Tell us what you're looking for in ${escapeHtml(cityLabel)}</h2>
                     <div class="paris-hero-accent" aria-hidden="true"></div>
                     <p class="paris-hero-copy">
                         Speak naturally — budget, workplace, commute, bedrooms, furnished, and amenities.
@@ -507,6 +589,11 @@ const App = (() => {
     }
 
     function renderProfileForm(dp, conf, sources, missing) {
+        const city = currentCity();
+        const cityLabel = currentCityLabel();
+        const workplacePlaceholder = city === 'berlin'
+            ? 'e.g. Alexanderplatz, Mitte, Potsdamer Platz'
+            : 'e.g. République, La Défense, Station F';
         const tag = (field) => {
             const c = conf[field];
             const src = sources[field] ? `<span class="paris-badge paris-badge-source">${escapeHtml(sources[field])}</span>` : '';
@@ -522,7 +609,7 @@ const App = (() => {
             <div class="paris-form-grid fields">
                 <div class="${cls('work_location', 'paris-field-full full')}">
                     <label class="paris-field-label-row">Workplace address or landmark ${tag('work_location_label')}</label>
-                    <input class="paris-input" id="f-work_location_label" value="${escapeAttr(dp.work_location_label || '')}" placeholder="e.g. République, La Défense, Station F">
+                    <input class="paris-input" id="f-work_location_label" value="${escapeAttr(dp.work_location_label || '')}" placeholder="${escapeAttr(workplacePlaceholder)}">
                 </div>
                 <div class="${cls('work_location', 'paris-field-full full')}">
                     <label class="paris-field-label-row">Optional precise address ${tag('work_location_address')}</label>
@@ -590,14 +677,21 @@ const App = (() => {
                     <label class="paris-field-label-row">Kitchen nice-to-haves</label>
                     <input class="paris-input" id="f-kt_nice" value="${escapeAttr(arr((rooms.kitchen||{}).nice_to_have))}">
                 </div>
-                <div class="paris-field field">
-                    <label class="paris-field-label-row">Preferred arrondissements</label>
-                    <input class="paris-input" id="f-pref_arr" value="${escapeAttr(arr(dp.preferred_arrondissements))}" placeholder="e.g. 11, 3, 4">
-                </div>
-                <div class="paris-field field">
-                    <label class="paris-field-label-row">Excluded arrondissements</label>
-                    <input class="paris-input" id="f-excl_arr" value="${escapeAttr(arr(dp.excluded_arrondissements))}" placeholder="e.g. 16, 8">
-                </div>
+                ${city === 'paris' ? `
+                    <div class="paris-field field">
+                        <label class="paris-field-label-row">Preferred arrondissements</label>
+                        <input class="paris-input" id="f-pref_arr" value="${escapeAttr(arr(dp.preferred_arrondissements))}" placeholder="e.g. 11, 3, 4">
+                    </div>
+                    <div class="paris-field field">
+                        <label class="paris-field-label-row">Excluded arrondissements</label>
+                        <input class="paris-input" id="f-excl_arr" value="${escapeAttr(arr(dp.excluded_arrondissements))}" placeholder="e.g. 16, 8">
+                    </div>
+                ` : `
+                    <div class="paris-field field paris-field-full full">
+                        <label class="paris-field-label-row">${escapeHtml(cityLabel)} area preferences</label>
+                        <input class="paris-input" value="${escapeAttr(cityLabel)} citywide" disabled>
+                    </div>
+                `}
                 <div class="paris-field field paris-field-full full">
                     <label class="paris-field-label-row">Nearby amenities (comma-separated)</label>
                     <input class="paris-input" id="f-nearby" value="${escapeAttr(formatNearbyAmenities(nearby))}" placeholder="park, pharmacy, metro">
@@ -691,6 +785,7 @@ const App = (() => {
         const nearby = parseNearbyAmenities(get('f-nearby'));
 
         const patch = {
+            city: currentCity(),
             work_location_label: get('f-work_location_label') || null,
             work_location_address: get('f-work_location_address') || null,
             max_rent_including_charges_eur: positiveNum(get('f-max_rent')),
@@ -724,6 +819,8 @@ const App = (() => {
     function renderDashboard() {
         const sp = state.searchProfile || {};
         const rp = state.renterProfile || {};
+        const city = currentCity();
+        const cityLabel = currentCityLabel();
         const activeScreen = ['feed', 'search', 'assistant', 'saved', 'drafts'].includes(state.dashboardScreen)
             ? state.dashboardScreen
             : 'feed';
@@ -738,13 +835,13 @@ const App = (() => {
             ['Rent', sp.max_rent_including_charges_eur ? `€${sp.max_rent_including_charges_eur}` : '—'],
             ['Commute', sp.commute_max_minutes ? `≤ ${sp.commute_max_minutes} min` : '—'],
             ['Rooms', `${sp.min_bedrooms ?? '—'} bed / ${sp.min_rooms ?? '—'} rooms`],
-            ['Area', (sp.preferred_arrondissements || []).length ? (sp.preferred_arrondissements || []).join(', ') : 'any'],
+            ['Area', city === 'paris' && (sp.preferred_arrondissements || []).length ? (sp.preferred_arrondissements || []).join(', ') : cityLabel],
         ];
 
         return `
         <div class="workspace-shell">
             <aside class="workspace-sidebar">
-                <div class="workspace-brand"><div class="brand-dot"></div> Paris Rental Agent</div>
+                <div class="workspace-brand"><div class="brand-dot"></div> ${escapeHtml(cityLabel)} Rental Agent</div>
                 <nav class="screen-nav-list" aria-label="Dashboard screens">
                     ${navItems.map(([id, label, count]) => `
                         <button class="screen-nav ${activeScreen === id ? 'active' : ''}" data-screen="${id}">
@@ -765,12 +862,13 @@ const App = (() => {
                         <h1>${screenTitle(activeScreen)}</h1>
                         <p>${screenSubtitle(activeScreen, rp)}</p>
                     </div>
-                    ${activeScreen === 'feed' || activeScreen === 'search' ? `
-                        <div class="topbar-actions">
+                    <div class="topbar-actions">
+                        ${renderCitySelect()}
+                        ${activeScreen === 'feed' || activeScreen === 'search' ? `
                             <button id="btn-fresh-search" class="btn" ${state.searching ? 'disabled' : ''}>${state.searching ? 'Searching...' : 'Run search'}</button>
                             <button id="btn-edit-profile" class="btn ghost" ${state.searching ? 'disabled' : ''}>Update</button>
-                        </div>
-                    ` : ''}
+                        ` : ''}
+                    </div>
                 </header>
                 <section class="workspace-content">
                     ${renderDashboardScreen(activeScreen, profileBits)}
@@ -836,6 +934,7 @@ const App = (() => {
 
     function renderSearchScreen(profileBits) {
         const sp = state.searchProfile || {};
+        const city = currentCity();
         return `
             <div class="search-screen-grid">
                 <section class="profile-panel">
@@ -849,7 +948,7 @@ const App = (() => {
                         <div><dt>Furnished</dt><dd>${escapeHtml(sp.furnished_preference || 'Any')}</dd></div>
                         <div><dt>Commute modes</dt><dd>${(sp.commute_modes || []).join(' / ') || '—'}</dd></div>
                         <div><dt>Min surface</dt><dd>${sp.min_surface_m2 ?? '—'} m²</dd></div>
-                        <div><dt>Excluded areas</dt><dd>${(sp.excluded_arrondissements || []).join(', ') || 'none'}</dd></div>
+                        <div><dt>Excluded areas</dt><dd>${city === 'paris' ? ((sp.excluded_arrondissements || []).join(', ') || 'none') : 'citywide'}</dd></div>
                     </dl>
                 </section>
                 <section class="profile-panel muted-panel">
@@ -918,6 +1017,7 @@ const App = (() => {
     function renderListingCard(m) {
         const l = m.listing;
         if (!l) return '';
+        const cityLabel = currentCityLabel();
         const total = l.total_monthly_eur || l.rent_eur;
         const c = m.commute || {};
         const listingUrl = safeExternalUrl(l.canonical_url);
@@ -936,7 +1036,7 @@ const App = (() => {
                     ${l.surface_m2 ? `<span>${l.surface_m2} m²</span>` : ''}
                     ${l.bedrooms != null ? `<span>${l.bedrooms} bed</span>` : (l.rooms ? `<span>${l.rooms} rooms</span>` : '')}
                     ${l.furnished === true ? '<span>furnished</span>' : (l.furnished === false ? '<span>unfurnished</span>' : '')}
-                    ${l.arrondissement ? `<span>Paris ${String(l.arrondissement).padStart(2,'0')}</span>` : ''}
+                    ${l.arrondissement ? `<span>Paris ${String(l.arrondissement).padStart(2,'0')}</span>` : `<span>${escapeHtml(cityLabel)}</span>`}
                     ${l.is_mock ? '<span class="tag-mock">mock</span>' : ''}
                 </div>
                 ${commuteBits.length ? `<div class="meta" style="color:var(--accent);">${commuteBits.map(s => `<span>${escapeHtml(s)}</span>`).join('')}</div>` : ''}
@@ -1155,7 +1255,7 @@ const App = (() => {
             const wsUrl = `${protocol}//${location.host}${BASE}/ws/voice${tokenParam}`;
             voiceWS = new WebSocket(wsUrl);
             voiceWS.onopen = () => {
-                voiceWS.send(JSON.stringify({ type: 'start', speed: readVoiceSpeed(), language: 'en' }));
+                voiceWS.send(JSON.stringify({ type: 'start', speed: readVoiceSpeed(), language: 'en', city: currentCity() }));
                 isRecording = true;
                 setVoiceStatus('Listening — speak naturally', 'on');
             };

@@ -18,6 +18,7 @@ from ..dependencies import get_current_user
 from ..models import ConversationMessage, ConversationSession, User
 from ..schemas import ChatIn, ChatOut
 from ..services import assistant_tools
+from ..services.cities import city_label
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 
@@ -25,10 +26,11 @@ router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 def _greet_or_status(db: Session, user_id: str) -> str:
     ctx = assistant_tools.get_user_context(db, user_id)
     sp = ctx.get("search_profile") or {}
+    city = city_label(sp.get("city"))
     if ctx.get("confirmation_status") == "confirmed":
         last_run_at = ctx.get("last_search_at")
         last_run_count = ctx.get("last_search_result_count") or 0
-        bits = ["Your Paris search profile is confirmed."]
+        bits = [f"Your {city} search profile is confirmed."]
         if last_run_at:
             bits.append(f"Latest search returned {last_run_count} matches.")
         else:

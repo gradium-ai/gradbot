@@ -18,6 +18,8 @@ from typing import Any, Optional
 import gradbot
 import httpx
 
+from .cities import city_label, normalize_city
+
 logger = logging.getLogger(__name__)
 
 REQUIRED_FIELDS = [
@@ -284,6 +286,15 @@ def _extract_furnished(text: str) -> tuple[Optional[str], float]:
     return None, 0.0
 
 
+def _extract_city(text: str) -> tuple[Optional[str], float]:
+    norm = _normalize(text)
+    if re.search(r"\bberlin\b", norm):
+        return "berlin", 0.95
+    if re.search(r"\bparis\b", norm):
+        return "paris", 0.95
+    return None, 0.0
+
+
 def _extract_commute(text: str) -> dict[str, Any]:
     norm = _normalize(text)
     out: dict[str, Any] = {}
@@ -471,7 +482,8 @@ def _build_summary(patch: dict[str, Any]) -> str:
 
     head = " ".join(parts) or "apartment"
 
-    bits: list[str] = [f"You want a {head} in Paris"]
+    city = normalize_city(patch.get("city"))
+    bits: list[str] = [f"You want a {head} in {city_label(city)}"]
     if patch.get("max_rent_including_charges_eur"):
         bits.append(f"max €{patch['max_rent_including_charges_eur']} including charges")
 
@@ -531,6 +543,7 @@ def _compute_missing(patch: dict[str, Any], existing: Optional[dict[str, Any]] =
 
 
 _ALLOWED_PROFILE_FIELDS = {
+    "city",
     "work_location_label",
     "work_location_address",
     "max_rent_including_charges_eur",
@@ -548,6 +561,7 @@ _ALLOWED_PROFILE_FIELDS = {
 }
 
 _SEMANTIC_AMBIGUOUS_FIELD_MAP = {
+    "city": "city",
     "work_location": "work_location_address",
     "work_location_label": "work_location_label",
     "work_location_address": "work_location_address",
@@ -738,6 +752,13 @@ def _semantic_requirements_to_patch(data: dict[str, Any]) -> tuple[dict[str, Any
     patch: dict[str, Any] = {}
     confidence: dict[str, float] = {}
     ambiguous: list[str] = []
+
+    raw_city = requirements.get("city") or data.get("city")
+    if isinstance(raw_city, dict):
+        raw_city = raw_city.get("value") or raw_city.get("name")
+    if raw_city:
+        patch["city"] = normalize_city(raw_city)
+        confidence["city"] = _semantic_field_confidence(raw_city, 0.9)
 
     work = requirements.get("work_location")
     if isinstance(work, dict):
@@ -933,8 +954,9 @@ async def extract_requirements_with_llm(
     if not model or not base_url:
         return fallback
 
+    active_city = city_label((existing_profile or {}).get("city"))
     system = (
-        "Extract Paris rental-search requirements from noisy STT text. Return only JSON. "
+        f"Extract {active_city} rental-search requirements from noisy STT text. Return only JSON. "
         "Do not output database fields, profile_patch, SQL, commands, deletes, or null-clears. "
         "Do not invent missing values. Normalize common STT variants, for example "
         "'Forty Rue de Louvre' -> '40 Rue de Louvre', '$2,000' -> 2000, and "
@@ -948,6 +970,10 @@ async def extract_requirements_with_llm(
         "existing_profile": existing_profile or {},
         "output_schema": {
             "requirements": {
+                "city": {
+                    "value": "paris|berlin",
+                    "confidence": 0.0,
+                },
                 "work_location": {
                     "kind": "address|label",
                     "value": "string",
@@ -1044,6 +1070,13 @@ def extract_requirements(
     confidence: dict[str, float] = {}
     sources: dict[str, str] = {}
     ambiguous: list[str] = []
+
+    # City
+    city, conf = _extract_city(transcript)
+    if city is not None:
+        patch["city"] = city
+        confidence["city"] = conf
+        sources["city"] = "voice"
 
     # Budget
     budget, conf = _extract_budget(transcript)

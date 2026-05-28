@@ -7,6 +7,7 @@ from typing import Iterator
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import get_settings
@@ -82,3 +83,19 @@ def init_db() -> None:
     from . import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _ensure_compat_schema()
+
+
+def _ensure_compat_schema() -> None:
+    """Apply small additive schema fixes for local SQLite demo databases."""
+    if not _db_url.startswith("sqlite"):
+        return
+    inspector = inspect(engine)
+    if "search_profiles" not in inspector.get_table_names():
+        return
+    columns = {col["name"] for col in inspector.get_columns("search_profiles")}
+    if "city" not in columns:
+        with engine.begin() as conn:
+            conn.execute(
+                text("ALTER TABLE search_profiles ADD COLUMN city VARCHAR(32) NOT NULL DEFAULT 'paris'")
+            )
