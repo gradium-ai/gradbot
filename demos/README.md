@@ -12,6 +12,7 @@ demos/
   fantasy_shop/          # Voice haggling game with tools and persona swaps
   business_bank/         # Voice banking workflow with multi-step tools
   hotel/                 # Hotel booking agent with deferred search tools
+  paris_rental_agent/    # Paris rental search agent with Tavily live web search
   restaurant_ordering/   # Multilingual restaurant ordering agent
   npc_3d_game/           # Three.js game with multiple voice sessions and direct TTS
 ```

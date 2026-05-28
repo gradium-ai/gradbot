@@ -99,6 +99,7 @@ Every demo is a standalone FastAPI + WebSocket app. Pick one, `uv sync`, and run
 | **[simple_chat](demos/simple_chat/)** | Basic voice conversation | Minimal starting point, dynamic voice/prompt switching |
 | **[fantasy_shop](demos/fantasy_shop/)** | Haggling game: buy a sword from NPCs | Tool calling, multi-character, game state, deferred tools |
 | **[hotel](demos/hotel/)** | Hotel booking agent for Paris, Bali, Dubai | Deferred tool results with natural chit-chat using Web Search API |
+| **[paris_rental_agent](demos/paris_rental_agent/)** ([hosted demo](https://gradium.ai/gradbot/paris_rental_agent/)) | Paris apartment search assistant that builds a renter profile and finds listings | Voice/text profile intake, Tavily web search, scoring, saved listings |
 | **[business_bank](demos/business_bank/)** | Banking agent with PIN auth and loan applications | Security flows, multi-step business logic |
 | **[restaurant_ordering](demos/restaurant_ordering/)** | Multilingual voice ordering agent for a fast-food restaurant | Menu browsing, order customization, multilingual support |
 | **[npc_3d_game](demos/npc_3d_game/)** | 3D office exploration: solve voice riddles, handle NPC check-ins | Three.js, multi-session (clue + check-in), response classification |
@@ -177,7 +178,7 @@ async def ws_chat(websocket: fastapi.WebSocket):
 | **TTS** | [Gradium](https://gradium.ai) streaming TTS (full voice library, 5 languages) |
 | **LLM** | Any OpenAI-compatible API: OpenAI, Groq, OpenRouter, Ollama, LM Studio, etc. |
 | **Telephony** | Twilio Media Streams |
-| **Tools** | MCP (Model Context Protocol), custom JSON Schema tools |
+| **Tools** | MCP (Model Context Protocol), Tavily web search, custom JSON Schema tools |
 | **Transport** | WebSocket (OpenAI Realtime API compatible, Twilio protocol) |
 
 ## Remote Mode
