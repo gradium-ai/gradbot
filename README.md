@@ -305,6 +305,8 @@ See [gradbot_py/README.md](gradbot_py/README.md) for the full Python API documen
 Projects built by the community using Gradbot.
 
 <!-- Add your project below this line, keeping the list alphabetical by project name. -->
+[Dual-LLM Proxy (MiniMax)](https://github.com/davidtaoweiji/gradbot): A Gradbot fork that runs two LLMs in parallel behind an OpenAI-compatible proxy — a fast "stall" model (MiniMax M2-her) streams an immediate acknowledgement while a slower "brain" model (MiniMax M2) produces the real reply with tool calls. Hides brain-model latency by filling the gap with natural-sounding stall speech.
+
 [EchoClaim](https://github.com/IamHetPatel/EchoClaim): We built a call agent that knows the caller, and answers insurance related calls in human-like tone.
 <!-- Example: - [project-name](https://github.com/your-username/your-repo): A one-line description of what it does. -->
 
