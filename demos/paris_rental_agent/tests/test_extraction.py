@@ -44,6 +44,39 @@ def test_extracts_work_location_label():
     assert label and "République" in label
 
 
+def test_extracts_workplace_which_is_street_address():
+    result = extract_requirements(
+        "I'd like it close to my workplace, which is Forty Rue de Louvre. "
+        "Maximum rent is 2000 euros and commute time is 50 minutes."
+    )
+
+    assert result.profile_patch.get("work_location_address") == "40 Rue de Louvre"
+
+
+def test_extracts_workplace_located_at_street_address():
+    result = extract_requirements("My workplace is located at Forty Rue de Louvre.")
+
+    assert result.profile_patch.get("work_location_address") == "40 Rue de Louvre"
+
+
+def test_extracts_short_workplace_address_correction_with_existing_workplace():
+    result = extract_requirements(
+        "No, you still haven't got the name right. It's 40 Roudeloup.",
+        existing_profile={"work_location_address": "40 Rue de Louvre"},
+    )
+
+    assert result.profile_patch.get("work_location_address") == "40 Roudeloup"
+
+
+def test_extracts_short_workplace_address_correction_from_number_word():
+    result = extract_requirements(
+        "Actually the correct address is forty Roudeloup.",
+        existing_profile={"work_location_label": "Rue de Louvre"},
+    )
+
+    assert result.profile_patch.get("work_location_address") == "40 Roudeloup"
+
+
 def test_extracts_room_features_and_amenities():
     result = extract_requirements(SAMPLE)
     p = result.profile_patch

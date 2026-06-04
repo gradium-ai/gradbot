@@ -18,6 +18,7 @@ from ..dependencies import get_current_user
 from ..models import ConversationMessage, ConversationSession, User
 from ..schemas import ChatIn, ChatOut
 from ..services import assistant_tools
+from ..services.cities import city_label
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 
@@ -25,10 +26,11 @@ router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 def _greet_or_status(db: Session, user_id: str) -> str:
     ctx = assistant_tools.get_user_context(db, user_id)
     sp = ctx.get("search_profile") or {}
+    city = city_label(sp.get("city"))
     if ctx.get("confirmation_status") == "confirmed":
         last_run_at = ctx.get("last_search_at")
         last_run_count = ctx.get("last_search_result_count") or 0
-        bits = ["Your Paris search profile is confirmed."]
+        bits = [f"Your {city} search profile is confirmed."]
         if last_run_at:
             bits.append(f"Latest search returned {last_run_count} matches.")
         else:
@@ -50,13 +52,39 @@ def _intent(message: str) -> str:
     m = message.strip().lower()
     if not m:
         return "noop"
+    edit_words = ("update", "edit", "change", "correct", "revise", "review", "adjust", "modify", "fix")
+    profile_words = (
+        "profile",
+        "criteria",
+        "preference",
+        "preferences",
+        "requirement",
+        "requirements",
+        "budget",
+        "rent",
+        "commute",
+        "workplace",
+        "office",
+        "bedroom",
+        "surface",
+        "furnished",
+    )
+    if any(k in m for k in edit_words) and any(k in m for k in profile_words):
+        return "edit_profile"
+    if any(k in m for k in ("open", "show", "go back", "take me")) and "profile" in m:
+        return "edit_profile"
     if any(k in m for k in ("hi", "hello", "hey", "status", "what's up")):
         return "greet"
     if "confirm" in m and "profile" in m:
         return "confirm"
     if "run" in m and ("search" in m or "find" in m):
         return "search"
-    if "match" in m or ("show" in m and "listing" in m) or "top" in m:
+    dwelling_words = ("apartment", "apartments", "flat", "flats", "home", "homes", "listing", "listings")
+    if (
+        "match" in m
+        or "top" in m
+        or (any(k in m for k in ("show", "list", "more")) and any(k in m for k in dwelling_words))
+    ):
         return "matches"
     if "save" in m and "listing" in m:
         return "save"
@@ -109,6 +137,9 @@ async def chat(
 
     if intent in ("greet", "noop", "fallback"):
         reply = _greet_or_status(db, current_user.id)
+    elif intent == "edit_profile":
+        tool_calls.append({"name": "open_profile_editor", "result": {"ok": True}})
+        reply = "Sure — I opened your search profile so you can update and reconfirm it."
     elif intent == "confirm":
         res = assistant_tools.confirm_profile(db, current_user.id)
         tool_calls.append({"name": "confirm_profile", "result": res})

@@ -1,1 +1,1 @@
-"""Paris rental apartment hunting app."""
+"""City rental apartment hunting app."""

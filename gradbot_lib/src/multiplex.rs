@@ -6,6 +6,8 @@ use tokio::sync::Mutex;
 
 pub const DEFAULT_FLUSH_FOR_S: f64 = 0.5;
 const INPUT_SAMPLE_RATE: usize = 24000;
+const ACOUSTIC_BARGE_IN_INACTIVITY_THRESHOLD: f64 = 0.15;
+const ACOUSTIC_BARGE_IN_MIN_SUSTAINED_S: f64 = 0.6;
 
 /// Internal commands sent from spawned tasks back to the main session loop.
 enum InternalCmd {
@@ -163,6 +165,9 @@ struct Session {
     /// Holds the JoinHandle of a user-interrupted LLM/TTS task while it winds down.
     /// Dropped when the next task starts.
     interrupted_task_jh: Option<crate::utils::JoinHandleAbortOnDrop>,
+    /// Start time for sustained acoustic activity observed while the assistant is speaking.
+    /// This is only a hint; semantic barge-in happens on recognized text in `on_text`.
+    possible_barge_in_since_s: Option<f64>,
 }
 
 impl Session {
@@ -230,6 +235,7 @@ impl Session {
                 .unwrap_or(false),
             user_interrupted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             interrupted_task_jh: None,
+            possible_barge_in_since_s: None,
         };
         Ok((slf, stt_sender))
     }
@@ -246,6 +252,7 @@ impl Session {
         self.stt_stream_start_audio_s = audio_time;
         self.min_inactivity_prob = 1.0;
         self.last_inactivity_prob = 1.0;
+        self.possible_barge_in_since_s = None;
 
         let config_guard = self.session_config.lock().await;
         let stt_lang = config_guard
@@ -865,23 +872,28 @@ impl Session {
         _end_of_turn: bool,
         inactivity_prob: f64,
     ) -> Result<()> {
-        // VAD-based interruption: if we're generating/speaking and the VAD
-        // detects likely voice activity (inactivity_prob < 0.4), signal
-        // interruption immediately instead of waiting for STT text.
-        if inactivity_prob < 0.4 {
+        // Acoustic VAD is intentionally conservative during assistant speech.
+        // It can be triggered by TTS leaking into the mic, so it only records a
+        // possible barge-in. The actual interruption happens semantically in
+        // `on_text` once STT recognizes user speech.
+        {
             let state = self.state.lock().await;
-            if let State::Processing { since_s, .. } = &*state {
-                let elapsed = stt_time - since_s;
-                if elapsed > 2.0 {
-                    drop(state);
-                    tracing::info!(
-                        inactivity_prob,
-                        elapsed,
-                        "VAD-based interruption: voice activity detected while processing"
-                    );
-                    self.user_interrupted
-                        .store(true, std::sync::atomic::Ordering::Release);
+            if matches!(&*state, State::Processing { .. }) {
+                if inactivity_prob < ACOUSTIC_BARGE_IN_INACTIVITY_THRESHOLD {
+                    let since = self.possible_barge_in_since_s.get_or_insert(stt_time);
+                    let sustained_s = stt_time - *since;
+                    if sustained_s >= ACOUSTIC_BARGE_IN_MIN_SUSTAINED_S {
+                        tracing::debug!(
+                            inactivity_prob,
+                            sustained_s,
+                            "possible acoustic barge-in detected; waiting for semantic STT text"
+                        );
+                    }
+                } else {
+                    self.possible_barge_in_since_s = None;
                 }
+            } else {
+                self.possible_barge_in_since_s = None;
             }
         }
 
@@ -999,12 +1011,18 @@ impl Session {
         self.silence_prompts = 0;
         self.min_inactivity_prob = 1.0;
         self.last_inactivity_prob = 1.0;
+        self.possible_barge_in_since_s = None;
         let mut state = self.state.lock().await;
         match &mut *state {
             State::Flushing { texts, .. } | State::Listening { texts, .. } => {
                 texts.push(text);
             }
             State::Processing { turn_idx, .. } => {
+                tracing::info!(
+                    ?text,
+                    stt_time,
+                    "semantic barge-in: recognized user text while assistant was speaking"
+                );
                 let new_turn_idx = *turn_idx + 1;
 
                 // Signal the LLM/TTS task to stop after its next audio packet.

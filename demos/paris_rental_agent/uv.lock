@@ -287,7 +287,7 @@ wheels = [
 [[package]]
 name = "gradbot"
 version = "0.1.8"
-source = { registry = "https://pypi.org/simple" }
+source = { directory = "../../gradbot_py" }
 dependencies = [
     { name = "fastapi" },
     { name = "gradium" },
@@ -295,23 +295,18 @@ dependencies = [
     { name = "pyyaml" },
     { name = "uvicorn", extra = ["standard"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ad/7a/14cf697a06bbb5792030b99896e2e2f4b77a4d922e8eeefb3275c3d08ada/gradbot-0.1.8.tar.gz", hash = "sha256:3d625b16a13e0ce2adac01da4824de7c141259d02fb65618362794e3f450fb50", size = 451626, upload-time = "2026-04-27T16:03:23.819Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/03/1aaa604a327ab2d306dc7aaa9893369a3275284f1f32edcfe1ddcf9cfec9/gradbot-0.1.8-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:623d7c27653aa71c318048dc3fd37dfc8e7bfb6228987eac0bce787ab3aa2de3", size = 4768152, upload-time = "2026-04-27T16:03:10.333Z" },
-    { url = "https://files.pythonhosted.org/packages/a4/96/58e7afa9dfac9b82f5f9226e7ed658c50fd2100a4c6118e0162f91eec20f/gradbot-0.1.8-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1450813fcc794842b670a4aea80db20ab907fa7d6a5184d2188088da0ef63e7c", size = 5454907, upload-time = "2026-04-27T16:03:05.423Z" },
-    { url = "https://files.pythonhosted.org/packages/21/88/58633c8a012e38f13986317cf26a3349ae12c3d845b92200a634190e5cfd/gradbot-0.1.8-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:417674adcab7ab38a0b1fd75cf519285d1f06d95e6d3342eb7409189ed569e66", size = 5683255, upload-time = "2026-04-27T16:03:15.517Z" },
-    { url = "https://files.pythonhosted.org/packages/8e/d2/37b0e6acb2cc1aab69b16df2cd3e4b1bf866ec083ccf01f37d50686a8326/gradbot-0.1.8-cp312-cp312-win_amd64.whl", hash = "sha256:5f6f5d5172622702204a915f200ab636d152d3e853c3e0747ca4456f113ba798", size = 4584313, upload-time = "2026-04-27T16:03:25.097Z" },
-    { url = "https://files.pythonhosted.org/packages/d9/af/88c427df792b2292eb43c9424d967cd77e8c0b6b950d3fb86d3a5ea34ca3/gradbot-0.1.8-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:46981bc069191bc8a23365e7c3c2fb4118bdb0cf8a086e13c47bdbcc031fa6fc", size = 4768252, upload-time = "2026-04-27T16:03:11.837Z" },
-    { url = "https://files.pythonhosted.org/packages/37/07/4e00a4a042dd94a0e282afc2ca4dc366362dc6816a13f9ff7abbd632f816/gradbot-0.1.8-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0496aadaf189af5aed5906219cb653e8bafeb22b55d3a76693b6a437a86b4892", size = 5454702, upload-time = "2026-04-27T16:03:07.159Z" },
-    { url = "https://files.pythonhosted.org/packages/1f/73/8834a76f1e6ff6c0a3aa1e97bb82aa5d2581855151f4fdc2c86d636a4a1f/gradbot-0.1.8-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:0131ab6ef88ef16a19fd80e8b0e889d3cf4b315a198ea115fd94dca903e5831f", size = 5682414, upload-time = "2026-04-27T16:03:17.357Z" },
-    { url = "https://files.pythonhosted.org/packages/96/45/f67c0b9fd658bfbf9509475fae1a3bf2a9cea282427a3f6cc45bbfcd33b1/gradbot-0.1.8-cp313-cp313-win_amd64.whl", hash = "sha256:281c709aa84ce1076524e45f7c410a2cf0efd494034f25de48efbdcec6239070", size = 4583120, upload-time = "2026-04-27T16:03:26.706Z" },
-    { url = "https://files.pythonhosted.org/packages/8e/8b/caea278891be54c658817331c667caf6bd71ccf23e33a97071bd7a15c828/gradbot-0.1.8-cp313-cp313t-musllinux_1_2_x86_64.whl", hash = "sha256:768403d4cb54213c1187436bb04b511892a3c14bd1431f2c3360cb49239471b1", size = 5677611, upload-time = "2026-04-27T16:03:18.854Z" },
-    { url = "https://files.pythonhosted.org/packages/4f/7e/99884abd384e15d53f678dd6d2e77a669cb08ece1adb042f79509bc6e714/gradbot-0.1.8-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:567186a1dfce6b2ce6fe1ec396cdd49d0d43212eba9a5465275c6a82c8dfe0b9", size = 4770864, upload-time = "2026-04-27T16:03:13.717Z" },
-    { url = "https://files.pythonhosted.org/packages/8a/b4/0d5627ca49cf5e05d76d4a193775ef349b1fe189825084b16dc9b488296c/gradbot-0.1.8-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e724af6ab8f9b86bd9caafb6d543daa1c17b48f88d1b507158784607849083c2", size = 5452854, upload-time = "2026-04-27T16:03:08.817Z" },
-    { url = "https://files.pythonhosted.org/packages/3b/77/d41a6d63872b82510b42e62d01844eea86161e2cd11d2a3197715e6647d9/gradbot-0.1.8-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:42bd55c19e2756766a56b9505299df9e8723628d8edd3f61b3d7c41ac87aeebd", size = 5679601, upload-time = "2026-04-27T16:03:20.39Z" },
-    { url = "https://files.pythonhosted.org/packages/a0/4e/77b7572a365a911de7283db17e93a43fa0d55728990da2722098c7839543/gradbot-0.1.8-cp314-cp314-win_amd64.whl", hash = "sha256:805c33cb9f3e2b85e632c9d4a3caf29cb3285198eced70ef57422a04808887e2", size = 4583823, upload-time = "2026-04-27T16:03:28.64Z" },
-    { url = "https://files.pythonhosted.org/packages/e0/75/6a006164c042f1708a870c364764c492e7a49be022898f21e68f3754f64a/gradbot-0.1.8-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:3ce066a021eb5a57545d8ddc94feb1ef9e7182a31d58f64e769b2eaa052df4fa", size = 5677727, upload-time = "2026-04-27T16:03:22.399Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi" },
+    { name = "gradium" },
+    { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'test'" },
+    { name = "pytest-asyncio", marker = "extra == 'test'" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "uvicorn", extras = ["standard"] },
 ]
+provides-extras = ["test"]
 
 [[package]]
 name = "gradium"
@@ -646,7 +641,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "gradbot", specifier = ">=0.1.8" },
+    { name = "gradbot", directory = "../../gradbot_py" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2.0" },
     { name = "pydantic", specifier = ">=2.7" },

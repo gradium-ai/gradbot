@@ -222,19 +222,24 @@ class SyncedAudioPlayer {
         const arrayBuffer = await data.arrayBuffer();
         if (this.audioProcessor) {
           const bytes = new Uint8Array(arrayBuffer);
-          if (this.pcmOutput) {
+          if (this.pendingAudioInterrupted) {
+            this.audioProcessor.resetPlayback();
+            this.pendingTexts = this.pendingTexts.filter(
+              (item) => item.turnIdx !== this.pendingAudioTurnIdx
+            );
+          } else if (this.pcmOutput) {
             this.audioProcessor.playPcmData(
               bytes,
               this.pendingAudioStopS,
               this.pendingAudioTurnIdx,
-              this.pendingAudioInterrupted
+              false
             );
           } else {
             this.audioProcessor.playOpusData(
               bytes,
               this.pendingAudioStopS,
               this.pendingAudioTurnIdx,
-              this.pendingAudioInterrupted
+              false
             );
           }
         }

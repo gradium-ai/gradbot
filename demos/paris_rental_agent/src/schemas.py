@@ -42,6 +42,7 @@ class RenterProfileOut(RenterProfileIn):
 
 class SearchProfileBase(BaseModel):
     name: Optional[str] = Field(default=None, max_length=255)
+    city: Optional[Literal["paris", "berlin"]] = None
     is_active: Optional[bool] = None
     max_rent_including_charges_eur: Optional[int] = Field(default=None, ge=1, le=50000)
     min_bedrooms: Optional[int] = Field(default=None, ge=0, le=10)

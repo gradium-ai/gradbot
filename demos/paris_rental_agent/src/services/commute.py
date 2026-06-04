@@ -31,21 +31,20 @@ import httpx
 import yaml
 
 from ..config import get_settings
+from .cities import city_bias, normalize_city
 
 logger = logging.getLogger(__name__)
 
 ROUTES_API_URL = (
     "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix"
 )
-PARIS_BIAS = "Paris, France"
-
 _TRAVEL_MODE = {
     "transit": "TRANSIT",
     "bicycling": "BICYCLE",
     "walking": "WALK",
 }
 
-_CACHE: dict[tuple[str, str, str], dict[str, Any]] = {}
+_CACHE: dict[tuple[str, str, str, str], dict[str, Any]] = {}
 
 
 # ─────────────────────── key resolution ───────────────────────
@@ -111,6 +110,8 @@ async def _call_routes_matrix(
     origin: str,
     destinations: list[str],
     mode: str,
+    *,
+    city: str,
 ) -> list[dict[str, Any]]:
     """One Routes API computeRouteMatrix call. Returns one entry per destination.
 
@@ -126,9 +127,9 @@ async def _call_routes_matrix(
         ]
 
     body: dict[str, Any] = {
-        "origins": [{"waypoint": {"address": _bias_address(origin)}}],
+        "origins": [{"waypoint": {"address": _bias_address(origin, city=city)}}],
         "destinations": [
-            {"waypoint": {"address": _bias_address(d)}} for d in destinations
+            {"waypoint": {"address": _bias_address(d, city=city)}} for d in destinations
         ],
         "travelMode": travel_mode,
     }
@@ -214,18 +215,21 @@ async def _call_routes_matrix(
     return out
 
 
-def _bias_address(addr: str) -> str:
+def _bias_address(addr: str, *, city: str = "paris") -> str:
+    city = normalize_city(city)
+    bias = city_bias(city)
     addr = (addr or "").strip()
     if not addr:
-        return PARIS_BIAS
-    if "paris" in addr.lower() or "france" in addr.lower():
+        return bias
+    lower = addr.lower()
+    if city in lower or "france" in lower or "germany" in lower or "deutschland" in lower:
         return addr
-    return f"{addr}, {PARIS_BIAS}"
+    return f"{addr}, {bias}"
 
 
 # ─────────────────────── public API ───────────────────────
 async def compute_commute_batch(
-    origin: str, destinations: list[str]
+    origin: str, destinations: list[str], *, city: str = "paris"
 ) -> dict[str, dict[str, Any]]:
     """Compute (metro, bike, walk) commute minutes for many destinations at once.
 
@@ -233,6 +237,7 @@ async def compute_commute_batch(
     input destination even if the call fails — that entry is just
     ``status="unknown"``.
     """
+    city = normalize_city(city)
     origin = (origin or "").strip()
     if not origin or not destinations:
         return {d: _unknown_result("missing_origin_or_destinations") for d in destinations}
@@ -248,7 +253,7 @@ async def compute_commute_batch(
     to_fetch: dict[str, list[str]] = {"transit": [], "bicycling": [], "walking": []}
     for d in unique_destinations:
         for mode in to_fetch:
-            if (origin, d, mode) not in _CACHE:
+            if (city, origin, d, mode) not in _CACHE:
                 to_fetch[mode].append(d)
 
     if any(to_fetch.values()):
@@ -260,11 +265,9 @@ async def compute_commute_batch(
                 # We use 1 origin, so up to 25 destinations per call.
                 for chunk_start in range(0, len(dests), 25):
                     chunk = dests[chunk_start : chunk_start + 25]
-                    results = await _call_routes_matrix(
-                        client, api_key, origin, chunk, mode
-                    )
+                    results = await _call_routes_matrix(client, api_key, origin, chunk, mode, city=city)
                     for d, r in zip(chunk, results):
-                        _CACHE[(origin, d, mode)] = r
+                        _CACHE[(city, origin, d, mode)] = r
 
     # Build per-destination output from the cache.
     out: dict[str, dict[str, Any]] = {}
@@ -273,9 +276,9 @@ async def compute_commute_batch(
         if not d_norm:
             out[d] = _unknown_result("empty_destination")
             continue
-        metro = _CACHE.get((origin, d_norm, "transit"), {}).get("duration_minutes")
-        bike = _CACHE.get((origin, d_norm, "bicycling"), {}).get("duration_minutes")
-        walk = _CACHE.get((origin, d_norm, "walking"), {}).get("duration_minutes")
+        metro = _CACHE.get((city, origin, d_norm, "transit"), {}).get("duration_minutes")
+        bike = _CACHE.get((city, origin, d_norm, "bicycling"), {}).get("duration_minutes")
+        walk = _CACHE.get((city, origin, d_norm, "walking"), {}).get("duration_minutes")
         any_known = any(v is not None for v in (metro, bike, walk))
         out[d] = {
             "metro_min": metro,

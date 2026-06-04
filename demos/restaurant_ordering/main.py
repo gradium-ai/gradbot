@@ -19,7 +19,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-cfg = gradbot.config.from_env()
+_SHARED_CONFIG_PATH = pathlib.Path(__file__).resolve().parents[1] / "config.yaml"
+cfg = gradbot.config.load(_SHARED_CONFIG_PATH)
 
 
 # Load CJK logit bias to suppress Chinese character generation (Qwen model artifact)
@@ -367,6 +368,8 @@ CRITICAL:
 - When the customer names one or more exact valid orderable items with all required choices, call add_to_order immediately in the same turn before speaking.
 - Never say "got it" or "noted" unless the item was actually added or modified via a tool call in that turn.
 - Never verbally confirm an item that is not yet in the order.
+- If the customer interrupts you or speaks while you are talking, answer only the latest request.
+- If prior assistant text is provided as context, never restart, quote, or continue it.
 
 If language is not English: think in meaning first, speak naturally. Keep food loanwords (nuggets, brownie, milkshake). Never say "côtés" — say "accompagnements". NEVER output Chinese/CJK characters or emojis — output ONLY Latin script and standard punctuation.
 
@@ -563,7 +566,7 @@ async def websocket_order(websocket: fastapi.WebSocket):
     state = OrderState()
     tools = build_tools()
 
-    def make_config() -> gradbot.SessionConfig:
+    def make_config(*, assistant_speaks_first: bool = False) -> gradbot.SessionConfig:
         """Build a SessionConfig from current state."""
         vid, l_enum, rw = LANG_CONFIG[state.lang]
         if state.voice_id_override:
@@ -575,8 +578,8 @@ async def websocket_order(websocket: fastapi.WebSocket):
         config_kwargs = {
             "padding_bonus": padding,
             "rewrite_rules": rw,
-            "assistant_speaks_first": True,
         } | cfg.session_kwargs
+        config_kwargs["assistant_speaks_first"] = assistant_speaks_first
         # The ordering flow should tolerate natural pauses without auto-nudging the user.
         config_kwargs["silence_timeout_s"] = 0.0
         # Merge CJK logit bias into llm_extra_config to suppress Chinese token generation
@@ -607,7 +610,7 @@ async def websocket_order(websocket: fastapi.WebSocket):
             state.voice_speed,
             state.voice_id_override,
         )
-        return make_config()
+        return make_config(assistant_speaks_first=True)
 
     async def handle_tool_call(handle, input_handle, websocket):
         tool_name = handle.name

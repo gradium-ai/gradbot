@@ -23,3 +23,6 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+
+[tool.uv.sources]
+gradbot = { path = "../../gradbot_py" }

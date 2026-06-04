@@ -18,6 +18,8 @@ from typing import Any, Optional
 import gradbot
 import httpx
 
+from .cities import city_label, normalize_city
+
 logger = logging.getLogger(__name__)
 
 REQUIRED_FIELDS = [
@@ -284,6 +286,15 @@ def _extract_furnished(text: str) -> tuple[Optional[str], float]:
     return None, 0.0
 
 
+def _extract_city(text: str) -> tuple[Optional[str], float]:
+    norm = _normalize(text)
+    if re.search(r"\bberlin\b", norm):
+        return "berlin", 0.95
+    if re.search(r"\bparis\b", norm):
+        return "paris", 0.95
+    return None, 0.0
+
+
 def _extract_commute(text: str) -> dict[str, Any]:
     norm = _normalize(text)
     out: dict[str, Any] = {}
@@ -328,7 +339,8 @@ def _extract_work_location(text: str) -> dict[str, Any]:
 
     patterns = [
         r"(?:my office is|i work)\s+(?:near|at|by|close to)\s+([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$|\s+(?:and|in)\b)",
-        r"(?:office|workplace|work)\s+(?:is\s+)?(?:near|at|by|close to)\s+([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$|\s+(?:and|in)\b)",
+        r"(?:office|workplace|work)\s+(?:is\s+)?(?:located\s+)?(?:near|at|by|close to)\s+([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$|\s+(?:and|in)\b)",
+        r"(?:my\s+)?(?:office|workplace|work)\s*,?\s+(?:which|that)\s+is\s+([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$|\s+(?:and|in)\b)",
         r"(?:near|close to)\s+(?:my\s+)?(?:office|workplace|work)\s+(?:near|at|by)\s+([A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$)",
         r"(?:near|close to)\s+([A-Za-zÀ-ÿ0-9' \-]+?),?\s+(?:which is|that is)\s+my\s+(?:work|workplace|office)(?:\s+location)?",
         r"(?:near|close to)\s+([0-9]+\s+(?:rue|avenue|boulevard|street|road|quai|place)[A-Za-zÀ-ÿ0-9' \-]+?)(?:[\.,;]|$)",
@@ -347,6 +359,51 @@ def _extract_work_location(text: str) -> dict[str, Any]:
                     out["confidence"] = 0.7
                 break
     return out
+
+
+def _extract_corrected_work_location(
+    text: str,
+    existing_profile: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    """Capture short address corrections when the profile already has a workplace."""
+    existing = existing_profile or {}
+    has_work_location = bool(
+        existing.get("work_location_address") or existing.get("work_location_label")
+    )
+    norm = _normalize(text)
+    if not has_work_location and not re.search(r"\b(workplace|office|work|address)\b", norm):
+        return {}
+    if not re.search(
+        r"\b(no|wrong|right|correct|correction|actually|address|name)\b|"
+        r"haven'?t got|didn'?t get|got .* wrong",
+        norm,
+    ):
+        return {}
+
+    number_words = "|".join(sorted(NUMBER_WORDS, key=len, reverse=True))
+    patterns = [
+        rf"(?:it'?s|it is|should be|address is|correct(?: address)? is)\s+"
+        rf"(?P<number>\d+|{number_words})\s+"
+        rf"(?P<name>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' \-]{{1,60}}?)(?:[\.,;]|$)",
+        rf"(?:at|to)\s+(?P<number>\d+|{number_words})\s+"
+        rf"(?P<name>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' \-]{{1,60}}?)(?:[\.,;]|$)",
+    ]
+    forbidden_names = {"minute", "minutes", "meter", "meters", "metre", "metres", "euro", "euros"}
+    for pattern in patterns:
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if not m:
+            continue
+        number = _number_token_to_int(m.group("number").lower())
+        if number is None:
+            continue
+        name = re.sub(r"\s+", " ", m.group("name")).strip(" .,")
+        if not name or name.lower() in forbidden_names:
+            continue
+        return {
+            "work_location_address": f"{number} {name}",
+            "confidence": 0.9,
+        }
+    return {}
 
 
 def _extract_room_features(text: str) -> dict[str, Any]:
@@ -425,7 +482,8 @@ def _build_summary(patch: dict[str, Any]) -> str:
 
     head = " ".join(parts) or "apartment"
 
-    bits: list[str] = [f"You want a {head} in Paris"]
+    city = normalize_city(patch.get("city"))
+    bits: list[str] = [f"You want a {head} in {city_label(city)}"]
     if patch.get("max_rent_including_charges_eur"):
         bits.append(f"max €{patch['max_rent_including_charges_eur']} including charges")
 
@@ -485,6 +543,7 @@ def _compute_missing(patch: dict[str, Any], existing: Optional[dict[str, Any]] =
 
 
 _ALLOWED_PROFILE_FIELDS = {
+    "city",
     "work_location_label",
     "work_location_address",
     "max_rent_including_charges_eur",
@@ -502,6 +561,7 @@ _ALLOWED_PROFILE_FIELDS = {
 }
 
 _SEMANTIC_AMBIGUOUS_FIELD_MAP = {
+    "city": "city",
     "work_location": "work_location_address",
     "work_location_label": "work_location_label",
     "work_location_address": "work_location_address",
@@ -692,6 +752,13 @@ def _semantic_requirements_to_patch(data: dict[str, Any]) -> tuple[dict[str, Any
     patch: dict[str, Any] = {}
     confidence: dict[str, float] = {}
     ambiguous: list[str] = []
+
+    raw_city = requirements.get("city") or data.get("city")
+    if isinstance(raw_city, dict):
+        raw_city = raw_city.get("value") or raw_city.get("name")
+    if raw_city:
+        patch["city"] = normalize_city(raw_city)
+        confidence["city"] = _semantic_field_confidence(raw_city, 0.9)
 
     work = requirements.get("work_location")
     if isinstance(work, dict):
@@ -887,8 +954,9 @@ async def extract_requirements_with_llm(
     if not model or not base_url:
         return fallback
 
+    active_city = city_label((existing_profile or {}).get("city"))
     system = (
-        "Extract Paris rental-search requirements from noisy STT text. Return only JSON. "
+        f"Extract {active_city} rental-search requirements from noisy STT text. Return only JSON. "
         "Do not output database fields, profile_patch, SQL, commands, deletes, or null-clears. "
         "Do not invent missing values. Normalize common STT variants, for example "
         "'Forty Rue de Louvre' -> '40 Rue de Louvre', '$2,000' -> 2000, and "
@@ -902,6 +970,10 @@ async def extract_requirements_with_llm(
         "existing_profile": existing_profile or {},
         "output_schema": {
             "requirements": {
+                "city": {
+                    "value": "paris|berlin",
+                    "confidence": 0.0,
+                },
                 "work_location": {
                     "kind": "address|label",
                     "value": "string",
@@ -999,6 +1071,13 @@ def extract_requirements(
     sources: dict[str, str] = {}
     ambiguous: list[str] = []
 
+    # City
+    city, conf = _extract_city(transcript)
+    if city is not None:
+        patch["city"] = city
+        confidence["city"] = conf
+        sources["city"] = "voice"
+
     # Budget
     budget, conf = _extract_budget(transcript)
     if budget is not None:
@@ -1047,6 +1126,8 @@ def extract_requirements(
 
     # Work location
     work = _extract_work_location(transcript)
+    if not work:
+        work = _extract_corrected_work_location(transcript, existing_profile)
     if "work_location_address" in work:
         patch["work_location_address"] = work["work_location_address"]
         confidence["work_location_address"] = work.get("confidence", 0.7)

@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ..models import Listing, ListingMatch, RenterProfile, SearchProfile, SearchRun
+from .cities import city_label, normalize_city
 from .commute import compute_commute_batch
 from .normalize import normalize_result
 from .requirement_extraction import compute_missing_fields
@@ -16,7 +17,7 @@ from .scoring import score_listing
 from .tavily_search import (
     TavilyNotConfiguredError,
     TavilySearchError,
-    search_paris_rentals,
+    search_city_rentals,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 def _profile_to_dict(p: SearchProfile, renter: RenterProfile | None = None) -> dict[str, Any]:
     return {
         "max_rent_including_charges_eur": p.max_rent_including_charges_eur,
+        "city": normalize_city(getattr(p, "city", None)),
+        "city_label": city_label(getattr(p, "city", None)),
         "min_bedrooms": p.min_bedrooms,
         "min_rooms": p.min_rooms,
         "min_surface_m2": p.min_surface_m2,
@@ -158,7 +161,7 @@ async def run_search_for_user(
 
     try:
         try:
-            raw_results = await search_paris_rentals(profile_dict)
+            raw_results = await search_city_rentals(profile_dict)
         except TavilyNotConfiguredError as exc:
             run.status = "failed"
             run.error_message = str(exc)
@@ -200,6 +203,8 @@ async def run_search_for_user(
         # Batch commute lookup before scoring. Falls back to status="unknown" when
         # no Google Maps key is set, when the workplace is empty, or when an
         # individual address can't be geocoded.
+        city = normalize_city(profile_dict.get("city"))
+        city_name = city_label(city)
         work_addr = (
             profile_dict.get("work_location_address")
             or profile_dict.get("work_location_label")
@@ -209,10 +214,10 @@ async def run_search_for_user(
         for n in unique[:max_results]:
             commute_inputs.append(
                 n.get("address_text")
-                or (f"Paris {n['arrondissement']:02d}" if n.get("arrondissement") else "")
+                or (f"{city_name} {n['arrondissement']:02d}" if n.get("arrondissement") else city_name)
             )
         commute_by_addr: dict[str, dict[str, Any]] = await compute_commute_batch(
-            work_addr, commute_inputs
+            work_addr, commute_inputs, city=city
         )
 
         match_records: list[dict[str, Any]] = []

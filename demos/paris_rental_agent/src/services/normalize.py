@@ -125,6 +125,15 @@ def parse_rooms(text: str) -> tuple[Optional[int], Optional[int]]:
         except ValueError:
             pass
 
+    m_de = re.search(r"(\d+)\s*[- ]?\s*zimmer", norm)
+    if m_de:
+        try:
+            rooms = int(m_de.group(1))
+            if bedrooms is None:
+                bedrooms = max(0, rooms - 1)
+        except ValueError:
+            pass
+
     m3 = re.search(r"(\d+)\s*chambres?", norm)
     if m3:
         try:
@@ -142,9 +151,9 @@ def parse_rooms(text: str) -> tuple[Optional[int], Optional[int]]:
 
 def parse_furnished(text: str) -> Optional[bool]:
     norm = _strip_accents(text.lower())
-    if re.search(r"\bnon[ -]?meuble\b|\bunfurnished\b|\bempty\b|\bvide\b", norm):
+    if re.search(r"\bnon[ -]?meuble\b|\bunfurnished\b|\bempty\b|\bvide\b|\bunmobliert\b", norm):
         return False
-    if re.search(r"\bmeuble\b|\bfurnished\b", norm):
+    if re.search(r"\bmeuble\b|\bfurnished\b|\bmobliert(?:e|er|es|en)?\b", norm):
         return True
     return None
 

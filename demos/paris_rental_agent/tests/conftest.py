@@ -62,8 +62,8 @@ def fake_tavily(monkeypatch):
     """Replace the Tavily HTTP call with a fixed set of normalized listings.
 
     Production now requires a real Tavily key. Tests run offline by default,
-    so we patch ``search_paris_rentals`` to return a deterministic set of raw
-    Paris rental results.
+    so we patch ``search_city_rentals`` to return a deterministic set of raw
+    rental results.
     """
     from src.services import search_pipeline
 
@@ -114,11 +114,11 @@ def fake_tavily(monkeypatch):
     async def _fake(profile):
         return fake_results
 
-    monkeypatch.setattr(search_pipeline, "search_paris_rentals", _fake)
+    monkeypatch.setattr(search_pipeline, "search_city_rentals", _fake)
 
     # Default commute mock: every destination returns "unknown".
     # Individual tests can override this when they exercise the commute path.
-    async def _fake_commute(origin, destinations):
+    async def _fake_commute(origin, destinations, **_kwargs):
         return {
             d: {
                 "metro_min": None,

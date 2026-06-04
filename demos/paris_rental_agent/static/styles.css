@@ -177,6 +177,10 @@ input:focus, textarea:focus, select:focus {
     position: relative;
     z-index: 1;
     padding: 22px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
 }
 .entry-main {
     position: relative;
@@ -553,6 +557,33 @@ input:focus, textarea:focus, select:focus {
     display: flex;
     align-items: center;
     gap: 14px;
+}
+
+.city-select-wrap {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px 0 14px;
+    border: 1px solid var(--pr-border, var(--border));
+    border-radius: 999px;
+    background: rgba(255, 253, 249, 0.9);
+    color: var(--pr-text, var(--text));
+    font-size: 13px;
+    font-weight: 800;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(48, 38, 28, 0.04);
+}
+
+.city-select {
+    height: 32px;
+    min-width: 92px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    outline: none;
 }
 
 .paris-user-pill,
@@ -1154,6 +1185,7 @@ input:focus, textarea:focus, select:focus {
     .paris-topbar-actions {
         width: 100%;
         justify-content: space-between;
+        flex-wrap: wrap;
     }
 
     .paris-brand-title {
@@ -1308,6 +1340,7 @@ input:focus, textarea:focus, select:focus {
 .topbar-actions,
 .panel-actions {
     display: flex;
+    align-items: center;
     gap: 8px;
     flex-wrap: wrap;
 }
@@ -1847,11 +1880,14 @@ footer.app-footer {
     }
     .topbar-actions {
         width: 100%;
-        flex-wrap: nowrap;
+        flex-wrap: wrap;
     }
     .topbar-actions .btn {
         flex: 1 1 0;
         min-width: 0;
+    }
+    .topbar-actions .city-select-wrap {
+        flex: 1 1 100%;
     }
     .profile-details div {
         grid-template-columns: 1fr;
