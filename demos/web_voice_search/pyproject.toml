@@ -1,0 +1,17 @@
+[project]
+name = "web-voice-search-demo"
+version = "0.1.0"
+description = "Voice agent that answers questions fast using Keenable realtime web search"
+requires-python = ">=3.12"
+dependencies = [
+    "gradbot",
+    "httpx>=0.27.0",
+    "python-dotenv>=1.0.0",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[project.scripts]
+demo = "main:app"
+
+[tool.uv.sources]
+gradbot = { path = "../../gradbot_py" }
