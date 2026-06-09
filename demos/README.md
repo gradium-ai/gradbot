@@ -15,6 +15,7 @@ demos/
   paris_rental_agent/    # Paris rental search agent with Tavily live web search
   restaurant_ordering/   # Multilingual restaurant ordering agent
   npc_3d_game/           # Three.js game with multiple voice sessions and direct TTS
+  interview_questions/   # "Notre IA" — minimal French voice chat, no tools
 ```
 
 ## Running locally
