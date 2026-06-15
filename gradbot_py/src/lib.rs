@@ -208,9 +208,9 @@ fn flagship_voices() -> Vec<FlagshipVoice> {
 /// Raises RuntimeError if the voice name is not a known flagship voice.
 ///
 /// Example:
-///     voice = flagship_voice("emma")
-///     print(voice.name)      # "Emma"
-///     print(voice.voice_id)  # "YTpq7expH9539ERJ"
+///     voice = flagship_voice("skyler")
+///     print(voice.name)      # "Skyler"
+///     print(voice.voice_id)  # "cLONiZ4hQ8VpQ4Sz"
 ///     print(voice.language)  # Lang.En
 #[pyfunction]
 fn flagship_voice(name: &str) -> PyResult<FlagshipVoice> {

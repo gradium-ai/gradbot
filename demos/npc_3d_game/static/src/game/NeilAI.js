@@ -367,7 +367,7 @@ export class NeilAI {
 
     if (this._tts) {
       try {
-        await this._tts.speak(line, 'Jack', {
+        await this._tts.speak(line, 'Toby', {
           onFirstAudio: () => { audioPlayed = true; },
         });
       } catch {

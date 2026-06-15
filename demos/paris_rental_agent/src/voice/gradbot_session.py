@@ -21,8 +21,8 @@ from ..services import assistant_tools
 
 logger = logging.getLogger(__name__)
 
-VOICE_ID_EN = "ubuXFxVQwVYnZQhy"  # Eva
-VOICE_ID_FR = "b35yykvVppLXyw_l"  # Elise
+VOICE_ID_EN = "uem82D50GRv2Dwma"  # Pippa
+VOICE_ID_FR = "jBULVCDhf05tOJN5"  # Romane
 _SEARCH_LOCKS: dict[str, asyncio.Lock] = {}
 
 

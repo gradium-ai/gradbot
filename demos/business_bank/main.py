@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 cfg = gradbot.config.from_env()
 
 AGENT_VOICES = {
-    "Alex": ("ubuXFxVQwVYnZQhy", "en"),   # Eva
-    "Jack": ("m86j6D7UZpGzHsNu", "en"),   # Jack
-    "Leo": ("axlOaUiFyOZhy4nv", "fr"),     # Leo
+    "Alex": ("uem82D50GRv2Dwma", "en"),   # Pippa
+    "Toby": ("dME3IWyZBvmh1n1q", "en"),   # Toby
+    "Gaspard": ("iEu63s1rhn_kegTr", "fr"),     # Gaspard
 }
 
 # ---------------------------------------------------------------------------
@@ -212,7 +212,7 @@ async def websocket_chat(websocket: fastapi.WebSocket):
         agent_name = start_msg.get("agent", "Alex")
         customer_name = start_msg.get("customer", "Jamie")
         padding_bonus = float(start_msg.get("padding_bonus", 0.0))
-        voice_id, lang = AGENT_VOICES.get(agent_name, ("ubuXFxVQwVYnZQhy", "en"))
+        voice_id, lang = AGENT_VOICES.get(agent_name, ("uem82D50GRv2Dwma", "en"))
         lang_enum = {"en": gradbot.Lang.En, "fr": gradbot.Lang.Fr}.get(
             lang, gradbot.Lang.En
         )

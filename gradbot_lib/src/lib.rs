@@ -183,16 +183,16 @@ pub struct FlagshipVoice {
 pub const FLAGSHIP_VOICES: &[FlagshipVoice] = &[
     // English (US) voices
     FlagshipVoice {
-        name: "Emma",
-        voice_id: "YTpq7expH9539ERJ",
+        name: "Skyler",
+        voice_id: "cLONiZ4hQ8VpQ4Sz",
         language: Lang::En,
         country: Country::Us,
         gender: Gender::Feminine,
         description: "A warm and welcoming voice with a friendly American accent, perfect for creating a comfortable conversational experience.",
     },
     FlagshipVoice {
-        name: "Kent",
-        voice_id: "LFZvm12tW_z0xfGo",
+        name: "Russel",
+        voice_id: "_6Aslh2DxfmnRLmP",
         language: Lang::En,
         country: Country::Us,
         gender: Gender::Masculine,
@@ -200,49 +200,33 @@ pub const FLAGSHIP_VOICES: &[FlagshipVoice] = &[
     },
     // English (UK) voices
     FlagshipVoice {
-        name: "Sydney",
-        voice_id: "jtEKaLYNn6iif5PR",
+        name: "Pippa",
+        voice_id: "uem82D50GRv2Dwma",
         language: Lang::En,
         country: Country::Gb,
         gender: Gender::Feminine,
         description: "A sophisticated and articulate voice with a refined British accent, suitable for elegant and professional applications.",
     },
     FlagshipVoice {
-        name: "John",
-        voice_id: "KWJiFWu2O9nMPYcR",
+        name: "Toby",
+        voice_id: "dME3IWyZBvmh1n1q",
         language: Lang::En,
         country: Country::Gb,
         gender: Gender::Masculine,
         description: "A distinguished and authoritative voice with a classic British accent, perfect for narration and formal content.",
     },
-    FlagshipVoice {
-        name: "Eva",
-        voice_id: "ubuXFxVQwVYnZQhy",
-        language: Lang::En,
-        country: Country::Gb,
-        gender: Gender::Feminine,
-        description: "A lively and engaging voice with a British accent, great for dynamic and energetic conversations.",
-    },
-    FlagshipVoice {
-        name: "Jack",
-        voice_id: "m86j6D7UZpGzHsNu",
-        language: Lang::En,
-        country: Country::Gb,
-        gender: Gender::Masculine,
-        description: "A relaxed and friendly voice with a British accent, ideal for casual and approachable interactions.",
-    },
     // French voices
     FlagshipVoice {
-        name: "Elise",
-        voice_id: "b35yykvVppLXyw_l",
+        name: "Romane",
+        voice_id: "jBULVCDhf05tOJN5",
         language: Lang::Fr,
         country: Country::Fr,
         gender: Gender::Feminine,
         description: "A charming and melodic voice with an authentic French accent, perfect for romantic and artistic content.",
     },
     FlagshipVoice {
-        name: "Leo",
-        voice_id: "axlOaUiFyOZhy4nv",
+        name: "Gaspard",
+        voice_id: "iEu63s1rhn_kegTr",
         language: Lang::Fr,
         country: Country::Fr,
         gender: Gender::Masculine,
@@ -250,16 +234,16 @@ pub const FLAGSHIP_VOICES: &[FlagshipVoice] = &[
     },
     // German voices
     FlagshipVoice {
-        name: "Mia",
-        voice_id: "-uP9MuGtBqAvEyxI",
+        name: "Svenja",
+        voice_id: "SqFfhmAgR2XdN83R",
         language: Lang::De,
         country: Country::De,
         gender: Gender::Feminine,
         description: "A clear and precise voice with a German accent, excellent for technical and professional content.",
     },
     FlagshipVoice {
-        name: "Maximilian",
-        voice_id: "0y1VZjPabOBU3rWy",
+        name: "Erik",
+        voice_id: "lbpBQTVCOcOHJ5zS",
         language: Lang::De,
         country: Country::De,
         gender: Gender::Masculine,
@@ -267,16 +251,16 @@ pub const FLAGSHIP_VOICES: &[FlagshipVoice] = &[
     },
     // Spanish voices
     FlagshipVoice {
-        name: "Valentina",
-        voice_id: "B36pbz5_UoWn4BDl",
+        name: "Vega",
+        voice_id: "m3lIeODdTQ3bOh4z",
         language: Lang::Es,
         country: Country::Mx,
         gender: Gender::Feminine,
         description: "A vibrant and expressive voice with a Mexican Spanish accent, great for lively and engaging conversations.",
     },
     FlagshipVoice {
-        name: "Sergio",
-        voice_id: "xu7iJ_fn2ElcWp2s",
+        name: "Mateo",
+        voice_id: "sVLgzKMqaptUdaY8",
         language: Lang::Es,
         country: Country::Es,
         gender: Gender::Masculine,
@@ -284,16 +268,16 @@ pub const FLAGSHIP_VOICES: &[FlagshipVoice] = &[
     },
     // Portuguese voices
     FlagshipVoice {
-        name: "Alice",
-        voice_id: "pYcGZz9VOo4n2ynh",
+        name: "Manuela",
+        voice_id: "fd7e1fLVAAJzzs8P",
         language: Lang::Pt,
         country: Country::Br,
         gender: Gender::Feminine,
         description: "A bright and cheerful voice with a Brazilian Portuguese accent, perfect for friendly and upbeat interactions.",
     },
     FlagshipVoice {
-        name: "Davi",
-        voice_id: "M-FvVo9c-jGR4PgP",
+        name: "Mateus",
+        voice_id: "AByHrwi1S-yLzW-s",
         language: Lang::Pt,
         country: Country::Br,
         gender: Gender::Masculine,
@@ -344,8 +328,8 @@ fn get_flagship_voice_lookup() -> &'static std::collections::HashMap<String, usi
 /// ```
 /// use gradbot::{flagship_voice, Lang};
 ///
-/// let voice = flagship_voice("emma").unwrap();
-/// assert_eq!(voice.voice_id, "YTpq7expH9539ERJ");
+/// let voice = flagship_voice("skyler").unwrap();
+/// assert_eq!(voice.voice_id, "cLONiZ4hQ8VpQ4Sz");
 /// assert_eq!(voice.language, Lang::En);
 /// ```
 pub fn flagship_voice(name: &str) -> Result<FlagshipVoice> {

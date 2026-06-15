@@ -10,7 +10,7 @@
  *
  * Usage:
  *   const tts = new TTSClient();
- *   await tts.speak("Hello, Mark.", "Jack");
+ *   await tts.speak("Hello, Mark.", "Toby");
  */
 
 import { getBasePath, getWsBase } from './basePath.js';
@@ -28,13 +28,13 @@ export class TTSClient {
   /**
    * Speak text using a Gradium voice. Resolves when playback finishes.
    * @param {string} text
-   * @param {string} [voiceName='Emma']
+   * @param {string} [voiceName='Skyler']
    * @param {object} [opts]
    * @param {() => void} [opts.onFirstAudio] Called when the first audio chunk starts playing
    * @param {number} [opts.speed=1.0] Playback speed multiplier (1.0 = normal)
    * @returns {Promise<void>}
    */
-  speak(text, voiceName = 'Emma', opts = {}) {
+  speak(text, voiceName = 'Skyler', opts = {}) {
     return new Promise((resolve) => {
       const { onFirstAudio, speed = 1.0 } = opts;
       console.log(LOG, `speak(): voice=${voiceName}, text="${text.slice(0, 60)}..."`);
