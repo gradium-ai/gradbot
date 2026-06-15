@@ -38,11 +38,10 @@ gradbot.init_logging()
 _cfg = gradbot.config.load(Path(__file__).parent)
 
 VOICES = {
-    "Emma": "YTpq7expH9539ERJ",
-    "Jack": "m86j6D7UZpGzHsNu",
-    "Kent": "LFZvm12tW_z0xfGo",
-    "Sydney": "jtEKaLYNn6iif5PR",
-    "Eva": "ubuXFxVQwVYnZQhy",
+    "Skyler": "cLONiZ4hQ8VpQ4Sz",
+    "Toby": "dME3IWyZBvmh1n1q",
+    "Russel": "_6Aslh2DxfmnRLmP",
+    "Pippa": "uem82D50GRv2Dwma",
 }
 
 log.info("Client kwargs keys: %s", list(_cfg.client_kwargs.keys()))
@@ -98,7 +97,7 @@ async def websocket_tts(websocket: WebSocket):
     One-shot TTS: send text, receive OggOpus audio directly (no LLM).
 
     Protocol:
-      Client -> JSON: {"type": "speak", "text": "...", "voice_name": "Emma"}
+      Client -> JSON: {"type": "speak", "text": "...", "voice_name": "Skyler"}
       Server -> binary OggOpus audio chunks
       Server -> JSON: {"type": "tts_text", "text": "..."}
       Server -> JSON: {"type": "done"}
@@ -113,13 +112,13 @@ async def websocket_tts(websocket: WebSocket):
             return
 
         text = msg.get("text", "")
-        voice_name = msg.get("voice_name", "Emma")
+        voice_name = msg.get("voice_name", "Skyler")
         log.info("[TTS] Speaking: %r with voice %s", text[:80], voice_name)
 
         log.info("[TTS] Synthesizing directly (no LLM)...")
         clients = await _get_clients()
 
-        voice_id = VOICES.get(voice_name, VOICES["Emma"])
+        voice_id = VOICES.get(voice_name, VOICES["Skyler"])
         results = await clients.tts_synthesize(
             text,
             voice_id=voice_id,
@@ -189,7 +188,7 @@ RULES:
 - Stay in character. Keep ALL responses under 15 words."""
 
     return gradbot.SessionConfig(
-        voice_id=VOICES["Emma"],
+        voice_id=VOICES["Skyler"],
         instructions=instructions,
         language=gradbot.Lang.En,
         assistant_speaks_first=True,
@@ -312,7 +311,7 @@ CRITICAL: Call classify_response on the FIRST thing the player says. Say nothing
     ]
 
     return gradbot.SessionConfig(
-        voice_id=VOICES["Jack"],
+        voice_id=VOICES["Toby"],
         instructions=instructions,
         language=gradbot.Lang.En,
         assistant_speaks_first=True,

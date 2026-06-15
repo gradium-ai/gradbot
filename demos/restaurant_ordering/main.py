@@ -34,10 +34,10 @@ if _CJK_BIAS_PATH.exists():
 # English uses a custom voice; other languages use catalog voices.
 LANG_CONFIG = {
     "en": ("3jUdJyOi9pgbxBTK", gradbot.Lang.En, "en"),
-    "fr": ("b35yykvVppLXyw_l", gradbot.Lang.Fr, "fr"),      # Elise
-    "es": ("B36pbz5_UoWn4BDl", gradbot.Lang.Es, "es"),      # Valentina
-    "de": ("-uP9MuGtBqAvEyxI", gradbot.Lang.De, "de"),      # Mia
-    "pt": ("pYcGZz9VOo4n2ynh", gradbot.Lang.Pt, "pt"),      # Alice
+    "fr": ("jBULVCDhf05tOJN5", gradbot.Lang.Fr, "fr"),      # Romane
+    "es": ("m3lIeODdTQ3bOh4z", gradbot.Lang.Es, "es"),      # Vega
+    "de": ("SqFfhmAgR2XdN83R", gradbot.Lang.De, "de"),      # Svenja
+    "pt": ("fd7e1fLVAAJzzs8P", gradbot.Lang.Pt, "pt"),      # Manuela
 }
 
 # Load menu data

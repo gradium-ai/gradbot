@@ -55,7 +55,7 @@ export class IntroSequence {
 
     if (this._tts) {
       try {
-        await this._tts.speak(INTRO_TEXT, 'Emma', {
+        await this._tts.speak(INTRO_TEXT, 'Skyler', {
           onFirstAudio: () => { introAudioPlayed = true; },
         });
       } catch (e) {
@@ -75,7 +75,7 @@ export class IntroSequence {
 
     if (this._tts) {
       try {
-        await this._tts.speak(NEIL_LINE, 'Jack', {
+        await this._tts.speak(NEIL_LINE, 'Toby', {
           onFirstAudio: () => { greetingAudioPlayed = true; },
         });
       } catch (e) {

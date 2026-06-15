@@ -22,7 +22,7 @@ gradbot.init_logging()
 app = fastapi.FastAPI(title="Gradbot Demo")
 cfg = gradbot.config.from_env()
 
-DEFAULT_VOICE_ID = "YTpq7expH9539ERJ"  # Emma
+DEFAULT_VOICE_ID = "cLONiZ4hQ8VpQ4Sz"  # Skyler
 
 
 def make_config(msg: dict) -> gradbot.SessionConfig:

@@ -90,8 +90,8 @@ class BookingState:
 
 
 AGENT_VOICES = {
-    "Sophie": "ubuXFxVQwVYnZQhy",   # Eva
-    "Sydney": "jtEKaLYNn6iif5PR",   # Sydney
+    "Sophie": "uem82D50GRv2Dwma",   # Pippa
+    "Pippa": "uem82D50GRv2Dwma",   # Pippa
     "Colin": "3jUdJyOi9pgbxBTK",
     "Claire": "8IWnaR9UcTNGRihW",
     "Juliette": "biPZlD1tJvi7Ixhq",
@@ -103,10 +103,10 @@ AGENT_VOICES = {
 # Language config: lang_code -> (voice_id, Lang enum, rewrite_rules)
 LANG_CONFIG = {
     "en": (None, gradbot.Lang.En, "en"),                    # None = use agent voice
-    "fr": ("b35yykvVppLXyw_l", gradbot.Lang.Fr, "fr"),      # Elise
-    "es": ("B36pbz5_UoWn4BDl", gradbot.Lang.Es, "es"),      # Valentina
-    "de": ("-uP9MuGtBqAvEyxI", gradbot.Lang.De, "de"),      # Mia
-    "pt": ("pYcGZz9VOo4n2ynh", gradbot.Lang.Pt, "pt"),      # Alice
+    "fr": ("jBULVCDhf05tOJN5", gradbot.Lang.Fr, "fr"),      # Romane
+    "es": ("m3lIeODdTQ3bOh4z", gradbot.Lang.Es, "es"),      # Vega
+    "de": ("SqFfhmAgR2XdN83R", gradbot.Lang.De, "de"),      # Svenja
+    "pt": ("fd7e1fLVAAJzzs8P", gradbot.Lang.Pt, "pt"),      # Manuela
 }
 
 LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish", "de": "German", "pt": "Portuguese"}

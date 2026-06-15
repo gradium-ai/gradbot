@@ -17,16 +17,16 @@ logger = logging.getLogger(__name__)
 
 # (role, language) -> (voice_id, character_name)
 VOICES = {
-    ("attendant", "en"): ("m86j6D7UZpGzHsNu", "Grumbold"),  # Jack
-    ("attendant", "fr"): ("axlOaUiFyOZhy4nv", "Guillaume"),  # Leo
-    ("attendant", "de"): ("0y1VZjPabOBU3rWy", "Heinrich"),  # Maximilian
-    ("attendant", "es"): ("xu7iJ_fn2ElcWp2s", "Fernando"),  # Sergio
-    ("attendant", "pt"): ("M-FvVo9c-jGR4PgP", "Roberto"),  # Davi
-    ("manager", "en"): ("jtEKaLYNn6iif5PR", "Princess Celestia"),  # Sydney
-    ("manager", "fr"): ("b35yykvVppLXyw_l", "Princesse Celestine"),  # Elise
-    ("manager", "de"): ("-uP9MuGtBqAvEyxI", "Prinzessin Celestia"),  # Mia
-    ("manager", "es"): ("B36pbz5_UoWn4BDl", "Princesa Celestina"),  # Valentina
-    ("manager", "pt"): ("pYcGZz9VOo4n2ynh", "Princesa Celestina"),  # Alice
+    ("attendant", "en"): ("dME3IWyZBvmh1n1q", "Grumbold"),  # Toby
+    ("attendant", "fr"): ("iEu63s1rhn_kegTr", "Guillaume"),  # Gaspard
+    ("attendant", "de"): ("lbpBQTVCOcOHJ5zS", "Heinrich"),  # Erik
+    ("attendant", "es"): ("sVLgzKMqaptUdaY8", "Fernando"),  # Mateo
+    ("attendant", "pt"): ("AByHrwi1S-yLzW-s", "Roberto"),  # Mateus
+    ("manager", "en"): ("uem82D50GRv2Dwma", "Princess Celestia"),  # Pippa
+    ("manager", "fr"): ("jBULVCDhf05tOJN5", "Princesse Celestine"),  # Romane
+    ("manager", "de"): ("SqFfhmAgR2XdN83R", "Prinzessin Celestia"),  # Svenja
+    ("manager", "es"): ("m3lIeODdTQ3bOh4z", "Princesa Celestina"),  # Vega
+    ("manager", "pt"): ("fd7e1fLVAAJzzs8P", "Princesa Celestina"),  # Manuela
 }
 
 
