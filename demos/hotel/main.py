@@ -89,24 +89,37 @@ class BookingState:
     current_destination: str | None = None
 
 
+# Flagship voices (see gradbot_lib/src/lib.rs FLAGSHIP_VOICES).
+# Each agent maps to (voice_id, lang_code); the agent fully determines both
+# the voice and the spoken language.
 AGENT_VOICES = {
-    "Sophie": "uem82D50GRv2Dwma",   # Pippa
-    "Pippa": "uem82D50GRv2Dwma",   # Pippa
-    "Colin": "3jUdJyOi9pgbxBTK",
-    "Claire": "8IWnaR9UcTNGRihW",
-    "Juliette": "biPZlD1tJvi7Ixhq",
-    "Antoine": "cc9VTN6fVa4s37K0",
-    "Margaux": "HvE1EoQDBLHnT7wd",
-    "Theo": "zIGaffB0kKEBG_8u",
+    # English
+    "Skyler": ("cLONiZ4hQ8VpQ4Sz", "en"),   # English (US), feminine
+    "Russel": ("_6Aslh2DxfmnRLmP", "en"),   # English (US), masculine
+    "Pippa": ("uem82D50GRv2Dwma", "en"),    # English (UK), feminine
+    "Toby": ("dME3IWyZBvmh1n1q", "en"),     # English (UK), masculine
+    # French
+    "Romane": ("jBULVCDhf05tOJN5", "fr"),   # French, feminine
+    "Gaspard": ("iEu63s1rhn_kegTr", "fr"),  # French, masculine
+    # German
+    "Svenja": ("SqFfhmAgR2XdN83R", "de"),   # German, feminine
+    "Erik": ("lbpBQTVCOcOHJ5zS", "de"),     # German, masculine
+    # Spanish
+    "Vega": ("m3lIeODdTQ3bOh4z", "es"),     # Spanish (MX), feminine
+    "Mateo": ("sVLgzKMqaptUdaY8", "es"),    # Spanish (ES), masculine
+    # Portuguese
+    "Manuela": ("fd7e1fLVAAJzzs8P", "pt"),  # Portuguese (BR), feminine
+    "Mateus": ("AByHrwi1S-yLzW-s", "pt"),   # Portuguese (BR), masculine
 }
 
-# Language config: lang_code -> (voice_id, Lang enum, rewrite_rules)
+# Per-language Lang enum + rewrite rules. The voice always comes from the
+# selected agent above.
 LANG_CONFIG = {
-    "en": (None, gradbot.Lang.En, "en"),                    # None = use agent voice
-    "fr": ("jBULVCDhf05tOJN5", gradbot.Lang.Fr, "fr"),      # Romane
-    "es": ("m3lIeODdTQ3bOh4z", gradbot.Lang.Es, "es"),      # Vega
-    "de": ("SqFfhmAgR2XdN83R", gradbot.Lang.De, "de"),      # Svenja
-    "pt": ("fd7e1fLVAAJzzs8P", gradbot.Lang.Pt, "pt"),      # Manuela
+    "en": (gradbot.Lang.En, "en"),
+    "fr": (gradbot.Lang.Fr, "fr"),
+    "es": (gradbot.Lang.Es, "es"),
+    "de": (gradbot.Lang.De, "de"),
+    "pt": (gradbot.Lang.Pt, "pt"),
 }
 
 LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish", "de": "German", "pt": "Portuguese"}
@@ -276,14 +289,14 @@ async def websocket_chat(websocket: WebSocket):
     tools = build_tools()
 
     # These will be set from the start message
-    agent_name = "Sophie"
+    agent_name = "Skyler"
     voice_speed = 1.0
     voice = None
     lang = "en"
 
     def make_config(instructions: str) -> gradbot.SessionConfig:
-        lang_voice_id, lang_enum, rewrite = LANG_CONFIG.get(lang, LANG_CONFIG["en"])
-        vid = lang_voice_id or voice  # Use lang voice if set, else agent voice
+        lang_enum, rewrite = LANG_CONFIG.get(lang, LANG_CONFIG["en"])
+        vid = voice  # voice is resolved in on_start from the selected agent
         # Map voice_speed (0.5x–2.0x) to padding_bonus (-4 to +4).
         # speed 1.0 → bonus 0, speed 2.0 → bonus -4, speed 0.5 → bonus +4
         padding = -4.0 * (voice_speed - 1.0)
@@ -441,14 +454,12 @@ async def websocket_chat(websocket: WebSocket):
 
     def on_start(msg: dict) -> gradbot.SessionConfig:
         nonlocal agent_name, voice_speed, voice, lang
-        agent_name = msg.get("agent", "Sophie")
+        agent_name = msg.get("agent", "Skyler")
         speed = msg.get("speed")
         if speed is not None:
             voice_speed = max(0.5, min(2.0, float(speed)))
-        lang = msg.get("language", "en")
-        if lang not in LANG_CONFIG:
-            lang = "en"
-        voice = AGENT_VOICES.get(agent_name, AGENT_VOICES["Sophie"])
+        # The agent fully determines the voice and the spoken language.
+        voice, lang = AGENT_VOICES.get(agent_name, AGENT_VOICES["Skyler"])
 
         filters = {
             "destination": msg.get("destination", ""),
