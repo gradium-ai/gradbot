@@ -714,14 +714,14 @@
                     <div class="workspace-summary">
                         <div>
                             <div class="summary-kicker" id="summaryKicker">Hotel booking assistant</div>
-                            <div class="summary-text" id="summaryText">Tell Sophie where you'd like to travel.</div>
+                            <div class="summary-text" id="summaryText">Tell Skyler where you'd like to travel.</div>
                         </div>
                     </div>
 
                     <div class="stage-idle" id="stageIdle">
                         <div>
                             <div class="idle-title">Ready when you are.</div>
-                            <div class="idle-body">Search results and booking details will appear here once Sophie starts looking.</div>
+                            <div class="idle-body">Search results and booking details will appear here once Skyler starts looking.</div>
                         </div>
                     </div>
 
@@ -748,14 +748,10 @@
                         </div>
 
                         <select class="dock-select" id="agentSelect">
-                            <option value="Sophie" selected>Sophie</option>
+                            <option value="Skyler" selected>Skyler</option>
+                            <option value="Russel">Russel</option>
                             <option value="Pippa">Pippa</option>
-                            <option value="Colin">Colin</option>
-                            <option value="Claire">Claire</option>
-                            <option value="Juliette">Juliette</option>
-                            <option value="Antoine">Antoine</option>
-                            <option value="Margaux">Margaux</option>
-                            <option value="Theo">Théo</option>
+                            <option value="Toby">Toby</option>
                         </select>
 
                         <div class="lang-selector" id="langSelector">
@@ -785,12 +781,12 @@
                     </div>
 
                     <div class="dock-actions">
-                        <button class="btn btn-primary" id="startBtn" type="button">Call Sophie</button>
+                        <button class="btn btn-primary" id="startBtn" type="button">Call Skyler</button>
                         <button class="btn btn-secondary" id="stopBtn" type="button" style="display: none;">Hang Up</button>
                     </div>
                 </div>
 
-                <div class="status idle" id="status">Click "Call Sophie" to start your reservation</div>
+                <div class="status idle" id="status">Click "Call Skyler" to start your reservation</div>
             </section>
         </main>
     </div>
@@ -843,6 +839,16 @@
 
         let selectedLang = 'en';
 
+        // Flagship voices available per language (see gradbot_lib/src/lib.rs).
+        // The language selector filters which voices appear in the dropdown.
+        const VOICES_BY_LANG = {
+            en: ['Skyler', 'Russel', 'Pippa', 'Toby'],
+            fr: ['Romane', 'Gaspard'],
+            de: ['Svenja', 'Erik'],
+            es: ['Vega', 'Mateo'],
+            pt: ['Manuela', 'Mateus'],
+        };
+
         const UI_STRINGS = {
             en: { searchResults: 'Search Results', conversation: 'Conversation', waitingForSearch: 'Waiting for search...', listening: 'Listening', noResults: 'No results found', connecting: 'Connecting...', connected: 'Connected - Speak to {name}', callEnded: 'Call ended', connError: 'Connection error', connFailed: 'Connection failed', micDenied: 'Microphone access denied', clickToStart: 'Click "Call {name}" to start your reservation', tellTravel: 'Tell {name} where you\'d like to travel and she\'ll find the perfect hotel for you', assistant: 'Hotel booking assistant', tellTravelShort: 'Tell {name} where you\'d like to travel.', searchQuery: 'Search query' },
             fr: { searchResults: 'Résultats de recherche', conversation: 'Conversation', waitingForSearch: 'En attente de recherche...', listening: 'Écoute', noResults: 'Aucun résultat trouvé', connecting: 'Connexion...', connected: 'Connecté - Parlez à {name}', callEnded: 'Appel terminé', connError: 'Erreur de connexion', connFailed: 'Échec de connexion', micDenied: 'Accès au micro refusé', clickToStart: 'Cliquez sur "Appeler {name}" pour commencer', tellTravel: 'Dites à {name} où vous aimeriez voyager et elle trouvera l\'hôtel idéal pour vous', assistant: 'Assistante de réservation', tellTravelShort: 'Dites à {name} où vous aimeriez voyager.', searchQuery: 'Recherche' },
@@ -867,13 +873,30 @@
             setAgentSummary(t('assistant'), t('tellTravelShort').replace('{name}', name));
         }
 
+        // Rebuild the voice dropdown with the voices for `lang`, defaulting to
+        // the first available voice, then refresh the dependent UI.
+        function populateAgents(lang) {
+            const names = VOICES_BY_LANG[lang] || VOICES_BY_LANG.en;
+            agentSelect.innerHTML = names
+                .map(n => `<option value="${n}">${n}</option>`)
+                .join('');
+            agentSelect.value = names[0];
+            refreshAgentUI();
+        }
+
+        function setLanguage(code) {
+            selectedLang = code;
+            langSelector.querySelectorAll('.lang-btn').forEach(b => {
+                b.classList.toggle('selected', b.dataset.lang === code);
+            });
+            populateAgents(code);
+            updateUILanguage();
+        }
+
         langSelector.addEventListener('click', (e) => {
             const btn = e.target.closest('.lang-btn');
             if (!btn) return;
-            langSelector.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('selected'));
-            btn.classList.add('selected');
-            selectedLang = btn.dataset.lang;
-            updateUILanguage();
+            setLanguage(btn.dataset.lang);
         });
 
         function setAgentSummary(kicker, text) {
@@ -905,12 +928,15 @@
             }
         });
 
-        agentSelect.addEventListener('change', () => {
+        // Update the button/status/panel text for the currently selected voice.
+        function refreshAgentUI() {
             const name = getAgentName();
             startBtn.textContent = `Call ${name}`;
             setStatus(t('clickToStart').replace('{name}', name), 'idle');
             hotelContent.innerHTML = `<div class="panel-empty">${t('tellTravel').replace('{name}', name)}</div>`;
-        });
+        }
+
+        agentSelect.addEventListener('change', refreshAgentUI);
 
         // --- Results Display ---
 
@@ -1179,6 +1205,9 @@
 
         startBtn.addEventListener('click', startCall);
         stopBtn.addEventListener('click', endCall);
+
+        // Initialize the voice dropdown for the default language.
+        populateAgents(selectedLang);
 
         AudioProcessor.preloadDecoder('./static/js');
     </script>
