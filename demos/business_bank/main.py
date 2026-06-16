@@ -17,10 +17,16 @@ gradbot.init_logging()
 logger = logging.getLogger(__name__)
 cfg = gradbot.config.from_env()
 
+# Flagship voices (see gradbot_lib/src/lib.rs FLAGSHIP_VOICES).
+# Each agent maps to (voice_id, lang_code); the agent determines both the
+# voice and the spoken language so prompts/transcription match the accent.
 AGENT_VOICES = {
-    "Alex": ("uem82D50GRv2Dwma", "en"),   # Pippa
-    "Toby": ("dME3IWyZBvmh1n1q", "en"),   # Toby
-    "Gaspard": ("iEu63s1rhn_kegTr", "fr"),     # Gaspard
+    "Skyler": ("cLONiZ4hQ8VpQ4Sz", "en"),   # English (US), feminine
+    "Russel": ("_6Aslh2DxfmnRLmP", "en"),   # English (US), masculine
+    "Pippa": ("uem82D50GRv2Dwma", "en"),    # English (UK), feminine
+    "Toby": ("dME3IWyZBvmh1n1q", "en"),     # English (UK), masculine
+    "Romane": ("jBULVCDhf05tOJN5", "fr"),   # French, feminine
+    "Gaspard": ("iEu63s1rhn_kegTr", "fr"),  # French, masculine
 }
 
 # ---------------------------------------------------------------------------
@@ -209,10 +215,10 @@ async def websocket_chat(websocket: fastapi.WebSocket):
     state = BankSession()
 
     def on_start(start_msg: dict) -> gradbot.SessionConfig:
-        agent_name = start_msg.get("agent", "Alex")
+        agent_name = start_msg.get("agent", "Skyler")
         customer_name = start_msg.get("customer", "Jamie")
         padding_bonus = float(start_msg.get("padding_bonus", 0.0))
-        voice_id, lang = AGENT_VOICES.get(agent_name, ("uem82D50GRv2Dwma", "en"))
+        voice_id, lang = AGENT_VOICES.get(agent_name, AGENT_VOICES["Skyler"])
         lang_enum = {"en": gradbot.Lang.En, "fr": gradbot.Lang.Fr}.get(
             lang, gradbot.Lang.En
         )
