@@ -148,7 +148,7 @@ impl TtsStreamReceiver {
                 Response::EndOfStream { client_req_id: _ } => {
                     tracing::debug!("TTS EndOfStream received");
                 }
-                Response::NeedMoreText(_) => {
+                Response::NeedMoreText { .. } => {
                     tracing::debug!("TTS NeedMoreText received");
                 }
             }
