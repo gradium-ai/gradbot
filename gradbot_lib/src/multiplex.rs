@@ -1281,6 +1281,20 @@ impl SessionOutputHandle {
 /// }
 /// // Returns Ok(None) when session ends normally
 /// ```
+/// Install the process-level rustls `CryptoProvider` exactly once.
+///
+/// Both `aws-lc-rs` and `ring` end up in the dependency tree (via different
+/// transitive deps), so rustls 0.23 cannot auto-select a default provider and
+/// panics on the first TLS handshake (e.g. when the STT stream connects).
+/// We pick `aws-lc-rs` explicitly. `install_default` returns `Err` if a
+/// provider is already installed, which we intentionally ignore.
+fn ensure_crypto_provider() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    });
+}
+
 pub async fn start_session(
     tts_client: Arc<TtsClient>,
     stt_client: Arc<SttClient>,
@@ -1288,6 +1302,8 @@ pub async fn start_session(
     initial_config: Option<SessionConfig>,
     io_format: crate::IoFormat,
 ) -> Result<(SessionInputHandle, SessionOutputHandle)> {
+    ensure_crypto_provider();
+
     let (msg_in_tx, msg_in_rx) = tokio::sync::mpsc::channel::<MsgIn>(MSG_IN_CHANNEL_CAPACITY);
     let (msg_out_tx, msg_out_rx) = tokio::sync::mpsc::channel::<MsgOut>(MSG_OUT_CHANNEL_CAPACITY);
 

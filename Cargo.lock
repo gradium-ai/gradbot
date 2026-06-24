@@ -889,6 +889,7 @@ dependencies = [
  "kaudio",
  "reqwest 0.12.28",
  "rubato",
+ "rustls 0.23.38",
  "serde",
  "serde_json",
  "tokio",
