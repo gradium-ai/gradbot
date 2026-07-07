@@ -7,6 +7,18 @@ use tokio::sync::Mutex;
 pub const DEFAULT_FLUSH_FOR_S: f64 = 0.5;
 const INPUT_SAMPLE_RATE: usize = 24000;
 
+/// Minimum time an unanswered tool call may be outstanding before we inject a
+/// `PENDING` placeholder result and let the model speak a holding phrase while
+/// the tool runs. This must stay above typical fast-tool latency: with a fast
+/// LLM backend (sub-100ms) and a quick tool (a couple hundred ms), a very small
+/// threshold fires this "holding" generation on the empty PENDING result before
+/// the real result arrives — the model then verbalizes it (e.g. "I couldn't find
+/// any record of X"), and re-answers correctly once the result lands, producing a
+/// confusing double answer. Slower LLMs never showed this because the real result
+/// was always in context before they emitted a token. Keep the holding phrase for
+/// genuinely long-running tools only.
+const TOOL_WAIT_FILLER_S: f64 = 1.5;
+
 /// Internal commands sent from spawned tasks back to the main session loop.
 enum InternalCmd {
     /// Restart the STT stream to clear stuck state.
@@ -921,7 +933,7 @@ impl Session {
                 } else {
                     let elapsed = stt_time - since_s;
                     let has_new = self.llm.read().await.has_new_tool_calls().await;
-                    if elapsed > 0.05 && inactivity_prob > 0.8 && has_new {
+                    if elapsed > TOOL_WAIT_FILLER_S && inactivity_prob > 0.8 && has_new {
                         tracing::info!(
                             elapsed_ms = ((stt_time - since_s) * 1000.0) as u32,
                             inactivity_prob,
