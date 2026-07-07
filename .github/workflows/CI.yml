@@ -99,6 +99,8 @@ jobs:
         with:
           python-version: 3.13
           architecture: ${{ matrix.platform.python_arch }}
+      - name: Install CMake 3.x
+        run: pip install 'cmake<4'
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
