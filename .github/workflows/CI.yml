@@ -99,10 +99,10 @@ jobs:
         with:
           python-version: 3.13
           architecture: ${{ matrix.platform.python_arch }}
-      - name: Install CMake 3.x
-        run: pip install 'cmake<4'
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         with:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter --manifest-path gradbot_py/Cargo.toml
