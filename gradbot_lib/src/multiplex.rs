@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 pub const DEFAULT_FLUSH_FOR_S: f64 = 0.5;
 const INPUT_SAMPLE_RATE: usize = 24000;
 
-/// Minimum time an unanswered tool call may be outstanding before we inject a
+/// Default minimum time an unanswered tool call may be outstanding before we inject a
 /// `PENDING` placeholder result and let the model speak a holding phrase while
 /// the tool runs. This must stay above typical fast-tool latency: with a fast
 /// LLM backend (sub-100ms) and a quick tool (a couple hundred ms), a very small
@@ -16,8 +16,69 @@ const INPUT_SAMPLE_RATE: usize = 24000;
 /// any record of X"), and re-answers correctly once the result lands, producing a
 /// confusing double answer. Slower LLMs never showed this because the real result
 /// was always in context before they emitted a token. Keep the holding phrase for
-/// genuinely long-running tools only.
-const TOOL_WAIT_FILLER_S: f64 = 1.5;
+/// genuinely long-running tools only. Tunable via `SessionConfig::tool_result_wait_s`.
+pub const DEFAULT_TOOL_RESULT_WAIT_S: f64 = 1.5;
+/// Default minimum duration of sustained voice activity before the VAD triggers a
+/// barge-in interruption of the assistant. A single low-inactivity STT step can be
+/// a cough, background noise, or a VAD flicker; requiring sustained activity keeps
+/// the assistant from being cut off mid-sentence by spurious signals.
+/// Tunable via `SessionConfig::vad_interrupt_min_s`.
+pub const DEFAULT_VAD_INTERRUPT_MIN_S: f64 = 0.2;
+
+/// Returns true if `text` is a short backchannel acknowledgment ("yeah", "okay",
+/// "mm-hmm") — words a listener says to signal engagement without taking the turn.
+/// Only whole utterances match, so "yeah, stop" or "okay but wait" still interrupt.
+fn is_backchannel(text: &str) -> bool {
+    const BACKCHANNELS: &[&str] = &[
+        // English
+        "yeah",
+        "yep",
+        "ok",
+        "okay",
+        "right",
+        "sure",
+        "uh huh",
+        "mm hmm",
+        "mhm",
+        "mmhm",
+        "hmm",
+        "hm",
+        "i see",
+        "got it",
+        "gotcha",
+        "cool",
+        "alright",
+        "all right",
+        "oh",
+        "wow",
+        // French
+        "ouais",
+        "d'accord",
+        "hum",
+        "ah",
+        // German
+        "genau",
+        "achso",
+        "aha",
+        // Spanish
+        "vale",
+        "claro",
+        "ajá",
+        // Portuguese
+        "tá",
+        "certo",
+        "uhum",
+        "aham",
+    ];
+    let normalized: String = text
+        .to_lowercase()
+        .chars()
+        .map(|c| if c == '-' { ' ' } else { c })
+        .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '\'')
+        .collect();
+    let normalized = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+    !normalized.is_empty() && BACKCHANNELS.contains(&normalized.as_str())
+}
 
 /// Internal commands sent from spawned tasks back to the main session loop.
 enum InternalCmd {
@@ -167,6 +228,10 @@ struct Session {
     min_inactivity_prob: f64,
     /// Last VAD inactivity probability received from STT.
     last_inactivity_prob: f64,
+    /// Session time when the current run of sustained voice activity started
+    /// (while the assistant is processing/speaking). None when no activity.
+    /// Used to debounce VAD-based interruptions.
+    vad_active_since: Option<f64>,
     /// Whether non-LLM/non-silence STT restarts are enabled.
     restart_stt_enabled: bool,
     /// Signal to the LLM/TTS task that the user interrupted.
@@ -232,6 +297,7 @@ impl Session {
             stt_connected_at: std::time::Instant::now(),
             min_inactivity_prob: 1.0,
             last_inactivity_prob: 1.0,
+            vad_active_since: None,
             restart_stt_enabled: std::env::var("RESTART_STT")
                 .map(|v| {
                     matches!(
@@ -879,22 +945,44 @@ impl Session {
     ) -> Result<()> {
         // VAD-based interruption: if we're generating/speaking and the VAD
         // detects likely voice activity (inactivity_prob < 0.4), signal
-        // interruption immediately instead of waiting for STT text.
+        // interruption instead of waiting for STT text. Debounced: activity
+        // must be sustained for vad_interrupt_min_s so a single noisy step
+        // (cough, background noise) doesn't cut the assistant off.
         if inactivity_prob < 0.4 {
-            let state = self.state.lock().await;
-            if let State::Processing { since_s, .. } = &*state {
-                let elapsed = stt_time - since_s;
-                if elapsed > 2.0 {
-                    drop(state);
-                    tracing::info!(
-                        inactivity_prob,
-                        elapsed,
-                        "VAD-based interruption: voice activity detected while processing"
-                    );
-                    self.user_interrupted
-                        .store(true, std::sync::atomic::Ordering::Release);
+            let processing_elapsed = {
+                let state = self.state.lock().await;
+                if let State::Processing { since_s, .. } = &*state {
+                    Some(stt_time - since_s)
+                } else {
+                    None
                 }
+            };
+            match processing_elapsed {
+                Some(elapsed) if elapsed > 2.0 => {
+                    let vad_interrupt_min_s = self
+                        .session_config
+                        .lock()
+                        .await
+                        .as_ref()
+                        .map(|c| c.vad_interrupt_min_s)
+                        .unwrap_or(DEFAULT_VAD_INTERRUPT_MIN_S);
+                    let active_since = *self.vad_active_since.get_or_insert(stt_time);
+                    if stt_time - active_since >= vad_interrupt_min_s {
+                        tracing::info!(
+                            inactivity_prob,
+                            elapsed,
+                            active_for_s = stt_time - active_since,
+                            "VAD-based interruption: sustained voice activity while processing"
+                        );
+                        self.user_interrupted
+                            .store(true, std::sync::atomic::Ordering::Release);
+                        self.vad_active_since = None;
+                    }
+                }
+                _ => self.vad_active_since = None,
             }
+        } else {
+            self.vad_active_since = None;
         }
 
         let jh = {
@@ -933,7 +1021,14 @@ impl Session {
                 } else {
                     let elapsed = stt_time - since_s;
                     let has_new = self.llm.read().await.has_new_tool_calls().await;
-                    if elapsed > TOOL_WAIT_FILLER_S && inactivity_prob > 0.8 && has_new {
+                    let tool_result_wait_s = self
+                        .session_config
+                        .lock()
+                        .await
+                        .as_ref()
+                        .map(|c| c.tool_result_wait_s)
+                        .unwrap_or(DEFAULT_TOOL_RESULT_WAIT_S);
+                    if elapsed > tool_result_wait_s && inactivity_prob > 0.8 && has_new {
                         tracing::info!(
                             elapsed_ms = ((stt_time - since_s) * 1000.0) as u32,
                             inactivity_prob,
@@ -1017,6 +1112,20 @@ impl Session {
                 texts.push(text);
             }
             State::Processing { turn_idx, .. } => {
+                // Backchannels ("yeah", "mm-hmm") signal the user is listening,
+                // not taking the turn — don't cut the assistant off for them.
+                // The transcript was already sent to the client as a caption.
+                let ignore_backchannels = self
+                    .session_config
+                    .lock()
+                    .await
+                    .as_ref()
+                    .map(|c| c.ignore_backchannels)
+                    .unwrap_or(false);
+                if ignore_backchannels && is_backchannel(&text) {
+                    tracing::info!(?text, "ignoring backchannel while assistant is speaking");
+                    return Ok(());
+                }
                 let new_turn_idx = *turn_idx + 1;
 
                 // Signal the LLM/TTS task to stop after its next audio packet.
@@ -1044,6 +1153,34 @@ impl Session {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_backchannel;
+
+    #[test]
+    fn backchannel_detection() {
+        // Plain acknowledgments, with punctuation/case/hyphen variations.
+        assert!(is_backchannel("yeah"));
+        assert!(is_backchannel("Yeah."));
+        assert!(is_backchannel("OK!"));
+        assert!(is_backchannel("Okay"));
+        assert!(is_backchannel("mm-hmm"));
+        assert!(is_backchannel("Uh-huh."));
+        assert!(is_backchannel("got it"));
+        assert!(is_backchannel("D'accord."));
+
+        // Anything carrying content must interrupt.
+        assert!(!is_backchannel("yeah, stop"));
+        assert!(!is_backchannel("okay but wait"));
+        assert!(!is_backchannel("no"));
+        assert!(!is_backchannel("yes"));
+        assert!(!is_backchannel("wait"));
+        assert!(!is_backchannel("what was that?"));
+        assert!(!is_backchannel(""));
+        assert!(!is_backchannel("..."));
     }
 }
 
@@ -1084,6 +1221,22 @@ pub struct SessionConfig {
     /// Duration of silence (in seconds) to send to STT to flush the pipeline after
     /// the user stops speaking. Default is 0.5s.
     pub flush_duration_s: f64,
+    /// Time (in seconds) to wait for a tool call result before triggering an LLM
+    /// generation with a PENDING placeholder (a "holding phrase" for slow tools).
+    /// Results arriving within this window produce a single answer based on the
+    /// real result. Increase for slow tool handlers; decrease to speak filler
+    /// sooner while a slow tool runs. Default is 1.5s.
+    pub tool_result_wait_s: f64,
+    /// Minimum duration (in seconds) of sustained voice activity before the VAD
+    /// interrupts the assistant mid-speech. Debounces spurious single-step VAD
+    /// signals (coughs, background noise). Set to 0.0 for the old behavior where
+    /// a single low-inactivity step interrupts. Default is 0.2s.
+    pub vad_interrupt_min_s: f64,
+    /// If true, short backchannel acknowledgments from the user ("yeah", "okay",
+    /// "mm-hmm") while the assistant is speaking do not interrupt it. The words
+    /// are still transcribed and sent to the client, but are not treated as the
+    /// user taking the turn. Default is false.
+    pub ignore_backchannels: bool,
     /// Padding bonus for STT. Positive values make the model pad more (wait longer before
     /// finalizing), negative values make it pad less. Range: -4.0 to 4.0. Default is 0.0.
     pub padding_bonus: f64,

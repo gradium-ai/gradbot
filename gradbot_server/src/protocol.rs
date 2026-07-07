@@ -83,6 +83,12 @@ pub struct SessionConfigWire {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flush_duration_s: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_result_wait_s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vad_interrupt_min_s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignore_backchannels: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub padding_bonus: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rewrite_rules: Option<String>,
@@ -146,6 +152,13 @@ impl SessionConfigWire {
             flush_duration_s: self
                 .flush_duration_s
                 .unwrap_or(gradbot::DEFAULT_FLUSH_FOR_S),
+            tool_result_wait_s: self
+                .tool_result_wait_s
+                .unwrap_or(gradbot::DEFAULT_TOOL_RESULT_WAIT_S),
+            vad_interrupt_min_s: self
+                .vad_interrupt_min_s
+                .unwrap_or(gradbot::DEFAULT_VAD_INTERRUPT_MIN_S),
+            ignore_backchannels: self.ignore_backchannels.unwrap_or(false),
             padding_bonus: self.padding_bonus.unwrap_or(0.0),
             rewrite_rules: self.rewrite_rules.clone(),
             stt_extra_config: self.stt_extra_config.clone(),
@@ -165,6 +178,9 @@ impl From<&gradbot::SessionConfig> for SessionConfigWire {
             silence_timeout_s: Some(c.silence_timeout_s),
             tools: Some(c.tools.iter().map(ToolDefWire::from).collect()),
             flush_duration_s: Some(c.flush_duration_s),
+            tool_result_wait_s: Some(c.tool_result_wait_s),
+            vad_interrupt_min_s: Some(c.vad_interrupt_min_s),
+            ignore_backchannels: Some(c.ignore_backchannels),
             padding_bonus: Some(c.padding_bonus),
             rewrite_rules: c.rewrite_rules.clone(),
             stt_extra_config: c.stt_extra_config.clone(),
@@ -225,6 +241,9 @@ pub fn merge_with_pinned(
         silence_timeout_s: pick!(silence_timeout_s),
         tools: pick!(tools),
         flush_duration_s: pick!(flush_duration_s),
+        tool_result_wait_s: pick!(tool_result_wait_s),
+        vad_interrupt_min_s: pick!(vad_interrupt_min_s),
+        ignore_backchannels: pick!(ignore_backchannels),
         padding_bonus: pick!(padding_bonus),
         rewrite_rules: pick!(rewrite_rules),
         stt_extra_config: pick!(stt_extra_config),

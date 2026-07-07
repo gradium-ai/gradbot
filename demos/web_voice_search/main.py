@@ -111,7 +111,15 @@ def make_config(msg: dict) -> gradbot.SessionConfig:
         language=gradbot.LANGUAGES.get(language) if language else None,
         instructions=_system_prompt(),
         tools=TOOLS,
-        **({"assistant_speaks_first": True} | cfg.session_kwargs),
+        **(
+            {
+                "assistant_speaks_first": True,
+                # Gentler turn-taking: backchannels ("yeah", "mm-hmm") don't
+                # cut the assistant off while it reads out search results.
+                "ignore_backchannels": True,
+            }
+            | cfg.session_kwargs
+        ),
     )
 
 

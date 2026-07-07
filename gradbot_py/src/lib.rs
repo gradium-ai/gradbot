@@ -288,6 +288,18 @@ pub struct SessionConfig {
     /// Duration of silence (in seconds) to flush the STT pipeline. Defaults to 0.5.
     #[pyo3(get, set)]
     pub flush_duration_s: f64,
+    /// Seconds to wait for a tool call result before generating with a PENDING
+    /// placeholder (a "holding phrase" for slow tools). Defaults to 1.5.
+    #[pyo3(get, set)]
+    pub tool_result_wait_s: f64,
+    /// Minimum sustained voice activity (seconds) before the VAD interrupts the
+    /// assistant mid-speech. 0.0 = a single VAD step interrupts. Defaults to 0.2.
+    #[pyo3(get, set)]
+    pub vad_interrupt_min_s: f64,
+    /// If true, backchannels ("yeah", "okay", "mm-hmm") while the assistant is
+    /// speaking do not interrupt it. Defaults to false.
+    #[pyo3(get, set)]
+    pub ignore_backchannels: bool,
     /// Padding bonus for STT. Positive = wait longer, negative = finalize sooner. Range: -4 to 4. Default 0.
     #[pyo3(get, set)]
     pub padding_bonus: f64,
@@ -308,7 +320,8 @@ pub struct SessionConfig {
 #[pymethods]
 impl SessionConfig {
     #[new]
-    #[pyo3(signature = (voice_id=None, instructions=None, language=Lang::En, assistant_speaks_first=true, silence_timeout_s=5.0, tools=vec![], flush_duration_s=0.5, padding_bonus=0.0, rewrite_rules=None, stt_extra_config=None, tts_extra_config=None, llm_extra_config=None))]
+    #[pyo3(signature = (voice_id=None, instructions=None, language=Lang::En, assistant_speaks_first=true, silence_timeout_s=5.0, tools=vec![], flush_duration_s=0.5, tool_result_wait_s=1.5, vad_interrupt_min_s=0.2, ignore_backchannels=false, padding_bonus=0.0, rewrite_rules=None, stt_extra_config=None, tts_extra_config=None, llm_extra_config=None))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         voice_id: Option<String>,
         instructions: Option<String>,
@@ -317,6 +330,9 @@ impl SessionConfig {
         silence_timeout_s: f64,
         tools: Vec<ToolDef>,
         flush_duration_s: f64,
+        tool_result_wait_s: f64,
+        vad_interrupt_min_s: f64,
+        ignore_backchannels: bool,
         padding_bonus: f64,
         rewrite_rules: Option<String>,
         stt_extra_config: Option<String>,
@@ -331,6 +347,9 @@ impl SessionConfig {
             silence_timeout_s,
             tools,
             flush_duration_s,
+            tool_result_wait_s,
+            vad_interrupt_min_s,
+            ignore_backchannels,
             padding_bonus,
             rewrite_rules,
             stt_extra_config,
@@ -351,6 +370,9 @@ impl SessionConfig {
             silence_timeout_s: self.silence_timeout_s,
             tools: tools?,
             flush_duration_s: self.flush_duration_s,
+            tool_result_wait_s: self.tool_result_wait_s,
+            vad_interrupt_min_s: self.vad_interrupt_min_s,
+            ignore_backchannels: self.ignore_backchannels,
             padding_bonus: self.padding_bonus,
             rewrite_rules: self.rewrite_rules.clone(),
             stt_extra_config: self.stt_extra_config.clone(),
@@ -393,6 +415,9 @@ impl SessionConfig {
             silence_timeout_s: Some(self.silence_timeout_s),
             tools: Some(tools?),
             flush_duration_s: Some(self.flush_duration_s),
+            tool_result_wait_s: Some(self.tool_result_wait_s),
+            vad_interrupt_min_s: Some(self.vad_interrupt_min_s),
+            ignore_backchannels: Some(self.ignore_backchannels),
             padding_bonus: Some(self.padding_bonus),
             rewrite_rules: self.rewrite_rules.clone(),
             stt_extra_config: self.stt_extra_config.clone(),

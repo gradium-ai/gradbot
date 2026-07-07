@@ -87,6 +87,12 @@ pub struct SessionConfigWire {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flush_duration_s: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_result_wait_s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vad_interrupt_min_s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignore_backchannels: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub padding_bonus: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rewrite_rules: Option<String>,

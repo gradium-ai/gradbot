@@ -16,6 +16,9 @@ def test_session_config_minimal():
     assert cfg.language == gradbot.Lang.En
     assert cfg.assistant_speaks_first is True
     assert cfg.tools == []
+    assert cfg.tool_result_wait_s == 1.5
+    assert cfg.vad_interrupt_min_s == 0.2
+    assert cfg.ignore_backchannels is False
 
 
 def test_session_config_full():
@@ -32,6 +35,9 @@ def test_session_config_full():
         silence_timeout_s=10.0,
         tools=[tool],
         flush_duration_s=1.0,
+        tool_result_wait_s=0.5,
+        vad_interrupt_min_s=0.4,
+        ignore_backchannels=True,
         padding_bonus=2.0,
         rewrite_rules="fr",
     )
@@ -39,6 +45,9 @@ def test_session_config_full():
     assert cfg.language == gradbot.Lang.Fr
     assert cfg.assistant_speaks_first is False
     assert cfg.flush_duration_s == 1.0
+    assert cfg.tool_result_wait_s == 0.5
+    assert cfg.vad_interrupt_min_s == 0.4
+    assert cfg.ignore_backchannels is True
     assert cfg.padding_bonus == 2.0
 
 
@@ -98,11 +107,18 @@ def test_session_kwargs():
         p.write_text(
             "tts:\n  padding_bonus: 1.5\n"
             "stt:\n  flush_duration_s: 0.8\n"
+            "session:\n"
+            "  tool_result_wait_s: 0.5\n"
+            "  vad_interrupt_min_s: 0.3\n"
+            "  ignore_backchannels: true\n"
         )
         cfg = gradbot.config.load(d)
         kw = cfg.session_kwargs
         assert kw["padding_bonus"] == 1.5
         assert kw["flush_duration_s"] == 0.8
+        assert kw["tool_result_wait_s"] == 0.5
+        assert kw["vad_interrupt_min_s"] == 0.3
+        assert kw["ignore_backchannels"] is True
 
 
 def test_audio_format_default():

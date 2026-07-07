@@ -32,6 +32,9 @@ Example config.yaml:
     session:
       silence_timeout_s: 5.0
       assistant_speaks_first: true
+      tool_result_wait_s: 1.5
+      vad_interrupt_min_s: 0.2
+      ignore_backchannels: false
 """
 
 import functools
@@ -76,6 +79,9 @@ class STTConfig(pydantic.BaseModel):
 class SessionSettings(pydantic.BaseModel):
     silence_timeout_s: float | None = None
     assistant_speaks_first: bool | None = None
+    tool_result_wait_s: float | None = None
+    vad_interrupt_min_s: float | None = None
+    ignore_backchannels: bool | None = None
 
 
 class Config(pydantic_settings.BaseSettings):
@@ -162,6 +168,9 @@ class Config(pydantic_settings.BaseSettings):
             "flush_duration_s": self.stt.flush_duration_s or self.flush_for_s,
             "silence_timeout_s": (self.session.silence_timeout_s),
             "assistant_speaks_first": (self.session.assistant_speaks_first),
+            "tool_result_wait_s": (self.session.tool_result_wait_s),
+            "vad_interrupt_min_s": (self.session.vad_interrupt_min_s),
+            "ignore_backchannels": (self.session.ignore_backchannels),
             "llm_extra_config": (
                 json.dumps(self.llm.extra_config)
                 if self.llm.extra_config
