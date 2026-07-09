@@ -141,6 +141,11 @@ struct Session {
     llm_config: Option<Arc<crate::llm::LlmConfig>>,
     /// Counter for consecutive "..." silence prompts. Reset when user speaks. Capped at 5.
     silence_prompts: u32,
+    /// STT-clock timestamp (same units as `on_step`'s `stt_time`) at which the
+    /// currently-outstanding tool call was first observed as `New`. Used to time
+    /// the tool-wait holding generation on a single, consistent clock — see the
+    /// note in `on_step`. `None` when no tool call is outstanding.
+    tool_wait_since_stt: Option<f64>,
     /// Session time (in audio_time_s units) when the current STT stream was started.
     ///
     /// # Timing Model
@@ -225,6 +230,7 @@ impl Session {
             session_config,
             llm_config: None,
             silence_prompts: 0,
+            tool_wait_since_stt: None,
             internal_cmd_rx,
             internal_cmd_tx,
             // First STT stream starts at session time 0
@@ -925,20 +931,36 @@ impl Session {
                 // Check for pending tool results first - process them immediately
                 if self.llm.read().await.has_pending_tool_results() {
                     tracing::info!("processing pending tool results");
+                    self.tool_wait_since_stt = None;
                     let turn_idx = *turn_idx;
                     drop(state);
                     // Send empty message to trigger LLM with tool results only
                     // The prompt distinguishes "" (tool results) from "..." (silence)
                     self.llm_tts("", turn_idx).await
                 } else {
-                    let elapsed = stt_time - since_s;
                     let has_new = self.llm.read().await.has_new_tool_calls().await;
-                    if elapsed > TOOL_WAIT_FILLER_S && inactivity_prob > 0.8 && has_new {
+                    // How long the outstanding tool call has been waiting, measured on
+                    // the SAME clock as `stt_time`. Do NOT use `stt_time - since_s`:
+                    // `since_s` is stamped from the session/audio master clock (in the
+                    // TurnComplete handler), which drifts several seconds ahead of the
+                    // STT-derived `stt_time` over a call, so that difference is dominated
+                    // by clock drift and trips this holding generation on essentially
+                    // every tool call (even ~200ms ones). Anchoring the wait on `stt_time`
+                    // makes the grace period reflect the real wait, so fast tools answer
+                    // in a single turn and the holding phrase stays reserved for slow ones.
+                    let tool_waited = if has_new {
+                        stt_time - *self.tool_wait_since_stt.get_or_insert(stt_time)
+                    } else {
+                        self.tool_wait_since_stt = None;
+                        0.0
+                    };
+                    if tool_waited > TOOL_WAIT_FILLER_S && inactivity_prob > 0.8 && has_new {
                         tracing::info!(
-                            elapsed_ms = ((stt_time - since_s) * 1000.0) as u32,
+                            waited_ms = (tool_waited * 1000.0) as u32,
                             inactivity_prob,
-                            "processing NEW tool calls after short delay"
+                            "processing NEW tool calls after wait"
                         );
+                        self.tool_wait_since_stt = None;
                         let turn_idx = *turn_idx;
                         drop(state);
                         // Send empty message to trigger LLM with NEW tool calls
