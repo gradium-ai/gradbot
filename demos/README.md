@@ -11,6 +11,7 @@ demos/
   simple_chat/           # Minimal voice chat reference
   fantasy_shop/          # Voice haggling game with tools and persona swaps
   business_bank/         # Voice banking workflow with multi-step tools
+  blablacar/             # Multilingual BlaBlaCar member support agent (EN/FR/PT)
   hotel/                 # Hotel booking agent with deferred search tools
   paris_rental_agent/    # Paris rental search agent with Tavily live web search
   restaurant_ordering/   # Multilingual restaurant ordering agent
