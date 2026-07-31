@@ -25,7 +25,7 @@ gradbot.init_logging()
 app = fastapi.FastAPI(title="Voice Chat Demo")
 cfg = gradbot.config.from_env()
 
-DEFAULT_VOICE_ID = "cLONiZ4hQ8VpQ4Sz"  # Skyler
+DEFAULT_VOICE_ID = "NbpkqMVS3CJeq2j8"  # Zoey
 
 
 def make_config(msg: dict) -> gradbot.SessionConfig:
@@ -331,7 +331,7 @@ async def on_tool_call(state, handle, input_handle, websocket):
 VOICES = {
     ("attendant", "en"): ("dME3IWyZBvmh1n1q", "Grumbold"),      # Toby
     ("attendant", "fr"): ("iEu63s1rhn_kegTr", "Guillaume"),      # Gaspard
-    ("manager", "en"): ("uem82D50GRv2Dwma", "Princess Celestia"),  # Pippa
+    ("manager", "en"): ("4rdlkbxRv4m3UQTW", "Princess Celestia"),  # Tilly
 }
 
 def get_voice(role: str, lang: str) -> tuple[str, str]:
@@ -364,7 +364,7 @@ cfg.use_pcm                                        # bool — from USE_PCM env v
 cfg.audio_format                                   # AudioFormat.Pcm or .OggOpus
 
 # Voices — use voice IDs directly (define as constants at the top of main.py)
-# VOICE_ID = "uem82D50GRv2Dwma"  # Pippa
+# VOICE_ID = "NbpkqMVS3CJeq2j8"  # Zoey
 # See /api/voices endpoint for full catalog with IDs
 
 # Language helpers

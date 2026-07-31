@@ -113,11 +113,15 @@ impl Gender {
 pub enum Country {
     Us,
     Gb,
+    Ie,
     Fr,
+    Ca,
     De,
+    At,
     Mx,
     Es,
     Br,
+    Pt,
 }
 
 impl From<gradbot::Country> for Country {
@@ -125,11 +129,15 @@ impl From<gradbot::Country> for Country {
         match c {
             gradbot::Country::Us => Country::Us,
             gradbot::Country::Gb => Country::Gb,
+            gradbot::Country::Ie => Country::Ie,
             gradbot::Country::Fr => Country::Fr,
+            gradbot::Country::Ca => Country::Ca,
             gradbot::Country::De => Country::De,
+            gradbot::Country::At => Country::At,
             gradbot::Country::Mx => Country::Mx,
             gradbot::Country::Es => Country::Es,
             gradbot::Country::Br => Country::Br,
+            gradbot::Country::Pt => Country::Pt,
         }
     }
 }
@@ -140,11 +148,15 @@ impl Country {
         match self {
             Country::Us => "United States",
             Country::Gb => "United Kingdom",
+            Country::Ie => "Ireland",
             Country::Fr => "France",
+            Country::Ca => "Canada",
             Country::De => "Germany",
+            Country::At => "Austria",
             Country::Mx => "Mexico",
             Country::Es => "Spain",
             Country::Br => "Brazil",
+            Country::Pt => "Portugal",
         }
     }
 
@@ -153,11 +165,15 @@ impl Country {
         match self {
             Country::Us => "us",
             Country::Gb => "gb",
+            Country::Ie => "ie",
             Country::Fr => "fr",
+            Country::Ca => "ca",
             Country::De => "de",
+            Country::At => "at",
             Country::Mx => "mx",
             Country::Es => "es",
             Country::Br => "br",
+            Country::Pt => "pt",
         }
     }
 }
@@ -208,9 +224,9 @@ fn flagship_voices() -> Vec<FlagshipVoice> {
 /// Raises RuntimeError if the voice name is not a known flagship voice.
 ///
 /// Example:
-///     voice = flagship_voice("skyler")
-///     print(voice.name)      # "Skyler"
-///     print(voice.voice_id)  # "cLONiZ4hQ8VpQ4Sz"
+///     voice = flagship_voice("zoey")
+///     print(voice.name)      # "Zoey"
+///     print(voice.voice_id)  # "NbpkqMVS3CJeq2j8"
 ///     print(voice.language)  # Lang.En
 #[pyfunction]
 fn flagship_voice(name: &str) -> PyResult<FlagshipVoice> {

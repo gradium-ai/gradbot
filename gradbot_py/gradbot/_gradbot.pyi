@@ -30,11 +30,15 @@ class Gender:
 class Country:
     Us: Country
     Gb: Country
+    Ie: Country
     Fr: Country
+    Ca: Country
     De: Country
+    At: Country
     Mx: Country
     Es: Country
     Br: Country
+    Pt: Country
 
     def code(self) -> str: ...
     def __str__(self) -> str: ...
