@@ -139,7 +139,7 @@ tools = [
 # 2. Configure the session via an on_start callback
 def on_start(msg: dict) -> gradbot.SessionConfig:
     return gradbot.SessionConfig(
-        voice_id="cLONiZ4hQ8VpQ4Sz",
+        voice_id="NbpkqMVS3CJeq2j8",
         instructions="You are Marco, a friendly pizzaiolo...",
         language=gradbot.Lang.En,
         tools=tools,

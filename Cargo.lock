@@ -835,7 +835,7 @@ dependencies = [
 
 [[package]]
 name = "gradbot"
-version = "0.6.5"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-openai",
@@ -853,7 +853,7 @@ dependencies = [
 
 [[package]]
 name = "gradbot_bin"
-version = "0.6.5"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-openai",
@@ -885,7 +885,7 @@ dependencies = [
 
 [[package]]
 name = "gradbot_py"
-version = "0.6.5"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -902,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "gradbot_server"
-version = "0.6.5"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "axum",

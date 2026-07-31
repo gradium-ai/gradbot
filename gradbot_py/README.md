@@ -27,7 +27,7 @@ import gradbot
 async def main():
     input_handle, output_handle = await gradbot.run(
         session_config=gradbot.SessionConfig(
-            voice_id="cLONiZ4hQ8VpQ4Sz",
+            voice_id="NbpkqMVS3CJeq2j8",
             instructions="You are a helpful assistant.",
             language=gradbot.Lang.En,
         ),

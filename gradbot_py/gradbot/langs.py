@@ -18,11 +18,15 @@ LANGUAGE_NAMES = {
 COUNTRY_NAMES = {
     "us": "United States",
     "gb": "United Kingdom",
+    "ie": "Ireland",
     "fr": "France",
+    "ca": "Canada",
     "de": "Germany",
+    "at": "Austria",
     "mx": "Mexico",
     "es": "Spain",
     "br": "Brazil",
+    "pt": "Portugal",
 }
 
 GENDER_NAMES = {
