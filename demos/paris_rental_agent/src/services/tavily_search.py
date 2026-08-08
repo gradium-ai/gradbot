@@ -8,6 +8,7 @@ or ``demos/config.yaml``. If no key is configured, search raises
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from functools import lru_cache
 from pathlib import Path
@@ -128,7 +129,7 @@ async def _tavily_request(
         "search_depth": "basic",
         "max_results": 5,
         "include_answer": False,
-        "include_raw_content": True,
+        "include_raw_content": False,
         "include_domains": PARIS_RENTAL_DOMAINS,
     }
     try:
@@ -169,24 +170,27 @@ async def search_paris_rentals(profile: dict[str, Any]) -> list[dict[str, Any]]:
     errors: list[str] = []
 
     async with httpx.AsyncClient() as client:
-        for q in queries:
-            results, err = await _tavily_request(client, api_key, q)
-            if err:
-                errors.append(err)
-            for r in results:
-                url = (r.get("url") or "").strip()
-                if not url or url in seen_urls:
-                    continue
-                seen_urls.add(url)
-                raw_results.append(
-                    {
-                        "url": url,
-                        "title": r.get("title") or "Untitled",
-                        "content": r.get("content") or r.get("raw_content") or "",
-                        "source": _domain_of(url),
-                        "is_mock": False,
-                    }
-                )
+        responses = await asyncio.gather(
+            *(_tavily_request(client, api_key, q) for q in queries)
+        )
+
+    for results, err in responses:
+        if err:
+            errors.append(err)
+        for r in results:
+            url = (r.get("url") or "").strip()
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            raw_results.append(
+                {
+                    "url": url,
+                    "title": r.get("title") or "Untitled",
+                    "content": r.get("content") or "",
+                    "source": _domain_of(url),
+                    "is_mock": False,
+                }
+            )
 
     if not raw_results and errors:
         raise TavilySearchError("; ".join(errors[:3]))
