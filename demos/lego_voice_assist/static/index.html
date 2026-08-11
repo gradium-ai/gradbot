@@ -19,9 +19,9 @@
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }   /* keep flex rules below from overriding the hidden attr */
-  html, body { height: 100%; }
+  html { height: 100%; }
   body {
-    margin: 0; background:
+    margin: 0; min-height: 100%; display: flex; flex-direction: column; background:
       radial-gradient(1200px 600px at 15% -10%, rgba(91,140,255,.10), transparent 60%),
       radial-gradient(1000px 500px at 100% 0%, rgba(208,52,44,.10), transparent 55%),
       var(--bg);
@@ -58,7 +58,7 @@
   .powered-by-gradium:hover { opacity: .8; }
   .powered-by-gradium span {
     font-size: 12px; font-weight: 700; letter-spacing: .04em;
-    color: rgba(238,240,244,.72);
+    color: rgba(238,240,244,.72); white-space: nowrap;
   }
   .powered-by-gradium img { height: 17px; filter: brightness(1.7); }
 
@@ -208,6 +208,17 @@
     align-items: center; justify-content: center; color: var(--dim); text-align: center; padding: 20px;
   }
   .pile-note { padding: 9px 14px; color: var(--dim); font-size: 12.5px; border-top: 1px solid var(--edge); }
+
+  /* ── brick playground: fills the empty space below the cards ── */
+  #playground { flex: 1 1 auto; min-height: 220px; position: relative; }
+  #bricks { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  #bricks.grabbing { cursor: grabbing; }
+  #playHint {
+    position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+    color: var(--dim); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase;
+    pointer-events: none; opacity: .5; transition: opacity .5s;
+  }
+  #playHint.gone { opacity: 0; }
 </style>
 </head>
 <body>
@@ -309,6 +320,12 @@
       Camera frames leave this machine only when a lookup runs.</div>
   </section>
 </main>
+
+<!-- decorative: draggable loose bricks fill the empty space below the cards -->
+<section id="playground" aria-hidden="true">
+  <canvas id="bricks"></canvas>
+  <div id="playHint">drag the loose bricks</div>
+</section>
 
 <!-- gradbot audio stack: bundled by the server at /static/js. Plain script
      tags on purpose — SyncedAudioPlayer is a global, not an ES module. -->
@@ -747,6 +764,144 @@ function showLine({ text, turnIdx, isUser }) {
   }
   $(el).textContent += text + " ";
 }
+</script>
+
+<script>
+// ── loose-brick playground (decorative) ─────────────────────────────────────
+// Fills the empty space under the cards with draggable LEGO bricks: gravity,
+// floor/wall bounce, rough AABB stacking, grab-and-fling. No physics lib; runs
+// on setInterval like the pile overlay (rAF is throttled in a hidden preview).
+(() => {
+  const cvs = document.getElementById("bricks");
+  if (!cvs) return;
+  const g = cvs.getContext("2d");
+  const hint = document.getElementById("playHint");
+  const COLORS = ["#d0342c", "#f5c518", "#2b6cff", "#3fb26f", "#ff8a1e", "#e6e9ef"];
+  const UNIT = 22, DT = 1 / 60;
+  const GRAV = 2600, REST = 0.26, FLOOR_FRIC = 0.8, AIR = 0.995;
+  let W = 0, H = 0, DPR = 1, bricks = [], drag = null, seeded = false;
+
+  function seed() {
+    bricks = [4, 2, 3, 2, 4, 3, 2, 3, 4, 2].map((n, i) => {
+      const w = n * UNIT, h = UNIT * 1.15;
+      return { w, h, studs: n, color: COLORS[i % COLORS.length],
+        x: 20 + Math.random() * Math.max(1, W - w - 40),
+        y: -h - Math.random() * H, vx: (Math.random() - 0.5) * 80, vy: 0 };
+    });
+  }
+
+  function size() {
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    const r = cvs.getBoundingClientRect();
+    W = r.width; H = r.height;
+    cvs.width = Math.round(W * DPR); cvs.height = Math.round(H * DPR);
+    g.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (!seeded && W > 4 && H > 4) { seed(); seeded = true; }
+    for (const b of bricks) {                    // keep bricks inside a resized box
+      b.x = Math.max(0, Math.min(b.x, Math.max(0, W - b.w)));
+      if (b.y + b.h > H) b.y = H - b.h;
+    }
+  }
+
+  // Separate two overlapping bricks along the shallower axis; a grabbed brick is
+  // immovable (infinite mass) so you can shove a pile with the one in your hand.
+  function resolve(a, b) {
+    const as = drag && drag.b === a, bs = drag && drag.b === b;
+    if (as && bs) return;
+    const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+    const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+    if (ox <= 0 || oy <= 0) return;
+    if (ox < oy) {
+      const dir = a.x + a.w / 2 < b.x + b.w / 2 ? 1 : -1;   // a is left of b when +1
+      if (as) { b.x += dir * ox; b.vx = 0; }
+      else if (bs) { a.x -= dir * ox; a.vx = 0; }
+      else { a.x -= dir * ox / 2; b.x += dir * ox / 2; const t = a.vx * FLOOR_FRIC; a.vx = b.vx * FLOOR_FRIC; b.vx = t; }
+    } else {
+      const dir = a.y + a.h / 2 < b.y + b.h / 2 ? 1 : -1;   // a is above b when +1
+      if (as) { b.y += dir * oy; if (dir > 0) b.vy = Math.max(b.vy, 0); }
+      else if (bs) { a.y -= dir * oy; if (dir > 0) a.vy = Math.min(a.vy, 0); }
+      else {
+        a.y -= dir * oy / 2; b.y += dir * oy / 2;
+        if (dir > 0) { a.vy = Math.min(a.vy, 0); b.vy = Math.max(b.vy, 0); }
+        else { a.vy = Math.max(a.vy, 0); b.vy = Math.min(b.vy, 0); }
+      }
+    }
+  }
+
+  function step() {
+    for (const b of bricks) {
+      if (drag && drag.b === b) continue;
+      b.vy += GRAV * DT; b.vx *= AIR; b.vy *= AIR;
+      b.x += b.vx * DT; b.y += b.vy * DT;
+      if (b.y + b.h > H) { b.y = H - b.h; b.vy = b.vy > 0 ? -b.vy * REST : b.vy; b.vx *= FLOOR_FRIC; if (Math.abs(b.vy) < 60) b.vy = 0; }
+      if (b.x < 0) { b.x = 0; b.vx = Math.abs(b.vx) * REST; }
+      if (b.x + b.w > W) { b.x = W - b.w; b.vx = -Math.abs(b.vx) * REST; }
+    }
+    for (let it = 0; it < 3; it++)
+      for (let i = 0; i < bricks.length; i++)
+        for (let j = i + 1; j < bricks.length; j++) resolve(bricks[i], bricks[j]);
+  }
+
+  function roundRect(x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    g.beginPath(); g.moveTo(x + r, y);
+    g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+
+  function brick(b) {
+    g.save();
+    g.fillStyle = b.color; roundRect(b.x, b.y, b.w, b.h, 4); g.fill();
+    g.fillStyle = "rgba(255,255,255,.16)"; roundRect(b.x, b.y, b.w, b.h * 0.4, 4); g.fill();   // top sheen
+    const sr = UNIT * 0.3;
+    for (let i = 0; i < b.studs; i++) {                 // studs poke over the top edge
+      const cx = b.x + (i + 0.5) * (b.w / b.studs);
+      g.fillStyle = b.color; g.beginPath(); g.ellipse(cx, b.y, sr, sr * 0.62, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = "rgba(255,255,255,.22)"; g.beginPath(); g.ellipse(cx, b.y - sr * 0.16, sr * 0.8, sr * 0.4, 0, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = "rgba(0,0,0,.18)"; g.lineWidth = 1; g.beginPath(); g.ellipse(cx, b.y, sr, sr * 0.62, 0, 0, Math.PI * 2); g.stroke();
+    }
+    g.restore();
+  }
+
+  function frame() { step(); g.clearRect(0, 0, W, H); for (const b of bricks) brick(b); }
+
+  // ── grab & fling ──
+  const at = (e) => { const r = cvs.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  cvs.addEventListener("pointerdown", (e) => {
+    const p = at(e);
+    for (let i = bricks.length - 1; i >= 0; i--) {      // topmost brick under the pointer
+      const b = bricks[i];
+      if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) {
+        drag = { b, dx: p.x - b.x, dy: p.y - b.y };
+        bricks.splice(i, 1); bricks.push(b);            // pull to the front
+        b.vx = b.vy = 0;
+        cvs.setPointerCapture(e.pointerId); cvs.classList.add("grabbing");
+        if (hint) hint.classList.add("gone");
+        break;
+      }
+    }
+  });
+  cvs.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const p = at(e), b = drag.b;
+    const nx = Math.max(0, Math.min(p.x - drag.dx, W - b.w));
+    const ny = Math.max(0, Math.min(p.y - drag.dy, H - b.h));
+    b.vx = Math.max(-1600, Math.min((nx - b.x) / DT, 1600));   // carry the throw velocity
+    b.vy = Math.max(-1600, Math.min((ny - b.y) / DT, 1600));
+    b.x = nx; b.y = ny;
+  });
+  const drop = (e) => {
+    if (!drag) return;
+    drag = null; cvs.classList.remove("grabbing");
+    try { cvs.releasePointerCapture(e.pointerId); } catch {}
+  };
+  cvs.addEventListener("pointerup", drop);
+  cvs.addEventListener("pointercancel", drop);
+
+  new ResizeObserver(size).observe(cvs);
+  size();
+  setInterval(frame, 1000 / 60);
+})();
 </script>
 </body>
 </html>
