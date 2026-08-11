@@ -1,0 +1,18 @@
+[project]
+name = "lego-voice-assist-demo"
+version = "0.1.0"
+description = "Voice AI companion that finds the current step's LEGO pieces in your pile via a vision model and Gradium voice"
+requires-python = ">=3.12"
+dependencies = [
+    "gradbot",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "openai>=1.50",
+    "python-dotenv>=1.0",
+    "pypdfium2>=4.30",
+    "pillow>=10.0",
+    "python-multipart>=0.0.32",
+]
+
+[tool.uv.sources]
+gradbot = { path = "../../gradbot_py" }
