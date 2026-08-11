@@ -69,7 +69,7 @@ One FastAPI process ([`main.py`](main.py)) serves the single-page frontend
   conversational LLM ↔ Gradium TTS, with turn-taking and barge-in. The LLM never
   sees images — it calls tools (`next_step`, `find_step`, `find_one_piece`,
   `check_piece`, `switch_language`).
-- **OpenAI vision** (Responses API): the tool handlers grab a fresh pile frame,
+- **OpenAI vision** ([Responses API](https://developers.openai.com/api/docs/guides/images-vision)): the tool handlers grab a fresh pile frame,
   burn a labeled 3×3 grid into it, and ask the model to localize *only* this
   step's known pieces. Cells become spoken directions in deterministic Python,
   and the agent relays that sentence verbatim.
@@ -80,6 +80,11 @@ those — a tractable problem where "find everything" is not.
 
 See [AGENTS.md](AGENTS.md) for the full architecture, the latency design, and the
 gotchas worth knowing before you change anything.
+
+**Learn more:** [gradbot](https://github.com/gradium-ai/gradbot) — the open-source
+voice framework this is built on · [OpenAI — Images and vision](https://developers.openai.com/api/docs/guides/images-vision)
+— how the pile search passes images to the model (Responses API, base64 input, and
+the `detail` levels the demo tunes via `PILE_IMAGE_DETAIL`).
 
 ## Configuration
 
