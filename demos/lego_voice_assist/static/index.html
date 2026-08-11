@@ -99,6 +99,12 @@
     border-radius: 10px; padding: 10px 12px; line-height: 1.4;
   }
   #agentline:empty::before { content: "Tap the mic and just talk."; color: var(--dim); }
+  #userline {
+    width: 100%; text-align: center; font-size: 12.5px; color: var(--dim);
+    line-height: 1.35; padding: 2px 4px;
+  }
+  #userline::before { content: "🗣 "; }
+  #userline:empty { display: none; }   /* only shows once you've spoken */
 
   .lang-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
   .lang-btn {
@@ -143,6 +149,19 @@
   .stepbar .meta { flex: 1; text-align: center; }
   .stepbar .meta b { font-size: 16px; }
   .stepbar .meta span { color: var(--dim); font-size: 12px; display: block; }
+
+  .jumpbar {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 8px 14px; border-bottom: 1px solid var(--edge);
+    font-size: 12px; color: var(--dim);
+  }
+  .jumpbar input {
+    width: 60px; text-align: center; font: inherit; font-size: 13px;
+    color: var(--text); background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 7px; padding: 5px 6px;
+  }
+  .jumpbar button.ghost { width: auto; padding: 5px 12px; font-size: 12px; }
+  #jumpMsg { color: var(--red); font-size: 11.5px; }
 
   #guideImgWrap {
     position: relative; background: #0c0d11; min-height: 320px;
@@ -196,14 +215,15 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
         </button>
         <div class="mic-label" id="micLabel">Tap to start</div>
+        <div id="userline"></div>
         <div id="agentline"></div>
         <div class="rail-label">Language</div>
         <div class="lang-row" id="langRow">
-          <button class="lang-btn sel" data-lang="en">EN</button>
-          <button class="lang-btn" data-lang="fr">FR</button>
-          <button class="lang-btn" data-lang="es">ES</button>
-          <button class="lang-btn" data-lang="de">DE</button>
-          <button class="lang-btn" data-lang="pt">PT</button>
+          <button class="lang-btn sel" data-lang="en">🇬🇧 EN</button>
+          <button class="lang-btn" data-lang="fr">🇫🇷 FR</button>
+          <button class="lang-btn" data-lang="es">🇪🇸 ES</button>
+          <button class="lang-btn" data-lang="de">🇩🇪 DE</button>
+          <button class="lang-btn" data-lang="pt">🇵🇹 PT</button>
         </div>
       </div>
       <details class="settings">
@@ -243,6 +263,12 @@
           <button class="nav" id="prevStep" title="Previous step">‹</button>
           <div class="meta"><b id="stepTitle">Step —</b><span id="stepSub"></span></div>
           <button class="nav" id="nextStep" title="Next step">›</button>
+        </div>
+        <div class="jumpbar">
+          <label for="gotoPage">Jump to page</label>
+          <input id="gotoPage" type="number" min="1" inputmode="numeric" placeholder="#">
+          <button class="ghost" id="gotoBtn">Go</button>
+          <span id="jumpMsg"></span>
         </div>
         <div id="guideImgWrap">
           <img id="guideImg" alt="Instruction page" hidden>
@@ -510,6 +536,22 @@ function goToStep(idx) {
 $("prevStep").addEventListener("click", () => goToStep(currentStep - 1));
 $("nextStep").addEventListener("click", () => goToStep(currentStep + 1));
 
+// Jump straight to a printed page number — lands on the first build step on that
+// page and drives the same server-side step (prefetch + highlights) as prev/next.
+// (Voice already does this: "go to page twelve" → the find_step tool.)
+function goToPage(value) {
+  const pg = parseInt(value, 10);
+  const msg = $("jumpMsg"); msg.textContent = "";
+  if (!Number.isFinite(pg)) return;
+  const idx = flatSteps.findIndex((s) => s.page === pg);
+  if (idx === -1) { msg.textContent = `no build steps on page ${pg}`; return; }
+  goToStep(idx);
+}
+$("gotoBtn").addEventListener("click", () => { goToPage($("gotoPage").value); $("gotoPage").value = ""; });
+$("gotoPage").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); goToPage(e.target.value); e.target.value = ""; }
+});
+
 // restore the last manual across reloads (parse results are cached server-side)
 (async () => {
   const id = localStorage.getItem("legoManual"); if (!id) return;
@@ -608,7 +650,7 @@ async function startCall() {
       basePath: "static/js", sampleRate: 24000, pcmOutput: audioConfig.pcm || false,
       echoCancellation: $("echoCancel").checked,
       onEncodedAudio: (opus) => { if (isRecording && ws?.readyState === WebSocket.OPEN) ws.send(opus); },
-      onText: ({ text, turnIdx, isUser }) => showAgentLine(text, turnIdx, isUser),
+      onText: (msg) => showLine(msg),
       onEvent: (_t, msg) => handleCustomMessage(msg),
     });
     await player.start();
@@ -625,7 +667,7 @@ async function startCall() {
       }));
       isRecording = true; callLive = true;
       $("mic").classList.add("live"); $("micLabel").textContent = "Listening — tap to end";
-      $("agentline").textContent = "";
+      $("agentline").textContent = ""; $("userline").textContent = "";
       setStatus("on a call", "live");
       populateMics();
       if (camOn) sendFrames({ warm: true });  // prefetch the current step's pieces
@@ -678,12 +720,18 @@ async function sendFrames(extra = {}) {
   try { await postJSON(`api/frames/${SID}`, body); } catch (err) { console.error("frames", err); }
 }
 
-// ── agent's last line only (no transcript wall) ───────────────────────────
-let curAgentTurn = null;
-function showAgentLine(text, turnIdx, isUser) {
-  if (isUser) return;  // the builder's words don't need to be on screen
-  if (turnIdx !== curAgentTurn) { curAgentTurn = turnIdx; $("agentline").textContent = ""; }
-  $("agentline").textContent += text + " ";
+// ── live transcript: your words (userline) + the agent's reply (agentline) ──
+// gradbot streams both; each is accumulated per turn so partial STT/TTS chunks
+// build up the current line and a new turn clears it.
+let curAgentTurn = null, curUserTurn = null;
+function showLine({ text, turnIdx, isUser }) {
+  const el = isUser ? "userline" : "agentline";
+  const cur = isUser ? curUserTurn : curAgentTurn;
+  if (turnIdx !== cur) {
+    if (isUser) curUserTurn = turnIdx; else curAgentTurn = turnIdx;
+    $(el).textContent = "";
+  }
+  $(el).textContent += text + " ";
 }
 </script>
 </body>
