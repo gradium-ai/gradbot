@@ -1,0 +1,690 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LEGO Voice Assist</title>
+<style>
+  :root {
+    --bg: #12141a;
+    --panel: #1b1e26;
+    --panel2: #232733;
+    --edge: #2c313d;
+    --text: #eef0f4;
+    --dim: #9aa2b1;
+    --red: #d0342c;      /* lego red */
+    --yellow: #f5c518;   /* highlight */
+    --good: #3fb26f;
+    --accent: #5b8cff;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(91,140,255,.10), transparent 60%),
+      radial-gradient(1000px 500px at 100% 0%, rgba(208,52,44,.10), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px; border-bottom: 1px solid var(--edge);
+  }
+  .brick {
+    width: 28px; height: 19px; border-radius: 3px; background: var(--red);
+    position: relative; flex: none;
+  }
+  .brick::before, .brick::after {
+    content: ""; position: absolute; top: -5px; width: 9px; height: 5px;
+    border-radius: 2px 2px 0 0; background: var(--red);
+  }
+  .brick::before { left: 3px; }
+  .brick::after { right: 4px; }
+  h1 { font-size: 17px; margin: 0; font-weight: 680; letter-spacing: .2px; }
+  h1 small { color: var(--dim); font-weight: 500; font-size: 13px; margin-left: 8px; }
+  #status {
+    margin-left: auto; padding: 5px 13px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--edge);
+    font-size: 13px; color: var(--dim); white-space: nowrap;
+  }
+  #status.live { color: var(--good); border-color: var(--good); }
+  #status.busy { color: var(--yellow); border-color: var(--yellow); }
+
+  main {
+    display: grid; grid-template-columns: 260px minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px; padding: 16px 20px; max-width: 1600px; margin: 0 auto;
+    align-items: start;
+  }
+  @media (max-width: 1080px) { main { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 14px; overflow: hidden;
+  }
+  .panel h2 {
+    margin: 0; padding: 12px 14px; font-size: 11px; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--dim); font-weight: 700;
+    border-bottom: 1px solid var(--edge); display: flex; align-items: center; gap: 8px;
+  }
+  .panel .body { padding: 14px; }
+
+  /* ── left rail: the companion ── */
+  .rail { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 16px; }
+
+  .mic-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 18px 14px; }
+  .mic-btn {
+    width: 92px; height: 92px; border-radius: 50%; cursor: pointer;
+    border: 2px solid var(--red); background: #20242e; color: var(--red);
+    display: flex; align-items: center; justify-content: center; flex: none;
+    transition: transform .15s ease, box-shadow .2s ease, background .2s ease;
+    box-shadow: 0 6px 22px rgba(208,52,44,.18);
+  }
+  .mic-btn svg { width: 34px; height: 34px; }
+  .mic-btn:hover:not(:disabled) { transform: scale(1.04); }
+  .mic-btn:disabled { opacity: .5; cursor: default; }
+  .mic-btn.live {
+    background: var(--red); color: #fff; border-color: var(--red);
+    box-shadow: 0 0 0 0 rgba(208,52,44,.45); animation: ring 1.8s ease-out infinite;
+  }
+  @keyframes ring {
+    0% { box-shadow: 0 0 0 0 rgba(208,52,44,.4); }
+    70% { box-shadow: 0 0 0 16px rgba(208,52,44,0); }
+    100% { box-shadow: 0 0 0 0 rgba(208,52,44,0); }
+  }
+  .mic-label { font-size: 13px; color: var(--dim); text-align: center; }
+  #agentline {
+    min-height: 40px; width: 100%; text-align: center; font-size: 14px;
+    color: var(--text); background: var(--panel2); border: 1px solid var(--edge);
+    border-radius: 10px; padding: 10px 12px; line-height: 1.4;
+  }
+  #agentline:empty::before { content: "Tap the mic and just talk."; color: var(--dim); }
+
+  .lang-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .lang-btn {
+    padding: 6px 11px; border-radius: 8px; border: 1px solid var(--edge);
+    background: var(--panel2); color: var(--text); font: inherit; font-size: 13px;
+    font-weight: 700; cursor: pointer; letter-spacing: .04em;
+  }
+  .lang-btn:hover { border-color: #3d4658; }
+  .lang-btn.sel { background: var(--red); border-color: var(--red); color: #fff; }
+  .rail-label { font-size: 11px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--dim); font-weight: 700; text-align: center; }
+
+  details.settings { border-top: 1px solid var(--edge); }
+  details.settings > summary {
+    list-style: none; cursor: pointer; padding: 11px 14px; font-size: 12px;
+    letter-spacing: .06em; text-transform: uppercase; color: var(--dim); font-weight: 700;
+  }
+  details.settings > summary::-webkit-details-marker { display: none; }
+  details.settings > summary::after { content: " ▾"; }
+  details.settings[open] > summary::after { content: " ▴"; }
+  .settings .body { display: flex; flex-direction: column; gap: 10px; padding-top: 0; }
+  select, button.ghost {
+    font: inherit; color: var(--text); background: var(--panel2);
+    border: 1px solid var(--edge); border-radius: 8px; padding: 8px 10px;
+    max-width: 100%; width: 100%; cursor: pointer;
+  }
+  label.toggle { display: flex; align-items: center; gap: 8px; color: var(--dim); cursor: pointer; font-size: 13px; }
+
+  /* ── guide pane ── */
+  #guideBody { padding: 0; }
+  .stepbar {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    border-bottom: 1px solid var(--edge); background: var(--panel2);
+  }
+  .stepbar .nav {
+    width: 38px; height: 38px; border-radius: 9px; border: 1px solid var(--edge);
+    background: var(--panel); color: var(--text); font-size: 20px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .stepbar .nav:hover:not(:disabled) { border-color: #3d4658; }
+  .stepbar .nav:disabled { opacity: .35; cursor: default; }
+  .stepbar .meta { flex: 1; text-align: center; }
+  .stepbar .meta b { font-size: 16px; }
+  .stepbar .meta span { color: var(--dim); font-size: 12px; display: block; }
+
+  #guideImgWrap {
+    position: relative; background: #0c0d11; min-height: 320px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #guideImg { display: block; max-width: 100%; max-height: 72vh; }
+  #guideFallback {
+    display: none; flex-direction: column; align-items: center; gap: 8px;
+    color: var(--dim); padding: 40px; text-align: center;
+  }
+  #guideFallback .num { font-size: 72px; font-weight: 800; color: var(--text); }
+
+  #uploadZone { padding: 44px 22px; text-align: center; }
+  #uploadZone .big { font-size: 17px; margin-bottom: 6px; }
+  #uploadZone p { color: var(--dim); font-size: 13px; margin: 6px 0 16px; }
+  button.primary {
+    font: inherit; font-weight: 680; color: #fff; background: var(--red);
+    border: 1px solid var(--red); border-radius: 10px; padding: 11px 18px; cursor: pointer;
+  }
+  button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+  button.primary:disabled { opacity: .5; cursor: default; }
+  #pdfStatus { color: var(--dim); font-size: 13px; margin-top: 12px; }
+
+  /* ── pile pane ── */
+  #stage { position: relative; background: #000; }
+  #stage video { display: block; width: 100%; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #camHint {
+    position: absolute; inset: 0; display: flex; flex-direction: column; gap: 12px;
+    align-items: center; justify-content: center; color: var(--dim); text-align: center; padding: 20px;
+  }
+  .pile-note { padding: 9px 14px; color: var(--dim); font-size: 12.5px; border-top: 1px solid var(--edge); }
+
+  footer { text-align: center; color: var(--dim); font-size: 12px; padding: 6px 0 20px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brick"></div>
+  <h1>LEGO Voice Assist <small>the screen guides · the voice finds your pieces</small></h1>
+  <div id="status">idle</div>
+</header>
+
+<main>
+  <!-- ── left rail: the voice companion ── -->
+  <aside class="rail">
+    <div class="panel">
+      <h2>Companion</h2>
+      <div class="mic-wrap">
+        <button class="mic-btn" id="mic" title="Start talking" aria-label="Start call">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        </button>
+        <div class="mic-label" id="micLabel">Tap to start</div>
+        <div id="agentline"></div>
+        <div class="rail-label">Language</div>
+        <div class="lang-row" id="langRow">
+          <button class="lang-btn sel" data-lang="en">EN</button>
+          <button class="lang-btn" data-lang="fr">FR</button>
+          <button class="lang-btn" data-lang="es">ES</button>
+          <button class="lang-btn" data-lang="de">DE</button>
+          <button class="lang-btn" data-lang="pt">PT</button>
+        </div>
+      </div>
+      <details class="settings">
+        <summary>Settings</summary>
+        <div class="body">
+          <select id="camSelect" title="Camera" hidden></select>
+          <select id="micSelect" title="Microphone (next call)">
+            <option value="">Default microphone</option>
+          </select>
+          <select id="orientation" title="Where is the camera relative to you?">
+            <option value="facing">Camera faces me (webcam on monitor)</option>
+            <option value="overhead">Camera behind me / over my shoulder</option>
+          </select>
+          <label class="toggle"><input type="checkbox" id="echoCancel" checked> Echo cancellation</label>
+          <button class="ghost" id="replacePdf">Replace instructions PDF</button>
+          <input type="file" id="pdfFile" accept="application/pdf" hidden>
+        </div>
+      </details>
+    </div>
+  </aside>
+
+  <!-- ── center: the guide (manual pages on screen) ── -->
+  <section class="panel">
+    <h2>Guide</h2>
+    <div class="body" id="guideBody">
+      <!-- upload state -->
+      <div id="uploadZone">
+        <div class="big">Load your set’s instructions</div>
+        <p>Drop in the instruction PDF once. We render every page here and the
+        step on screen becomes the step we build — no booklet needed.</p>
+        <button class="primary" id="uploadBtn">Upload instructions PDF</button>
+        <div id="pdfStatus"></div>
+      </div>
+      <!-- guide state (hidden until a manual is loaded) -->
+      <div id="guideView" hidden>
+        <div class="stepbar">
+          <button class="nav" id="prevStep" title="Previous step">‹</button>
+          <div class="meta"><b id="stepTitle">Step —</b><span id="stepSub"></span></div>
+          <button class="nav" id="nextStep" title="Next step">›</button>
+        </div>
+        <div id="guideImgWrap">
+          <img id="guideImg" alt="Instruction page" hidden>
+          <div id="guideFallback"><div class="num" id="fbNum">—</div><div>build diagram unavailable</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── right: the pile (camera the voice searches) ── -->
+  <section class="panel">
+    <h2>Your pile</h2>
+    <div id="stage">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div id="camHint">
+        <div>Point a camera at your loose pieces.</div>
+        <button class="primary" id="startCam">Start camera</button>
+      </div>
+    </div>
+    <div class="pile-note">Directions are spoken from <b>your</b> point of view.
+      Camera frames leave this machine only when a lookup runs.</div>
+  </section>
+</main>
+
+<footer>Gradium voice via gradbot · OpenAI vision · the pile is the only thing the camera watches</footer>
+
+<!-- gradbot audio stack: bundled by the server at /static/js. Plain script
+     tags on purpose — SyncedAudioPlayer is a global, not an ES module. -->
+<script src="static/js/opus-encoder.js"></script>
+<script src="static/js/audio-processor.js"></script>
+<script src="static/js/synced-audio-player.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const video = $("video"), overlay = $("overlay"), ctx = overlay.getContext("2d");
+
+const GRID_ROWS = 3, GRID_COLS = 3;   // pile cells A1..C3 — nine cells map cleanly
+                                       // onto spoken directions; must match main.py
+const MAX_EDGE = 1536;                 // cap crop resolution for the vision API
+const SID = (crypto.randomUUID?.() || Math.random().toString(36).slice(2));
+
+let camOn = false, callLive = false, busy = false;
+let manualId = null;
+let flatSteps = [];   // [{page, step, pieces, img, image_url}] in book order
+let currentStep = 0;  // index into flatSteps the guide is showing
+let highlights = [];  // [{row, col, box?, until}]
+
+function setStatus(text, cls) { const el = $("status"); el.textContent = text; el.className = cls || ""; }
+
+// ── camera (pile-only; the whole frame IS the pile view) ──────────────────
+// Baked-in device picker: some Chromium shells expose no per-tab camera
+// selector, so an external cam would otherwise be unreachable.
+let camStream = null;
+
+async function openStream(deviceId) {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      width: { ideal: 1920 }, height: { ideal: 1080 },
+      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+    },
+  });
+  camStream?.getTracks().forEach((t) => t.stop());
+  camStream = stream;
+  video.srcObject = stream;
+  await new Promise((ok) => (video.onloadedmetadata = ok));
+}
+
+async function populateCameras() {
+  const sel = $("camSelect");
+  const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+  const currentId = camStream?.getVideoTracks()[0]?.getSettings().deviceId;
+  sel.innerHTML = "";
+  cams.forEach((cam, i) => {
+    const opt = document.createElement("option");
+    opt.value = cam.deviceId;
+    opt.textContent = cam.label || `Camera ${i + 1}`;
+    opt.selected = cam.deviceId === currentId;
+    sel.appendChild(opt);
+  });
+  sel.hidden = !camOn || !cams.length;
+}
+
+async function startCamera() {
+  try {
+    const saved = localStorage.getItem("legoCam") || undefined;
+    await openStream(saved).catch(() => { localStorage.removeItem("legoCam"); return openStream(); });
+    camOn = true;
+    $("camHint").style.display = "none";
+    setStatus(callLive ? "on a call" : "camera on", "live");
+    sizeOverlay();
+    await populateCameras();
+    await populateMics();
+    // camera just became the pile view: tell a live session and warm the current step
+    signalReady();
+  } catch (err) {
+    console.error(err);
+    setStatus("camera blocked");
+  }
+}
+$("startCam").addEventListener("click", startCamera);
+
+$("camSelect").addEventListener("change", async (ev) => {
+  try {
+    await openStream(ev.target.value);
+    localStorage.setItem("legoCam", ev.target.value);
+    setStatus(callLive ? "on a call" : "camera on", "live");
+  } catch (err) { console.error(err); populateCameras(); }
+});
+navigator.mediaDevices.addEventListener?.("devicechange", () => { if (camOn) populateCameras(); populateMics(); });
+
+function sizeOverlay() { overlay.width = overlay.clientWidth; overlay.height = overlay.clientHeight; }
+addEventListener("resize", sizeOverlay);
+
+// ── overlay: grid + pinpoint highlights over the whole pile view ──────────
+// Driven by setInterval, NOT requestAnimationFrame: in a backgrounded/hidden
+// tab (the preview pane) rAF never fires, and the harness relies on this loop.
+function drawGrid(g, r, scale, bold) {
+  g.save();
+  g.strokeStyle = bold ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.32)";
+  g.lineWidth = (bold ? 3 : 1) * scale;
+  const cw = r.w / GRID_COLS, ch = r.h / GRID_ROWS;
+  for (let c = 1; c < GRID_COLS; c++) { g.beginPath(); g.moveTo(r.x + c * cw, r.y); g.lineTo(r.x + c * cw, r.y + r.h); g.stroke(); }
+  for (let row = 1; row < GRID_ROWS; row++) { g.beginPath(); g.moveTo(r.x, r.y + row * ch); g.lineTo(r.x + r.w, r.y + row * ch); g.stroke(); }
+  const fs = Math.max(11, ch * (bold ? 0.16 : 0.1)) * scale;
+  g.font = `700 ${fs}px sans-serif`; g.textBaseline = "top";
+  for (let row = 0; row < GRID_ROWS; row++) for (let c = 0; c < GRID_COLS; c++) {
+    const label = String.fromCharCode(65 + row) + (c + 1);
+    const x = r.x + c * cw + 4 * scale, y = r.y + row * ch + 4 * scale;
+    g.lineWidth = 3 * scale; g.strokeStyle = "rgba(0,0,0,0.8)"; g.strokeText(label, x, y);
+    g.fillStyle = bold ? "#fff" : "rgba(255,255,255,0.6)"; g.fillText(label, x, y);
+  }
+  g.restore();
+}
+
+function drawOverlay() {
+  if (!camOn) return;
+  const W = overlay.width, H = overlay.height;
+  if (!W || !H) return;
+  ctx.clearRect(0, 0, W, H);
+  const p = { x: 0, y: 0, w: W, h: H };   // the whole frame is the pile
+  drawGrid(ctx, p, 1, false);
+  const now = performance.now();
+  highlights = highlights.filter((h) => h.until > now);
+  const pulse = 0.28 + 0.2 * Math.sin(now / 180);
+  for (const h of highlights) {
+    if (h.box) {
+      // pinpoint: a tight box (normalized to the frame) → a pulsing outline
+      // sits ON the brick instead of flooding a ninth of the pile
+      const pad = 5;
+      const bx = h.box[0] * p.w - pad, by = h.box[1] * p.h - pad;
+      const bw = (h.box[2] - h.box[0]) * p.w + 2 * pad, bh = (h.box[3] - h.box[1]) * p.h + 2 * pad;
+      ctx.save();
+      ctx.fillStyle = `rgba(245, 197, 24, ${pulse * 0.55})`;
+      ctx.strokeStyle = "#f5c518"; ctx.lineWidth = 3.5;
+      ctx.shadowColor = "rgba(245, 197, 24, 0.9)"; ctx.shadowBlur = 10 + 6 * Math.sin(now / 180);
+      ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    } else {
+      const cw = p.w / GRID_COLS, ch = p.h / GRID_ROWS;
+      ctx.fillStyle = `rgba(245, 197, 24, ${pulse})`;
+      ctx.fillRect(h.col * cw, h.row * ch, cw, ch);
+      ctx.strokeStyle = "#f5c518"; ctx.lineWidth = 3;
+      ctx.strokeRect(h.col * cw, h.row * ch, cw, ch);
+    }
+  }
+}
+setInterval(drawOverlay, 40);
+
+// ── crop + encode: the whole video frame ──────────────────────────────────
+function cropFrame(burnGrid) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const scale = Math.min(1, MAX_EDGE / Math.max(vw, vh));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(vw * scale); canvas.height = Math.round(vh * scale);
+  const g = canvas.getContext("2d");
+  g.drawImage(video, 0, 0, vw, vh, 0, 0, canvas.width, canvas.height);
+  if (burnGrid) drawGrid(g, { x: 0, y: 0, w: canvas.width, h: canvas.height }, 1, true);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+async function postJSON(url, body) {
+  const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`);
+  return resp.json();
+}
+
+// ── the guide: manual pages rendered on screen ────────────────────────────
+$("uploadBtn").addEventListener("click", () => $("pdfFile").click());
+$("replacePdf").addEventListener("click", () => $("pdfFile").click());
+$("pdfFile").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0]; if (!file) return; ev.target.value = "";
+  $("pdfStatus").textContent = "uploading…";
+  try {
+    const fd = new FormData(); fd.append("pdf", file);
+    const resp = await fetch("api/manual", { method: "POST", body: fd });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`);
+    const { id } = await resp.json();
+    await pollManual(id);
+  } catch (err) { console.error(err); $("pdfStatus").textContent = `upload failed — ${err.message || err}`; }
+});
+
+async function pollManual(id) {
+  for (;;) {
+    const resp = await fetch(`api/manual/${id}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const m = await resp.json();
+    if (m.status === "error") throw new Error(m.error || "parse failed");
+    if (m.status === "done") return adoptManual(m, id);
+    $("pdfStatus").textContent = `parsing page ${m.done} of ${m.total || "…"} — one-time cost, cached after this`;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+
+function adoptManual(m, id) {
+  const steps = (m.pages || []).flatMap((pg, i) =>
+    (pg.steps || []).filter((s) => (s.pieces || []).length).map((s) => ({
+      page: pg.page, step: s.step, pieces: s.pieces, img: i,
+      image_url: `api/manual/${id}/page/${i}`,
+    })));
+  if (!steps.length) {
+    // A manual with no steps is worse than no manual: every lookup would fail.
+    manualId = null; flatSteps = [];
+    localStorage.removeItem("legoManual");
+    $("pdfStatus").textContent = `⚠ Parsed ${m.total} page${m.total === 1 ? "" : "s"} but found no build steps — is that the right instructions PDF?`;
+    return;
+  }
+  manualId = id; flatSteps = steps; currentStep = 0;
+  localStorage.setItem("legoManual", id);
+  $("uploadZone").hidden = true;
+  $("guideView").hidden = false;
+  renderGuide(0);
+  const note = callLive ? " Restart the call to build with it." : "";
+  setStatus(`${flatSteps.length} steps loaded`, callLive ? "live" : "");
+  if (callLive) $("agentline").textContent = "New set loaded." + note;
+}
+
+function renderGuide(idx) {
+  if (!flatSteps.length) return;
+  currentStep = Math.max(0, Math.min(idx, flatSteps.length - 1));
+  const s = flatSteps[currentStep];
+  $("stepTitle").textContent = `Step ${s.step ?? currentStep + 1}`;
+  $("stepSub").textContent = `${currentStep + 1} of ${flatSteps.length}` + (s.page ? ` · page ${s.page}` : "");
+  $("prevStep").disabled = currentStep === 0;
+  $("nextStep").disabled = currentStep === flatSteps.length - 1;
+  const img = $("guideImg"), fb = $("guideFallback");
+  if (s.image_url) {
+    img.hidden = false; fb.style.display = "none";
+    img.onerror = () => { img.hidden = true; $("fbNum").textContent = s.step ?? currentStep + 1; fb.style.display = "flex"; };
+    img.src = s.image_url;
+  } else {
+    img.hidden = true; $("fbNum").textContent = s.step ?? currentStep + 1; fb.style.display = "flex";
+  }
+}
+
+// On-screen prev/next and the voice both drive one server-side step. A click
+// updates the guide instantly (local render) and, on a call, POSTs the new
+// step so the server prefetches its pieces and pushes highlights back.
+function goToStep(idx) {
+  idx = Math.max(0, Math.min(idx, flatSteps.length - 1));
+  if (idx === currentStep && $("guideImg").src) { /* still resync server */ }
+  renderGuide(idx);
+  highlights = [];
+  if (callLive && camOn) sendFrames({ step: idx });
+}
+$("prevStep").addEventListener("click", () => goToStep(currentStep - 1));
+$("nextStep").addEventListener("click", () => goToStep(currentStep + 1));
+
+// restore the last manual across reloads (parse results are cached server-side)
+(async () => {
+  const id = localStorage.getItem("legoManual"); if (!id) return;
+  try {
+    const resp = await fetch(`api/manual/${id}`); if (!resp.ok) throw new Error();
+    const m = await resp.json();
+    if (m.status === "done") adoptManual(m, id);
+    else if (m.status === "parsing") await pollManual(id);
+    else throw new Error();
+  } catch { localStorage.removeItem("legoManual"); }
+})();
+
+// ── result rendering: highlights + guide follow the server ────────────────
+// All direction math (grid cell → "close to you, on your right") happens
+// server-side in deterministic Python; this only paints what came back.
+function applyFindResult(msg) {
+  if (msg.step && typeof msg.step.index === "number") {
+    // the server moved to this step (voice "next", or our own prev/next echo)
+    renderGuide(msg.step.index - 1);
+  }
+  highlights = [];
+  for (const p of (msg.pieces || [])) for (const c of (p.cells || []))
+    highlights.push({ row: c.row, col: c.col, box: c.box || null, until: performance.now() + 30000 });
+}
+
+// ── microphone picker ─────────────────────────────────────────────────────
+// gradbot's AudioProcessor opens the mic itself and exposes no device option,
+// so the choice is injected here: wrap getUserMedia and pin the saved deviceId
+// on any audio-only request. Video requests (the camera path) pass through.
+const nativeGUM = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+navigator.mediaDevices.getUserMedia = (constraints) => {
+  const micId = localStorage.getItem("legoMic");
+  if (!(micId && constraints?.audio && !constraints.video)) return nativeGUM(constraints);
+  const audio = constraints.audio === true ? {} : constraints.audio;
+  const pinned = { ...constraints, audio: { ...audio, deviceId: { exact: micId } } };
+  return nativeGUM(pinned).catch((err) => {
+    if (err?.name !== "OverconstrainedError") throw err;
+    localStorage.removeItem("legoMic"); populateMics(); return nativeGUM(constraints);
+  });
+};
+async function populateMics() {
+  const sel = $("micSelect"); const saved = localStorage.getItem("legoMic") || "";
+  const mics = (await navigator.mediaDevices.enumerateDevices())
+    .filter((d) => d.kind === "audioinput" && d.deviceId && d.deviceId !== "default" && d.deviceId !== "communications");
+  sel.innerHTML = "";
+  const def = document.createElement("option"); def.value = ""; def.textContent = "Default microphone"; sel.appendChild(def);
+  let found = false;
+  mics.forEach((mic, i) => {
+    const opt = document.createElement("option"); opt.value = mic.deviceId;
+    opt.textContent = mic.label || `Microphone ${i + 1}`;
+    if (mic.deviceId === saved) { opt.selected = true; found = true; }
+    sel.appendChild(opt);
+  });
+  if (saved && !found) localStorage.removeItem("legoMic");
+}
+populateMics();
+$("micSelect").addEventListener("change", (ev) => {
+  if (ev.target.value) localStorage.setItem("legoMic", ev.target.value); else localStorage.removeItem("legoMic");
+  if (callLive) setStatus("mic saved — restart the call to switch", "live");
+});
+
+// ── orientation preset (affects egocentric directions) ────────────────────
+$("orientation").value = localStorage.getItem("legoOrient") || "facing";
+$("orientation").addEventListener("change", (ev) => {
+  localStorage.setItem("legoOrient", ev.target.value);
+  if (callLive && camOn) sendFrames({ warm: true });  // re-warm with the new preset
+});
+
+// ── language buttons: pre-call selection + mid-call switch ────────────────
+let selectedLang = localStorage.getItem("legoLang") || "en";
+function markLang(l) { $("langRow").querySelectorAll(".lang-btn").forEach((b) => b.classList.toggle("sel", b.dataset.lang === l)); }
+markLang(selectedLang);
+$("langRow").addEventListener("click", (e) => {
+  const btn = e.target.closest(".lang-btn"); if (!btn) return;
+  selectedLang = btn.dataset.lang; markLang(selectedLang);
+  localStorage.setItem("legoLang", selectedLang);
+  if (callLive && ws?.readyState === WebSocket.OPEN) {
+    // live swap: send_config on the server swaps voice + instructions without
+    // resetting the conversation (mirrors the switch_language tool)
+    ws.send(JSON.stringify({ type: "config", lang: selectedLang, regions_ready: camOn, orientation: $("orientation").value }));
+    setStatus(`switching to ${btn.textContent}…`, "busy");
+  }
+});
+
+// ── voice call: gradbot session (streaming STT ↔ LLM ↔ TTS, barge-in) ─────
+let ws = null, player = null, isRecording = false;
+
+$("mic").addEventListener("click", () => (callLive ? endCall() : startCall()));
+
+async function startCall() {
+  $("mic").disabled = true;
+  try {
+    setStatus("connecting…", "busy");
+    const audioConfig = await fetch("api/audio-config").then((r) => r.json());
+    player = new SyncedAudioPlayer({
+      basePath: "static/js", sampleRate: 24000, pcmOutput: audioConfig.pcm || false,
+      echoCancellation: $("echoCancel").checked,
+      onEncodedAudio: (opus) => { if (isRecording && ws?.readyState === WebSocket.OPEN) ws.send(opus); },
+      onText: ({ text, turnIdx, isUser }) => showAgentLine(text, turnIdx, isUser),
+      onEvent: (_t, msg) => handleCustomMessage(msg),
+    });
+    await player.start();
+
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    // base path so the demo works both at root and mounted at /<demo>/ (gradbot's combined launcher)
+    const base = location.pathname.replace(/\/$/, "");
+    ws = new WebSocket(`${proto}//${location.host}${base}/ws/chat`);
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        type: "start", sid: SID,
+        manual_id: manualId, orientation: $("orientation").value,
+        lang: selectedLang, regions_ready: camOn,
+      }));
+      isRecording = true; callLive = true;
+      $("mic").classList.add("live"); $("micLabel").textContent = "Listening — tap to end";
+      $("agentline").textContent = "";
+      setStatus("on a call", "live");
+      populateMics();
+      if (camOn) sendFrames({ warm: true });  // prefetch the current step's pieces
+    };
+    ws.onmessage = (event) => player.handleMessage(event.data);
+    ws.onclose = () => endCall();
+    ws.onerror = () => setStatus("call connection failed");
+  } catch (err) {
+    console.error(err); setStatus("mic blocked or call failed"); endCall();
+  } finally { $("mic").disabled = false; }
+}
+
+function endCall() {
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "stop" }));
+  isRecording = false; callLive = false;
+  ws?.close(); ws = null; player?.stop(); player = null;
+  $("mic").classList.remove("live"); $("micLabel").textContent = "Tap to start";
+  setStatus(camOn ? "camera on" : "idle", camOn ? "live" : "");
+}
+
+// Camera became ready during a live call: tell the agent (send_config swaps
+// the "start the camera" instructions for the ready ones) and warm the current
+// step so the first ask is instant.
+let readySignaled = false;
+function signalReady() {
+  if (!callLive || !camOn || ws?.readyState !== WebSocket.OPEN) return;
+  if (!readySignaled) {
+    readySignaled = true;
+    ws.send(JSON.stringify({ type: "config", regions_ready: true, lang: selectedLang, orientation: $("orientation").value }));
+  }
+  sendFrames({ warm: true });
+}
+
+function handleCustomMessage(msg) {
+  switch (msg.type) {
+    case "capture": sendFrames(); break;                 // a tool wants fresh crops
+    case "find_result": applyFindResult(msg); if (callLive) setStatus("on a call", "live"); break;
+    case "status": setStatus(msg.hint || "…", "busy"); break;
+    case "lang": selectedLang = msg.lang; markLang(msg.lang); localStorage.setItem("legoLang", msg.lang); setStatus("on a call", "live"); break;
+    case "error": console.error("session error", msg); setStatus(msg.message || "session error"); break;
+  }
+}
+
+// POST the pile crop (grid burned in) + a clean full frame (check_piece looks
+// there) to the session mailbox. Called when the backend asks (capture) and
+// unprompted on warm-up / on-screen step changes.
+async function sendFrames(extra = {}) {
+  const body = { orientation: $("orientation").value, ...extra };
+  if (camOn) { body.pile = cropFrame(true); body.scene = cropFrame(false); }
+  try { await postJSON(`api/frames/${SID}`, body); } catch (err) { console.error("frames", err); }
+}
+
+// ── agent's last line only (no transcript wall) ───────────────────────────
+let curAgentTurn = null;
+function showAgentLine(text, turnIdx, isUser) {
+  if (isUser) return;  // the builder's words don't need to be on screen
+  if (turnIdx !== curAgentTurn) { curAgentTurn = turnIdx; $("agentline").textContent = ""; }
+  $("agentline").textContent += text + " ";
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# secrets — never commit
+.env
+
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# parsed-manual cache
+data/
+
+# local recordings + macOS junk
+demo/
+.DS_Store
