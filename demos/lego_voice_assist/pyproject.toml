@@ -14,5 +14,10 @@ dependencies = [
     "python-multipart>=0.0.32",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
 [tool.uv.sources]
 gradbot = { path = "../../gradbot_py" }

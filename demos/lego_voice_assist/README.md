@@ -87,6 +87,17 @@ Only the two keys are required. Everything else has a sensible default — see
 [`.env.example`](.env.example) for the full list, including model/effort tiers,
 per-language voice overrides, and the STT flush window.
 
+## Tests
+
+Unit tests cover the deterministic helpers — grid-cell parsing, egocentric
+direction phrasing, speech composition — the logic the module's own comments
+insist stay "exact code, never left to a model." They stub the native
+`gradbot` extension so they run without building the Rust workspace:
+
+```bash
+uv run --group dev pytest tests
+```
+
 ## Hosting
 
 Like the other gradbot demos, this ships no deploy files of its own — it's a
