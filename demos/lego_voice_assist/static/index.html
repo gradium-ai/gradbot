@@ -215,7 +215,7 @@
   #bricks.grabbing { cursor: grabbing; }
   #playHint {
     position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
-    color: var(--dim); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--dim); font-size: 12px; letter-spacing: .02em;
     pointer-events: none; opacity: .5; transition: opacity .5s;
   }
   #playHint.gone { opacity: 0; }
@@ -324,7 +324,7 @@
 <!-- decorative: draggable loose bricks fill the empty space below the cards -->
 <section id="playground" aria-hidden="true">
   <canvas id="bricks"></canvas>
-  <div id="playHint">drag the loose bricks</div>
+  <div id="playHint">Now go build something</div>
 </section>
 
 <!-- gradbot audio stack: bundled by the server at /static/js. Plain script
