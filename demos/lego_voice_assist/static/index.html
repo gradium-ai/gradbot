@@ -66,8 +66,11 @@
   main {
     display: grid; grid-template-columns: 260px minmax(0, 1fr) minmax(0, 1fr);
     gap: 16px; padding: 16px 20px; max-width: 1600px; margin: 0 auto;
-    align-items: stretch;
+    align-items: stretch;   /* equal-height cards in the pristine empty state */
   }
+  /* Once a manual/camera/call is engaged, stop coupling card heights: a growing
+     transcript or a tall manual must not stretch the video box or the pile. */
+  main.engaged { align-items: start; }
   @media (max-width: 1080px) { main { grid-template-columns: 1fr; } }
 
   .panel {
@@ -107,14 +110,15 @@
   }
   .mic-label { font-size: 13px; color: var(--dim); text-align: center; }
   #agentline {
-    min-height: 40px; width: 100%; text-align: center; font-size: 14px;
+    min-height: 40px; max-height: 132px; overflow-y: auto;   /* scroll long replies; don't grow the card */
+    width: 100%; text-align: center; font-size: 14px;
     color: var(--text); background: var(--panel2); border: 1px solid var(--edge);
     border-radius: 10px; padding: 10px 12px; line-height: 1.4;
   }
   #agentline:empty::before { content: "Tap the mic and just talk."; color: var(--dim); }
   #userline {
     width: 100%; text-align: center; font-size: 12.5px; color: var(--dim);
-    line-height: 1.35; padding: 2px 4px;
+    line-height: 1.35; padding: 2px 4px; max-height: 48px; overflow-y: auto;
   }
   #userline::before { content: "🗣 "; }
   #userline:empty { display: none; }   /* only shows once you've spoken */
@@ -202,6 +206,9 @@
 
   /* ── pile pane ── */
   #stage { position: relative; background: #000; flex: 1; min-height: 300px; }
+  /* Camera live: size the stage to the video itself, so the grid and highlight
+     outlines sit on the actual feed instead of the black letterbox below it. */
+  main.cam-live #stage { flex: none; min-height: 0; }
   #stage video { display: block; width: 100%; }
   #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   #camHint {
@@ -388,6 +395,7 @@ async function startCamera() {
     const saved = localStorage.getItem("legoCam") || undefined;
     await openStream(saved).catch(() => { localStorage.removeItem("legoCam"); return openStream(); });
     camOn = true;
+    document.querySelector("main").classList.add("engaged", "cam-live");
     $("camHint").style.display = "none";
     setStatus(callLive ? "on a call" : "camera on", "live");
     sizeOverlay();
@@ -413,6 +421,9 @@ navigator.mediaDevices.addEventListener?.("devicechange", () => { if (camOn) pop
 
 function sizeOverlay() { overlay.width = overlay.clientWidth; overlay.height = overlay.clientHeight; }
 addEventListener("resize", sizeOverlay);
+// Keep the overlay canvas locked to the video box through every layout change —
+// camera going live resizes the stage, video metadata arrives, the window resizes.
+new ResizeObserver(sizeOverlay).observe(overlay);
 
 // ── overlay: grid + pinpoint highlights over the whole pile view ──────────
 // Driven by setInterval, NOT requestAnimationFrame: in a backgrounded/hidden
@@ -531,6 +542,7 @@ function adoptManual(m, id) {
   localStorage.setItem("legoManual", id);
   $("uploadZone").hidden = true;
   $("guideView").hidden = false;
+  document.querySelector("main").classList.add("engaged");
   renderGuide(0);
   const note = callLive ? " Restart the call to build with it." : "";
   setStatus(`${flatSteps.length} steps loaded`, callLive ? "live" : "");
@@ -698,6 +710,7 @@ async function startCall() {
         lang: selectedLang, regions_ready: camOn,
       }));
       isRecording = true; callLive = true;
+      document.querySelector("main").classList.add("engaged");
       $("mic").classList.add("live"); $("micLabel").textContent = "Listening — tap to end";
       $("agentline").textContent = ""; $("userline").textContent = "";
       setStatus("on a call", "live");
