@@ -51,6 +51,11 @@ pip install gradbot
 
 Or run a demo directly (builds from source):
 
+> **macOS prerequisite:** the demos build the Rust/C audio stack from source, which requires `opus` and `pkg-config`:
+> ```bash
+> brew install opus pkg-config
+> ```
+
 ```bash
 cd demos/simple_chat
 uv sync
