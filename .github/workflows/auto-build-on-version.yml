@@ -1,0 +1,290 @@
+name: Auto Build on VERSION Change
+
+# Builds and pushes the gradbot demos image whenever the VERSION file changes
+# on main. The image only ships to the Scaleway registry (it is served from the
+# site-and-demo cluster), so this is Scaleway-only — no ECR.
+#
+# Requires two repo/org secrets: SCW_ACCESS_KEY and SCW_SECRET_KEY.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'VERSION'
+  workflow_dispatch:  # Allow manual runs (build current VERSION if not already published)
+
+# Permissions for GITHUB_TOKEN
+permissions:
+  contents: write        # For git tagging
+
+env:
+  REGISTRY_SCW: rg.fr-par.scw.cloud/gradium
+  IMAGE_NAME: gradbot
+
+jobs:
+  # =============================================================================
+  # DETECT: Read the version and confirm the VERSION file actually changed
+  # =============================================================================
+  detect-changes:
+    name: Detect VERSION Change
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.detect.outputs.version }}
+      has_changes: ${{ steps.detect.outputs.has_changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Need previous commit to detect changes
+
+      - name: Detect VERSION change
+        id: detect
+        run: |
+          echo "🔍 Detecting VERSION change..."
+
+          # On manual dispatch, always proceed — the check-image-exists job
+          # makes this idempotent (skips the build if the tag already exists).
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            if ! git diff --name-only HEAD~1 HEAD | grep -qx 'VERSION'; then
+              echo "No VERSION change detected"
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+
+          # Skip pre-release / dev builds
+          case "$VERSION" in
+            *-dev|*-rc*|"")
+              echo "⚠️  Skipping non-release version: '$VERSION'"
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+              exit 0
+              ;;
+          esac
+
+          echo "✅ Will build: ${IMAGE_NAME}:${VERSION}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+
+  # =============================================================================
+  # CHECK: Record whether the image/tag already exists (does not fail if present)
+  # =============================================================================
+  check-image-exists:
+    name: Check gradbot:${{ needs.detect-changes.outputs.version }}
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      exists_in: ${{ steps.check.outputs.exists_in }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history to check tags
+
+      - name: Login to Scaleway Registry
+        uses: docker/login-action@v3
+        with:
+          registry: rg.fr-par.scw.cloud
+          username: ${{ secrets.SCW_ACCESS_KEY }}
+          password: ${{ secrets.SCW_SECRET_KEY }}
+
+      - name: Check where image/tag already exists
+        id: check
+        run: |
+          VERSION="${{ needs.detect-changes.outputs.version }}"
+
+          echo "🔍 Checking if ${IMAGE_NAME}:${VERSION} exists..."
+
+          EXISTS_IN=""
+
+          # Check Scaleway
+          if docker manifest inspect "${{ env.REGISTRY_SCW }}/${IMAGE_NAME}:${VERSION}" > /dev/null 2>&1; then
+            echo "⚠️  Exists in Scaleway"
+            EXISTS_IN="${EXISTS_IN}scw,"
+          else
+            echo "✅ Not in Scaleway"
+          fi
+
+          # Check git tag
+          if git rev-parse "${IMAGE_NAME}/${VERSION}" >/dev/null 2>&1; then
+            echo "⚠️  Git tag exists"
+            EXISTS_IN="${EXISTS_IN}git-tag,"
+          else
+            echo "✅ Git tag does not exist"
+          fi
+
+          # Remove trailing comma
+          EXISTS_IN="${EXISTS_IN%,}"
+
+          if [ -z "$EXISTS_IN" ]; then
+            echo "✅ Image does not exist anywhere - will build and push"
+            EXISTS_IN="none"
+          else
+            echo "⚠️  Image exists in: $EXISTS_IN"
+          fi
+
+          echo "exists_in=$EXISTS_IN" >> $GITHUB_OUTPUT
+
+  # =============================================================================
+  # BUILD: Build, scan, and push the Docker image to Scaleway
+  # =============================================================================
+  build-and-push:
+    name: Build gradbot:${{ needs.detect-changes.outputs.version }}
+    needs: [detect-changes, check-image-exists]
+    if: >-
+      needs.detect-changes.outputs.has_changes == 'true' &&
+      needs.check-image-exists.outputs.exists_in == 'none'
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.build.outcome }}
+    steps:
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/share/swift /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost /usr/share/miniconda || true
+          docker system prune -af --volumes || true
+          df -h /
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Scaleway Registry
+        uses: docker/login-action@v3
+        with:
+          registry: rg.fr-par.scw.cloud
+          username: ${{ secrets.SCW_ACCESS_KEY }}
+          password: ${{ secrets.SCW_SECRET_KEY }}
+
+      # Step 1: Build image locally (don't push yet)
+      - name: Build Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          load: true  # Load to local Docker instead of pushing
+          tags: ${{ env.IMAGE_NAME }}:${{ needs.detect-changes.outputs.version }}
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ env.REGISTRY_SCW }}/${{ env.IMAGE_NAME }}:cache
+          cache-to: |
+            type=gha,mode=max
+          network: host
+          provenance: false
+
+      # Step 2: Scan image for vulnerabilities (table output for logs)
+      - name: Scan image for vulnerabilities (Trivy)
+        if: steps.build.outcome == 'success'
+        continue-on-error: true  # Don't fail the build if scan fails
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ needs.detect-changes.outputs.version }}
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          ignore-unfixed: true
+          timeout: '15m'
+
+      # Step 3: Push to Scaleway (version + latest)
+      - name: Push to Scaleway
+        id: push_scw
+        if: steps.build.outcome == 'success'
+        run: |
+          VERSION="${{ needs.detect-changes.outputs.version }}"
+          LOCAL_TAG="${IMAGE_NAME}:${VERSION}"
+          TAG="${{ env.REGISTRY_SCW }}/${IMAGE_NAME}:${VERSION}"
+
+          echo "🚀 Pushing to Scaleway: $TAG"
+          docker tag "$LOCAL_TAG" "$TAG"
+          docker push "$TAG"
+
+          LATEST_TAG="${{ env.REGISTRY_SCW }}/${IMAGE_NAME}:latest"
+          docker tag "$LOCAL_TAG" "$LATEST_TAG"
+          docker push "$LATEST_TAG"
+          echo "✅ Pushed to Scaleway ($VERSION + latest)"
+
+  # =============================================================================
+  # TAG: Create the git tag for the released version
+  # =============================================================================
+  create-git-tag:
+    name: Tag gradbot/${{ needs.detect-changes.outputs.version }}
+    needs: [detect-changes, check-image-exists, build-and-push]
+    if: >-
+      needs.detect-changes.outputs.has_changes == 'true' &&
+      needs.check-image-exists.outputs.exists_in == 'none' &&
+      needs.build-and-push.outputs.build == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history to check tags
+
+      - name: Create git tag
+        run: |
+          TAG_NAME="${IMAGE_NAME}/${{ needs.detect-changes.outputs.version }}"
+
+          # Double-check if tag already exists (safety check)
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "⏭️ Tag $TAG_NAME already exists - skipping"
+            exit 0
+          fi
+
+          echo "🏷️  Creating tag: $TAG_NAME"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$TAG_NAME" -m "Release ${IMAGE_NAME} ${{ needs.detect-changes.outputs.version }}"
+          git push origin "$TAG_NAME"
+
+          echo "✅ Tag $TAG_NAME created and pushed"
+
+  # =============================================================================
+  # SUMMARY: Final build summary
+  # =============================================================================
+  summary:
+    name: Build Summary
+    needs: [detect-changes, check-image-exists, build-and-push, create-git-tag]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "# 🚀 Auto Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.detect-changes.outputs.has_changes }}" != "true" ]; then
+            echo "ℹ️ No buildable VERSION change detected." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          VERSION="${{ needs.detect-changes.outputs.version }}"
+          EXISTS_IN="${{ needs.check-image-exists.outputs.exists_in }}"
+
+          echo "**Image:** \`${IMAGE_NAME}:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$EXISTS_IN" != "none" ]; then
+            echo "⏭️ Build skipped — image/tag already exists in: \`$EXISTS_IN\`" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          BUILD="${{ needs.build-and-push.result }}"
+          TAG="${{ needs.create-git-tag.result }}"
+
+          echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|:------:|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build & Push (SCW) | $BUILD |" >> $GITHUB_STEP_SUMMARY
+          echo "| Git Tag | $TAG |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Registry" >> $GITHUB_STEP_SUMMARY
+          echo "- **scw**: \`${{ env.REGISTRY_SCW }}/${IMAGE_NAME}:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
