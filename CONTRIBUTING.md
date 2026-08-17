@@ -2,6 +2,8 @@
 
 Thanks for taking the time to contribute. This document explains how to set up the project, the workflow we use, and what we look for in pull requests.
 
+By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Getting started
 
 ### Prerequisites
