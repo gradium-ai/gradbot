@@ -15,6 +15,24 @@ enum InternalCmd {
     Greet,
 }
 
+/// Items to be played through TTS in sequence.
+#[derive(Debug, Clone)]
+enum TtsQueueItem {
+    /// Filler content detected during LLM streaming - plays immediately.
+    Filler { content: String, turn_idx: u64 },
+    /// Main LLM response - plays after any queued fillers.
+    Main { text: String, turn_idx: u64 },
+}
+
+/// Commands sent to the TTS coordinator.
+#[derive(Debug)]
+enum TtsCoordinatorCmd {
+    /// Queue a filler for immediate playback.
+    QueueFiller { content: String, turn_idx: u64 },
+    /// Queue main content to play after fillers.
+    QueueMain { text: String, turn_idx: u64 },
+}
+
 /// Returns the internal reset_asr tool definition.
 /// This tool allows the LLM to reset the speech-to-text system when it gets stuck.
 fn reset_asr_tool() -> crate::llm::ToolDef {
@@ -36,6 +54,174 @@ fn reset_asr_tool() -> crate::llm::ToolDef {
             "required": []
         }),
     }
+}
+
+/// TTS coordinator task that ensures sequential playback of filler and main content.
+/// Prevents audio mixing by playing only one TTS stream at a time.
+async fn run_tts_coordinator(
+    mut cmd_rx: tokio::sync::mpsc::Receiver<TtsCoordinatorCmd>,
+    tts_client: Arc<TtsClient>,
+    config: Arc<Mutex<Option<SessionConfig>>>,
+    tts_out_tx: tokio::sync::mpsc::Sender<Result<TtsOut>>,
+    state: Arc<Mutex<State>>,
+) -> Result<()> {
+    use std::collections::VecDeque;
+
+    let mut queue: VecDeque<TtsQueueItem> = VecDeque::new();
+    let mut playing: Option<tokio::task::JoinHandle<()>> = None;
+
+    loop {
+        tokio::select! {
+            // Receive new items to queue
+            Some(cmd) = cmd_rx.recv() => {
+                match cmd {
+                    TtsCoordinatorCmd::QueueFiller { content, turn_idx } => {
+                        tracing::info!("📝 TTS queue: adding filler (turn={}, content='{}')", turn_idx, content);
+                        queue.push_back(TtsQueueItem::Filler { content, turn_idx });
+                    }
+                    TtsCoordinatorCmd::QueueMain { text, turn_idx } => {
+                        tracing::info!("📝 TTS queue: adding main content (turn={}, {} chars)", turn_idx, text.len());
+                        queue.push_back(TtsQueueItem::Main { text, turn_idx });
+                    }
+                }
+            }
+
+            // Check if current item finished
+            result = async {
+                if let Some(ref mut handle) = playing {
+                    handle.await
+                } else {
+                    // No active task, wait forever
+                    std::future::pending::<Result<(), tokio::task::JoinError>>().await
+                }
+            } => {
+                if let Err(e) = result {
+                    tracing::error!(?e, "TTS playback task panicked");
+                }
+                playing = None;
+            }
+
+            else => break, // All channels closed
+        }
+
+        // Start next item if nothing playing
+        if playing.is_none() {
+            while let Some(item) = queue.pop_front() {
+                // Check if item is stale (old turn_idx)
+                let current_turn = state.lock().await.turn_idx();
+                let item_turn = match &item {
+                    TtsQueueItem::Filler { turn_idx, .. } => *turn_idx,
+                    TtsQueueItem::Main { turn_idx, .. } => *turn_idx,
+                };
+
+                if item_turn < current_turn {
+                    tracing::debug!(
+                        "⏭️  TTS skipped: stale item (turn={} < current={})",
+                        item_turn,
+                        current_turn
+                    );
+                    continue; // Skip stale item, try next
+                }
+
+                // Play this item
+                let tts_client = tts_client.clone();
+                let config = config.clone();
+                let tts_out_tx = tts_out_tx.clone();
+
+                playing = Some(tokio::spawn(async move {
+                    if let Err(e) = play_tts_item(item, tts_client, config, tts_out_tx).await {
+                        tracing::error!(?e, "TTS item playback failed");
+                    }
+                }));
+                break; // Don't start more items
+            }
+        }
+    }
+
+    tracing::debug!("TTS coordinator task ended");
+    Ok(())
+}
+
+/// Play a single TTS item (filler or main content).
+async fn play_tts_item(
+    item: TtsQueueItem,
+    tts_client: Arc<TtsClient>,
+    config: Arc<Mutex<Option<SessionConfig>>>,
+    tts_out_tx: tokio::sync::mpsc::Sender<Result<TtsOut>>,
+) -> Result<()> {
+    let (content, turn_idx, is_filler) = match &item {
+        TtsQueueItem::Filler { content, turn_idx } => (content.as_str(), *turn_idx, true),
+        TtsQueueItem::Main { text, turn_idx } => (text.as_str(), *turn_idx, false),
+    };
+
+    let item_type = if is_filler { "filler" } else { "main" };
+    tracing::info!("▶️  TTS playing: {} (turn={}, {} chars)", item_type, turn_idx, content.len());
+
+    // Get TTS configuration
+    let cfg = config.lock().await.clone();
+    let Some(cfg) = cfg else {
+        tracing::warn!("No session config available for TTS");
+        return Ok(());
+    };
+
+    let voice_id = cfg.voice_id;
+    let padding_bonus = cfg.padding_bonus;
+    let rewrite_rules = cfg.rewrite_rules;
+    let tts_extra_config = cfg.tts_extra_config;
+
+    // Create TTS stream
+    let (mut tts_tx, mut tts_rx) = tts_client
+        .tts_stream(voice_id, padding_bonus, rewrite_rules, tts_extra_config.as_deref())
+        .await
+        .context("Failed to create TTS stream")?;
+
+    // Send text to TTS
+    tts_tx.send_text(content).await?;
+    tts_tx.send_end_of_stream().await?;
+
+    // Forward TTS output
+    let mut audio_chunk_count = 0;
+    let mut last_stop_s = 0.0;
+    while let Some(msg) = tts_rx.next_message(turn_idx).await? {
+        // Track last stop_s from audio messages
+        if let TtsOut::Audio { stop_s, .. } = &msg {
+            last_stop_s = *stop_s;
+        }
+        audio_chunk_count += 1;
+        if let Err(e) = tts_out_tx.send(Ok(msg)).await {
+            tracing::warn!(?e, "Failed to send TTS output");
+            break;
+        }
+    }
+
+    tracing::info!(
+        "✅ TTS complete: {} (turn={}, {} chunks)",
+        item_type,
+        turn_idx,
+        audio_chunk_count
+    );
+
+    // For Main items, send TurnComplete to signal end of turn
+    if is_filler {
+        tracing::debug!(
+            "Filler complete (turn={}), no TurnComplete sent",
+            turn_idx
+        );
+    } else {
+        tracing::info!(
+            "Main content complete (turn={}), sending TurnComplete with stop_s={}",
+            turn_idx,
+            last_stop_s
+        );
+        tts_out_tx
+            .send(Ok(TtsOut::TurnComplete {
+                turn_idx,
+                stop_s: last_stop_s,
+            }))
+            .await?;
+    }
+
+    Ok(())
 }
 const INPUT_FRAME_SIZE: usize = 1920;
 pub const OUTPUT_SAMPLE_RATE: usize = 48000;
@@ -113,7 +299,6 @@ struct SttSender_ {
 struct SttSender(Arc<Mutex<SttSender_>>);
 
 struct Session {
-    tts_client: Arc<TtsClient>,
     stt_client: Arc<SttClient>,
     stt_receiver: SttStreamReceiver,
     llm: Arc<tokio::sync::RwLock<crate::llm::LlmSession>>,
@@ -148,6 +333,10 @@ struct Session {
     internal_cmd_rx: tokio::sync::mpsc::Receiver<InternalCmd>,
     /// Sender for internal commands - cloned into spawned tasks.
     internal_cmd_tx: tokio::sync::mpsc::Sender<InternalCmd>,
+    /// Sender for TTS coordinator commands (filler and main content).
+    tts_coord_tx: tokio::sync::mpsc::Sender<TtsCoordinatorCmd>,
+    /// TTS coordinator task handle - kept alive for session lifetime.
+    _tts_coord_jh: crate::utils::JoinHandleAbortOnDrop,
     /// Wall-clock time when the current STT connection was established.
     /// Used to auto-reconnect if disconnected after being connected for >20s.
     stt_connected_at: std::time::Instant,
@@ -197,28 +386,52 @@ impl Session {
         let stt_sender = SttSender(Arc::new(Mutex::new(stt_sender)));
         let session_config = Arc::new(Mutex::new(session_config));
 
-        // Set up gradbot_filler callback to send text directly to TTS
-        // Note: For simplicity, we just log the filler call for now.
-        // Full immediate TTS integration would require access to current turn_idx
-        // to avoid audio being filtered out by turn management.
+        // Create TTS coordinator channel and spawn coordinator task
+        let (tts_coord_tx, tts_coord_rx) = tokio::sync::mpsc::channel(32);
+        let state = Arc::new(Mutex::new(State::Listening {
+            since_s: 0.0,
+            texts: vec![],
+            turn_idx: 0,
+        }));
+
+        // Set up gradbot_filler callback to send to TTS coordinator
+        let tts_coord_tx_for_callback = tts_coord_tx.clone();
+        let state_for_callback = state.clone();
         llm_session.set_filler_callback(move |content: String| {
-            tracing::info!("🎤 gradbot_filler called with content: '{}'", content);
-            tracing::info!("   Note: Immediate TTS callback received but not sending to TTS stream");
-            tracing::info!("   (filler content will flow through normal LLM response)");
+            let tts_coord_tx = tts_coord_tx_for_callback.clone();
+            let state = state_for_callback.clone();
+            tokio::spawn(async move {
+                let turn_idx = state.lock().await.turn_idx();
+                tracing::info!("🎤 gradbot_filler: queueing '{}' (turn={})", content, turn_idx);
+                if let Err(e) = tts_coord_tx
+                    .send(TtsCoordinatorCmd::QueueFiller { content, turn_idx })
+                    .await
+                {
+                    tracing::warn!(?e, "Failed to queue filler to TTS coordinator");
+                }
+            });
         });
 
         let llm = Arc::new(tokio::sync::RwLock::new(llm_session));
         let (internal_cmd_tx, internal_cmd_rx) = tokio::sync::mpsc::channel(10);
+
+        // Spawn TTS coordinator task - must be done after creating all the clones
+        let tts_coord_jh = crate::utils::spawn_abort_on_drop(
+            "tts-coordinator",
+            run_tts_coordinator(
+                tts_coord_rx,
+                tts_client.clone(),
+                session_config.clone(),
+                tts_out_tx.clone(),
+                state.clone(),
+            ),
+        );
+
         let slf = Self {
-            tts_client,
             stt_client,
             llm,
             stt_receiver,
-            state: Arc::new(Mutex::new(State::Listening {
-                since_s: 0.0,
-                texts: vec![],
-                turn_idx: 0,
-            })),
+            state,
             tts_out_tx,
             msg_out_tx,
             stt_sender: stt_sender.clone(),
@@ -227,6 +440,8 @@ impl Session {
             silence_prompts: 0,
             internal_cmd_rx,
             internal_cmd_tx,
+            tts_coord_tx,
+            _tts_coord_jh: tts_coord_jh,
             // First STT stream starts at session time 0
             stt_stream_start_audio_s: 0.0,
             stt_connected_at: std::time::Instant::now(),
@@ -474,306 +689,127 @@ impl Session {
         self.user_interrupted
             .store(false, std::sync::atomic::Ordering::Release);
 
-        let tts_client = self.tts_client.clone();
         let tts_out_tx = self.tts_out_tx.clone();
         let msg_out_tx = self.msg_out_tx.clone();
-        let start_time = self.audio_time_s().await;
         let llm_request_start = std::time::Instant::now();
         let _ = self.send_event(Event::LlmStarted).await;
         let stt_sender = self.stt_sender.clone();
-        let session_config = self.session_config.clone();
         let internal_cmd_tx = self.internal_cmd_tx.clone();
-        let llm = self.llm.clone();
-        let user_interrupted = self.user_interrupted.clone();
-        let (padding_bonus, rewrite_rules, tts_extra_config) = {
-            let guard = self.session_config.lock().await;
-            (
-                guard.as_ref().map(|c| c.padding_bonus).unwrap_or(0.0),
-                guard.as_ref().and_then(|c| c.rewrite_rules.clone()),
-                guard.as_ref().and_then(|c| c.tts_extra_config.clone()),
-            )
-        };
+        let tts_coord_tx = self.tts_coord_tx.clone();
         let jh = crate::utils::spawn_abort_on_drop("llm-tts", async move {
-            let result: Result<f64> = async {
-                let voice_id = {
-                    let config_guard = session_config.lock().await;
-                    let config = config_guard.as_ref().ok_or_else(|| {
-                        anyhow::anyhow!("Session configuration required before audio processing")
-                    })?;
-                    config.voice_id.clone()
-                };
-                tracing::info!(?voice_id, "creating TTS stream");
-                let (mut tts_tx, tts_rx) =
-                    tts_client.tts_stream(voice_id.clone(), padding_bonus, rewrite_rules.clone(), tts_extra_config.as_deref()).await
-                        .context("TTS: failed to create stream")?;
-                tracing::info!("TTS stream created successfully");
-                // Shared state for tracking last stop_s across futures
-                let last_stop_s =
-                    Arc::new(std::sync::atomic::AtomicU64::new(start_time.to_bits()));
-                let llm_to_tts = {
-                    let msg_out_tx = msg_out_tx.clone();
-                    let stt_sender = stt_sender.clone();
-                    let internal_cmd_tx = internal_cmd_tx.clone();
-                    async move {
-                        let mut streaming_session = streaming_session;
-                        let mut first_word = true;
-                        let mut buffer = String::new();
-                        // When the buffer ends with "<digit>." or "<digit>,", we can't
-                        // tell if the punctuation is mid-number ($50,000 or 6.1%) or a
-                        // real boundary (sentence end / list comma). We stash the buffer
-                        // and decide when the next chunk arrives.
-                        let mut pending_numeric: Option<String> = None;
-                        let mut tool_call_as_text = false;
-                        while let Some(item) = streaming_session.recv().await {
-                            tracing::debug!(?item, "LLM stream item received");
-                            match item {
-                                crate::llm::LlmResponseItem::Text(chunk) => {
-                                    // Detect tool-call-as-text: some models (e.g. Qwen) may
-                                    // output tool calls as plain text instead of structured
-                                    // tool_calls. Once detected, suppress ALL remaining text
-                                    // for this LLM turn (content between tags is clean text
-                                    // that would otherwise leak to TTS).
-                                    if tool_call_as_text {
-                                        tracing::debug!(
-                                            text = %chunk,
-                                            "Suppressing text (tool-call-as-text mode active)"
-                                        );
-                                        continue;
-                                    }
-                                    if chunk.contains("<tool_call>")
-                                        || chunk.contains("</tool_call>")
-                                        || chunk.contains("<function=")
-                                        || chunk.contains("</function>")
-                                        || chunk.contains("<parameter=")
-                                        || chunk.contains("</parameter>")
-                                        || chunk.contains("\"tool_calls\"")
-                                    {
-                                        tracing::warn!(
-                                            text = %chunk,
-                                            "LLM emitted tool call as plain text — suppressing this and all remaining text"
-                                        );
-                                        tool_call_as_text = true;
-                                        continue;
-                                    }
-                                    if first_word {
-                                        let ttft_ms = llm_request_start.elapsed().as_millis();
-                                        tracing::info!(
-                                            ttft_ms,
-                                            "LLM time-to-first-token"
-                                        );
-                                        let time_s = stt_sender.current_time_s().await;
-                                        msg_out_tx
-                                            .send(MsgOut::Event { time_s, event: Event::FirstWord })
-                                            .await?;
-                                        first_word = false;
-                                    }
-                                    // Resolve any pending numeric: check if this chunk
-                                    // starts with a digit (mid-number) or not (real boundary).
-                                    if let Some(held) = pending_numeric.take() {
-                                        let next_is_digit = chunk.chars().next().is_some_and(|c| c.is_ascii_digit());
-                                        if next_is_digit {
-                                            // Mid-number punctuation — rejoin into buffer
-                                            buffer.push_str(&held);
-                                        } else {
-                                            // Real boundary — flush it
-                                            tts_tx.send_text(&held).await?;
-                                        }
-                                    }
-                                    buffer.push_str(&chunk);
-                                    // Send when we have a word boundary (ends with space or sentence punctuation).
-                                    // This ensures "don't" and "well-known" stay together.
-                                    let last_char = buffer.chars().last();
-                                    let maybe_mid_number = matches!(last_char, Some('.' | ','))
-                                        && matches!(buffer.chars().rev().nth(1), Some('0'..='9'));
-                                    if maybe_mid_number {
-                                        // Stash — we need the next chunk to decide
-                                        pending_numeric = Some(buffer.clone());
-                                        buffer.clear();
-                                    } else {
-                                        let is_word_boundary = matches!(
-                                            last_char,
-                                            Some(' ' | '.' | '!' | '?' | ',' | '\n')
-                                        );
-                                        if is_word_boundary {
-                                            tts_tx.send_text(&buffer).await?;
-                                            buffer.clear();
-                                        }
-                                    }
-                                }
-                                crate::llm::LlmResponseItem::ToolCall { call, handle } => {
-                                    tracing::info!(?call, "LLM made tool call");
-                                    // Handle reset_asr internally - don't forward to client
-                                    if call.tool_name == "reset_asr" {
-                                        tracing::info!("Handling reset_asr tool call internally");
-                                        // Signal the main loop to restart STT
-                                        let _ = internal_cmd_tx.send(InternalCmd::RestartStt).await;
-                                        // Respond to the LLM with success
-                                        let _ = handle.send(serde_json::json!({
-                                            "success": true,
-                                            "message": "ASR has been reset. The next transcription may start mid-sentence or lack context from what the user just said."
-                                        })).await;
-                                    } else {
-                                        msg_out_tx.send(MsgOut::ToolCall { call, handle }).await?;
-                                    }
-                                }
-                                crate::llm::LlmResponseItem::Error(err) => {
-                                    return Err(anyhow::anyhow!("LLM error: {err}"));
-                                }
+            let result: Result<()> = async {
+                let mut streaming_session = streaming_session;
+                let mut first_word = true;
+                let mut accumulated_text = String::new();
+                let mut tool_call_as_text = false;
+
+                // Process LLM stream, accumulating text and handling tool calls
+                while let Some(item) = streaming_session.recv().await {
+                    tracing::debug!(?item, "LLM stream item received");
+                    match item {
+                        crate::llm::LlmResponseItem::Text(chunk) => {
+                            // Detect tool-call-as-text: some models (e.g. Qwen) may
+                            // output tool calls as plain text instead of structured
+                            // tool_calls. Once detected, suppress ALL remaining text.
+                            if tool_call_as_text {
+                                tracing::debug!(
+                                    text = %chunk,
+                                    "Suppressing text (tool-call-as-text mode active)"
+                                );
+                                continue;
+                            }
+                            if chunk.contains("<tool_call>")
+                                || chunk.contains("</tool_call>")
+                                || chunk.contains("<function=")
+                                || chunk.contains("</function>")
+                                || chunk.contains("<parameter=")
+                                || chunk.contains("</parameter>")
+                                || chunk.contains("\"tool_calls\"")
+                            {
+                                tracing::warn!(
+                                    text = %chunk,
+                                    "LLM emitted tool call as plain text — suppressing this and all remaining text"
+                                );
+                                tool_call_as_text = true;
+                                continue;
+                            }
+                            if first_word {
+                                let ttft_ms = llm_request_start.elapsed().as_millis();
+                                tracing::info!(ttft_ms, "LLM time-to-first-token");
+                                let time_s = stt_sender.current_time_s().await;
+                                msg_out_tx
+                                    .send(MsgOut::Event {
+                                        time_s,
+                                        event: Event::FirstWord,
+                                    })
+                                    .await?;
+                                first_word = false;
+                            }
+                            accumulated_text.push_str(&chunk);
+                        }
+                        crate::llm::LlmResponseItem::ToolCall { call, handle } => {
+                            tracing::info!(?call, "LLM made tool call");
+                            // Handle reset_asr internally - don't forward to client
+                            if call.tool_name == "reset_asr" {
+                                tracing::info!("Handling reset_asr tool call internally");
+                                // Signal the main loop to restart STT
+                                let _ = internal_cmd_tx.send(InternalCmd::RestartStt).await;
+                                // Respond to the LLM with success
+                                let _ = handle
+                                    .send(serde_json::json!({
+                                        "success": true,
+                                        "message": "ASR has been reset. The next transcription may start mid-sentence or lack context from what the user just said."
+                                    }))
+                                    .await;
+                            } else {
+                                msg_out_tx.send(MsgOut::ToolCall { call, handle }).await?;
                             }
                         }
-                        // Send any remaining buffered text (including stashed numeric)
-                        if let Some(held) = pending_numeric.take() {
-                            buffer.insert_str(0, &held);
+                        crate::llm::LlmResponseItem::Error(err) => {
+                            return Err(anyhow::anyhow!("LLM error: {err}"));
                         }
-                        if !buffer.is_empty() {
-                            tts_tx.send_text(&buffer).await?;
-                        }
-                        let llm_total_ms = llm_request_start.elapsed().as_millis();
-                        tracing::info!(
-                            llm_total_ms,
-                            "LLM stream complete"
-                        );
-                        tts_tx.send_end_of_stream().await?;
-                        Ok::<(), anyhow::Error>(())
                     }
-                };
-                let tts_to_client = {
-                    let tts_out_tx = tts_out_tx.clone();
-                    let last_stop_s = last_stop_s.clone();
-                    let llm = llm.clone();
-                    async move {
-                        use std::sync::atomic::Ordering;
-                        let mut tts_rx = tts_rx;
-                        let mut first_audio = true;
-                        let mut message_count = 0u32;
-                        // FIFO queue for text messages - text is sent after corresponding audio
-                        let mut text_queue: std::collections::VecDeque<TtsOut> = std::collections::VecDeque::new();
-
-                        // Wall clock time when TTS started - used to pace output.
-                        // We send audio 300ms early to allow client jitter buffer to fill,
-                        // which means up to 300ms of extra audio in flight on interruption.
-                        let wall_start = std::time::Instant::now();
-                        let wait_until = |target_s: f64| async move {
-                            let elapsed = wall_start.elapsed().as_secs_f64();
-                            if elapsed < target_s {
-                                let wait_s = target_s - elapsed;
-                                tokio::time::sleep(std::time::Duration::from_secs_f64(wait_s)).await;
-                            }
-                        };
-
-                        let mut done = false;
-                        while let Some(event) =
-                            tts_rx.next_message(turn_idx).await.map_err(|e| {
-                                tracing::error!(?e, "TTS receiver error");
-                                e
-                            })?
-                        {
-                            message_count += 1;
-                            match event {
-                                TtsOut::Audio { pcm, start_s, stop_s, turn_idx, .. } => {
-                                    // Send audio 300ms early so client jitter buffer can fill
-                                    wait_until(start_s - 0.3).await;
-
-                                    if first_audio && stop_s > 0.0 {
-                                        let time_s = stt_sender.current_time_s().await;
-                                        msg_out_tx
-                                            .send(MsgOut::Event {
-                                                time_s,
-                                                event: Event::FirstTtsAudio,
-                                            })
-                                            .await?;
-                                        first_audio = false;
-                                    }
-                                    let adjusted_stop_s = start_time + stop_s;
-                                    last_stop_s.store(adjusted_stop_s.to_bits(), Ordering::Release);
-
-                                    // Check text queue BEFORE sending audio so we know if
-                                    // this is the last packet (function call interruption).
-                                    // Texts are still sent AFTER audio to preserve ordering.
-                                    let mut texts_to_send = Vec::new();
-                                    while let Some(TtsOut::Text {text, stop_s: text_stop_s, turn_idx: text_turn_idx, start_s }) = text_queue.pop_front() {
-                                        if text_stop_s <= adjusted_stop_s {
-                                            let has_pending = llm.read().await.has_pending_tool_results();
-                                            done = done || has_pending && text.chars().any(|c| matches!(c, '.' | '!' | '?' | ';'));
-                                            texts_to_send.push(TtsOut::Text {text, stop_s: text_stop_s, turn_idx: text_turn_idx, start_s });
-                                        } else {
-                                            text_queue.push_front(TtsOut::Text {text, stop_s: text_stop_s, turn_idx: text_turn_idx, start_s });
-                                            break
-                                        }
-                                    }
-
-                                    // Also check for user interruption
-                                    done = done || user_interrupted.load(Ordering::Acquire);
-
-                                    // Send audio — marked interrupted if this is the last packet
-                                    tts_out_tx
-                                        .send(Ok(TtsOut::Audio {
-                                            pcm,
-                                            start_s: start_time + start_s,
-                                            stop_s: adjusted_stop_s,
-                                            turn_idx,
-                                            interrupted: done,
-                                        }))
-                                        .await?;
-
-                                    // Send texts after audio
-                                    for text in texts_to_send {
-                                        tts_out_tx.send(Ok(text)).await?;
-                                    }
-
-                                    if done {
-                                        break
-                                    }
-                                }
-                                TtsOut::Text { text, start_s, stop_s, turn_idx } => {
-                                    // Queue text instead of sending immediately
-                                    // It will be sent after corresponding audio is sent
-                                    text_queue.push_back(TtsOut::Text {
-                                        text,
-                                        start_s: start_time + start_s,
-                                        stop_s: start_time + stop_s,
-                                        turn_idx,
-                                    });
-                                }
-                                TtsOut::TurnComplete { .. } => {
-                                    // Shouldn't happen from TTS receiver
-                                }
-                            }
-                        }
-                        if !done {
-                                    while let Some(TtsOut::Text {text, stop_s: text_stop_s, turn_idx: text_turn_idx, start_s }) = text_queue.pop_front() {
-                                            tts_out_tx.send(Ok(TtsOut::Text {text, stop_s: text_stop_s, turn_idx: text_turn_idx, start_s })).await?
-                                    }
-                        }
-                        tracing::info!(message_count, "TTS receiver finished");
-                        let time_s = stt_sender.current_time_s().await;
-                        msg_out_tx
-                            .send(MsgOut::Event { time_s, event: Event::EndTtsAudio })
-                            .await?;
-                        Ok::<(), anyhow::Error>(())
-                    }
-                };
-                tokio::try_join!(llm_to_tts, tts_to_client)?;
-                let stop_s = f64::from_bits(last_stop_s.load(std::sync::atomic::Ordering::Acquire));
-                Ok(stop_s)
-            }
-            .await;
-            match &result {
-                Ok(stop_s) => {
-                    tracing::info!(?stop_s, "LLM/TTS task completed successfully");
                 }
-                Err(e) => {
-                    tracing::error!(?e, "LLM/TTS task failed");
-                }
-            }
-            match result {
-                Ok(stop_s) => {
+
+                let llm_total_ms = llm_request_start.elapsed().as_millis();
+                tracing::info!(llm_total_ms, "LLM stream complete");
+
+                // Send accumulated text to TTS coordinator
+                if !accumulated_text.is_empty() {
+                    tracing::info!(
+                        turn_idx,
+                        text_len = accumulated_text.len(),
+                        "Sending main content to TTS coordinator"
+                    );
+                    tts_coord_tx
+                        .send(TtsCoordinatorCmd::QueueMain {
+                            text: accumulated_text,
+                            turn_idx,
+                        })
+                        .await
+                        .context("Failed to send main content to TTS coordinator")?;
+                } else {
+                    tracing::info!("No text to send to TTS (empty response or tool-only)");
+                    // Send empty TurnComplete for tool-only responses
                     tts_out_tx
-                        .send(Ok(TtsOut::TurnComplete { turn_idx, stop_s }))
+                        .send(Ok(TtsOut::TurnComplete {
+                            turn_idx,
+                            stop_s: 0.0,
+                        }))
                         .await?;
                 }
+
+                Ok(())
+            }
+            .await;
+
+            match &result {
+                Ok(()) => {
+                    tracing::info!("LLM processing completed successfully");
+                }
                 Err(e) => {
-                    tts_out_tx.send(Err(e)).await?;
+                    tracing::error!(?e, "LLM processing failed");
+                    let _ = tts_out_tx.send(Err(anyhow::anyhow!("{}", e))).await;
                 }
             }
             Ok::<(), anyhow::Error>(())

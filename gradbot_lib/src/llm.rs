@@ -794,7 +794,7 @@ impl LlmSession {
                                                 idx,
                                                 content = %content,
                                                 has_callback = filler_callback.is_some(),
-                                                "🗣️ gradbot_filler detected during streaming"
+                                                "🗣️ gradbot_filler detected durin streaming"
                                             );
                                             if let Some(ref callback) = filler_callback {
                                                 tracing::debug!("invoking filler callback immediately");
