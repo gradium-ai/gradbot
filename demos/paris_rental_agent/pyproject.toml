@@ -23,3 +23,9 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+
+[tool.uv]
+exclude-newer = "7 days"
+
+[tool.uv.audit]
+malware-check = true
