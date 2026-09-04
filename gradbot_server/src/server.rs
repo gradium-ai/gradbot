@@ -326,3 +326,41 @@ pub async fn serve(config: crate::config::Config) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers_with_auth(value: &str) -> axum::http::HeaderMap {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_str(value).unwrap(),
+        );
+        headers
+    }
+
+    #[test]
+    fn extract_bearer_token_returns_token_for_bearer_scheme() {
+        let headers = headers_with_auth("Bearer abc123");
+        assert_eq!(extract_bearer_token(&headers), Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn extract_bearer_token_returns_none_when_header_missing() {
+        let headers = axum::http::HeaderMap::new();
+        assert_eq!(extract_bearer_token(&headers), None);
+    }
+
+    #[test]
+    fn extract_bearer_token_returns_none_for_non_bearer_scheme() {
+        let headers = headers_with_auth("Basic abc123");
+        assert_eq!(extract_bearer_token(&headers), None);
+    }
+
+    #[test]
+    fn extract_bearer_token_handles_empty_token() {
+        let headers = headers_with_auth("Bearer ");
+        assert_eq!(extract_bearer_token(&headers), Some("".to_string()));
+    }
+}
