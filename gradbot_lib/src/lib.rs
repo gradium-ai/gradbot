@@ -922,7 +922,9 @@ impl GradbotClients {
             .or_else(|| std::env::var("GRADIUM_BASE_URL").ok())
             .unwrap_or_else(|| DEFAULT_GRADIUM_BASE_URL.to_string());
         let llm_base_url = llm_base_url.map(|s| s.to_string());
-        let max_completion_tokens = max_completion_tokens.unwrap_or(4096);
+        // Default to 0 = "let server decide". Thinking models like MiniMax-M2
+        // can blow past hardcoded limits with reasoning tokens, causing truncation.
+        let max_completion_tokens = max_completion_tokens.unwrap_or(0);
 
         tracing::info!(
             gradium_base_url,

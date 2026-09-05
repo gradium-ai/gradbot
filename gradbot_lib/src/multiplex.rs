@@ -180,6 +180,9 @@ struct Session {
     /// Holds the JoinHandle of a user-interrupted LLM/TTS task while it winds down.
     /// Dropped when the next task starts.
     interrupted_task_jh: Option<crate::utils::JoinHandleAbortOnDrop>,
+    /// Buffered text chunks received during Processing state but not yet enough to barge in.
+    /// Reset when transitioning out of Processing.
+    pending_barge_in_text: Vec<String>,
 }
 
 impl Session {
@@ -248,6 +251,7 @@ impl Session {
                 .unwrap_or(false),
             user_interrupted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             interrupted_task_jh: None,
+            pending_barge_in_text: Vec::new(),
         };
         Ok((slf, stt_sender))
     }
@@ -1034,11 +1038,42 @@ impl Session {
         self.min_inactivity_prob = 1.0;
         self.last_inactivity_prob = 1.0;
         let mut state = self.state.lock().await;
+        let mut should_clear_barge_buf = false;
         match &mut *state {
             State::Flushing { texts, .. } | State::Listening { texts, .. } => {
                 texts.push(text);
+                should_clear_barge_buf = true;
             }
             State::Processing { turn_idx, .. } => {
+                // Barge-in grace period: don't interrupt the assistant for tiny
+                // STT artifacts (single-word false positives, hesitations).
+                // We accumulate text and only interrupt when the user has clearly
+                // committed to speaking — at least N chars of meaningful content.
+                self.pending_barge_in_text.push(text.clone());
+                let total: String = self.pending_barge_in_text.join(" ");
+                let total_chars = total.trim().chars().count();
+                let total_words = total.split_whitespace().count();
+                // Threshold: need either >=3 words OR >=10 chars to interrupt.
+                // This ignores single-word echoes ("yes", "ok", "uh") and short
+                // back-channels while still respecting genuine attempts to barge in.
+                let should_interrupt = total_words >= 3 || total_chars >= 10;
+                if !should_interrupt {
+                    tracing::debug!(
+                        accumulated = %total,
+                        total_words,
+                        total_chars,
+                        "barge-in grace: not enough text yet, waiting"
+                    );
+                    return Ok(());
+                }
+                tracing::info!(
+                    accumulated = %total,
+                    total_words,
+                    total_chars,
+                    "barge-in threshold met, interrupting assistant"
+                );
+                let pending = std::mem::take(&mut self.pending_barge_in_text);
+
                 let new_turn_idx = *turn_idx + 1;
 
                 // Signal the LLM/TTS task to stop after its next audio packet.
@@ -1052,7 +1087,7 @@ impl Session {
                     &mut *state,
                     State::Listening {
                         since_s: stt_time,
-                        texts: vec![text],
+                        texts: pending,
                         turn_idx: new_turn_idx,
                     },
                 );
@@ -1064,6 +1099,9 @@ impl Session {
 
                 self.send_event(Event::Interrupted).await?;
             }
+        }
+        if should_clear_barge_buf && !self.pending_barge_in_text.is_empty() {
+            self.pending_barge_in_text.clear();
         }
         Ok(())
     }
