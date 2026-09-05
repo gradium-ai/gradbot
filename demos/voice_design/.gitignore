@@ -1,0 +1,9 @@
+# Local config may hold a real GRADIUM_API_KEY — never commit it.
+config.yaml
+
+# Local candidate-to-voice mappings
+*.sqlite3
+*.sqlite
+
+.ruff_cache/
+.env

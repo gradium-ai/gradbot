@@ -1,0 +1,22 @@
+# Loaded automatically when no local config.yaml exists.
+# Copy to config.yaml to override anything below (config.yaml is git-ignored).
+
+llm:
+  model: "pipecat-ai/phonellm-alpha-1"
+  # base_url is deliberately NOT set here. Point the demo at your own
+  # OpenAI-compatible PhoneLLM server via the LLM_BASE_URL env var:
+  #
+  #   export LLM_BASE_URL=http://localhost:8001/v1
+  #
+  # NOTE: gradbot's config loader only applies LLM_BASE_URL when base_url is
+  # absent from YAML (gradbot_py/gradbot/config.py), so adding it back here
+  # would silently shadow the env var.
+  api_key: "unused"
+  extra_config:
+    temperature: 0
+    chat_template_kwargs:
+      enable_thinking: false
+
+session:
+  # A pause should not make the design director speak again on its own.
+  silence_timeout_s: 0.0

@@ -68,7 +68,9 @@ impl Decoder {
                 }
                 let pcm: Vec<f32> = match format {
                     PcmFormat::Raw => data
-                        .chunks_exact(2)
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
                         .map(|b| {
                             let v = byteorder::LittleEndian::read_i16(b);
                             v as f32 / i16::MAX as f32
