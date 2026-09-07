@@ -16,6 +16,50 @@ import main
 import voice_generator
 
 
+@pytest.fixture(autouse=True)
+def configured_phone_endpoint(monkeypatch):
+    # Session tests do not require an actual inference service.
+    monkeypatch.setattr(main.cfg.llm, "base_url", "https://phone.test/v1")
+
+
+def test_dedicated_phone_config_does_not_change_shared_gemma_config(monkeypatch):
+    monkeypatch.setenv("LLM_BASE_URL", "https://gemma.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "google/gemma-4-26B-A4B-it")
+    monkeypatch.setenv("LLM_API_KEY", "shared-key")
+    monkeypatch.setenv("PHONELLM_BASE_URL", " https://phone.test/v1/ ")
+    monkeypatch.setenv("PHONELLM_API_KEY", "phone-key")
+    config = main._load_config(main.APP_DIR / "config.example.yaml")
+    assert config.client_kwargs["llm_base_url"] == "https://phone.test/v1"
+    assert config.client_kwargs["llm_model_name"] == "pipecat-ai/phonellm-alpha-1"
+    assert config.client_kwargs["llm_api_key"] == "phone-key"
+    shared = gradbot.config.from_env()
+    assert shared.llm.base_url == "https://gemma.test/v1"
+    assert shared.llm.model == "google/gemma-4-26B-A4B-it"
+    assert shared.llm.api_key.get_secret_value() == "shared-key"
+
+
+@pytest.mark.parametrize("url", ["", "   "])
+def test_missing_phone_url_does_not_inherit_gemma(monkeypatch, url):
+    monkeypatch.setenv("PHONELLM_BASE_URL", url)
+    monkeypatch.setenv("LLM_BASE_URL", "https://gemma.test/v1")
+    monkeypatch.setenv("LLM_API_KEY", "shared-key")
+    monkeypatch.delenv("PHONELLM_API_KEY", raising=False)
+    config = main._load_config(main.APP_DIR / "config.example.yaml")
+    assert config.llm.base_url is None
+    assert config.llm.api_key.get_secret_value() == "unused"
+
+
+def test_missing_phone_url_rejects_session_before_llm_start(monkeypatch):
+    monkeypatch.setattr(main.cfg.llm, "base_url", None)
+
+    async def handle_session(ws, **kwargs):
+        with pytest.raises(RuntimeError, match="PHONELLM_BASE_URL is required"):
+            kwargs["on_start"]({})
+
+    monkeypatch.setattr(main.gradbot.websocket, "handle_session", handle_session)
+    asyncio.run(main.ws_chat(object()))
+
+
 def test_harper_is_the_english_starter_voice():
     state = main.VoiceDesignState()
     config = main._make_config(state, speaks_first=True)
