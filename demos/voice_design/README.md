@@ -33,12 +33,16 @@ wheel when the package version has not changed.
 
 ## Run
 
-Create a git-ignored `.env` file:
+Create a `.env` file in `demos/voice_design` with your Gradium API key and
+PhoneLLM server URL:
 
 ```dotenv
 GRADIUM_API_KEY=your_key_here
 PHONELLM_BASE_URL=http://localhost:8001/v1
 ```
+
+If the PhoneLLM server requires authentication, also set `PHONELLM_API_KEY` in
+that file. `.env` is git-ignored.
 
 Then run:
 
@@ -51,10 +55,9 @@ open `/voice_design/` instead.
 
 ## The PhoneLLM endpoint
 
-`PHONELLM_BASE_URL` is required — the demo ships no endpoint of its own. Leave it
-unset and voice sessions fail with a configuration error before contacting an
-LLM. The demo never falls back to the shared Gemma endpoint. The page remains
-available so a missing setting does not remove the demo from the combined app.
+Set `PHONELLM_BASE_URL` to the OpenAI-compatible API base URL of a server
+hosting `pipecat-ai/phonellm-alpha-1`. Include the `/v1` suffix. The server must
+support native tool calls.
 
 Start PhoneLLM's vLLM server with automatic tool choice and the `qwen3_coder`
 parser; the demo relies on native OpenAI tool calls:
@@ -69,54 +72,26 @@ vllm serve "pipecat-ai/phonellm-alpha-1" \
   --override-generation-config '{"temperature":0}'
 ```
 
-Point `PHONELLM_BASE_URL` at the `/v1` path of wherever that server is reachable —
-`http://localhost:8001/v1` locally, or an ngrok/Cloudflare tunnel URL if you're
-running it on a remote GPU box. Keep tunnel URLs out of the repo: an
-unauthenticated tunnel URL is effectively a credential for that server.
+For a remote server, replace `http://localhost:8001/v1` in `.env` with its
+reachable API base URL.
 
 ## Configuration
 
-`config.example.yaml` is loaded automatically and pins the LLM defaults:
+| Environment variable | Purpose | Required |
+| --- | --- | --- |
+| `GRADIUM_API_KEY` | Authentication for speech recognition, speech synthesis, and voice design | Yes |
+| `PHONELLM_BASE_URL` | PhoneLLM API base URL, ending in `/v1` | Yes |
+| `PHONELLM_API_KEY` | Authentication for the PhoneLLM server | Only if the server requires it |
 
-| Setting | Value |
-| --- | --- |
-| Model | `pipecat-ai/phonellm-alpha-1` |
-| Temperature | `0` |
-| Thinking | disabled, per the PhoneLLM model card |
-| `silence_timeout_s` | `0.0` — a pause won't make the director speak unprompted |
+The demo always uses the model `pipecat-ai/phonellm-alpha-1`. Its dedicated
+`PHONELLM_*` variables override LLM URL and key values in YAML; shared `LLM_*`
+variables are not used by this demo. A missing `PHONELLM_BASE_URL` prevents voice
+sessions from starting.
 
-Create a local `config.yaml` to override any of it. `config.yaml` is
-git-ignored, so it's the right place for a real `gradium.api_key`.
-
-This demo overrides its loaded LLM configuration with `PHONELLM_BASE_URL`,
-`PHONELLM_API_KEY` (optional, defaults to `unused`), and the fixed model name
-`pipecat-ai/phonellm-alpha-1`. These dedicated environment settings take precedence
-over YAML. It does not modify process-wide environment variables or the shared
-`LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` used by the other demos.
-
-On the Gradbot deployment, keep the existing Gemma configuration and add:
-
-```dotenv
-PHONELLM_BASE_URL=https://<phonellm-service>/v1
-# Only if the PhoneLLM service requires authentication:
-PHONELLM_API_KEY=your_key_here
-```
-
-Roll out the updated Gradbot image with these variables. The model service's
-`/v1/models` endpoint must advertise `pipecat-ai/phonellm-alpha-1`.
-
-Operational timeouts, if you need them:
-
-```bash
-export GRADIUM_TTS_MODEL_NAME=gradium-tts-beta
-export VOICE_DESIGN_HTTP_TIMEOUT_S=120
-export VOICE_DESIGN_POLL_TIMEOUT_S=120
-export VOICE_DESIGN_POLL_INTERVAL_S=1
-# Optional: fewer generator steps trade some quality for lower latency.
-export VOICE_DESIGN_STEPS=12
-# How long a safely prefetched revision waits for PhoneLLM's matching tool call.
-export VOICE_DESIGN_PREFETCH_CLAIM_TIMEOUT_S=5
-```
+`config.example.yaml` supplies the remaining defaults: temperature `0`, thinking
+disabled, and silence-triggered turns disabled. To customize these settings,
+create a git-ignored `config.yaml` in this directory. When present, it is loaded
+instead of `config.example.yaml`.
 
 ## How the voice design flow works
 
