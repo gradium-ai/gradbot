@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 import fastapi
 import gradbot
 import httpx
+from pydantic import SecretStr
 
 import caption_edit
 import voice_generator
@@ -161,7 +162,18 @@ app = fastapi.FastAPI(title="Gradbot Voice Workshop")
 config_path = APP_DIR / "config.yaml"
 if not config_path.exists():
     config_path = APP_DIR / "config.example.yaml"
-cfg = gradbot.config.load(config_path)
+
+def _load_config(path: pathlib.Path):
+    config = gradbot.config.load(path)
+    # This demo has its own inference service. Never inherit the shared Gemma
+    # endpoint or credentials, and never change process-wide LLM settings.
+    config.llm.base_url = os.getenv("PHONELLM_BASE_URL", "").strip().rstrip("/") or None
+    config.llm.model = "pipecat-ai/phonellm-alpha-1"
+    config.llm.api_key = SecretStr(os.getenv("PHONELLM_API_KEY") or "unused")
+    return config
+
+
+cfg = _load_config(config_path)
 
 
 @dataclasses.dataclass
@@ -1382,6 +1394,11 @@ async def ws_chat(websocket: fastapi.WebSocket) -> None:
     watched_socket.on_llm_started = observe_llm_started
 
     def on_start(msg: dict) -> gradbot.SessionConfig:
+        if not cfg.llm.base_url:
+            raise RuntimeError(
+                "PHONELLM_BASE_URL is required for voice_design; "
+                "set it to the PhoneLLM service URL ending in /v1."
+            )
         state.agent_voice_id = msg.get("voice_id") or DEFAULT_VOICE_ID
         state.voice_id = state.agent_voice_id
         language = msg.get("language") or DEFAULT_LANGUAGE

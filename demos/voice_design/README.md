@@ -37,7 +37,7 @@ Create a git-ignored `.env` file:
 
 ```dotenv
 GRADIUM_API_KEY=your_key_here
-LLM_BASE_URL=http://localhost:8001/v1
+PHONELLM_BASE_URL=http://localhost:8001/v1
 ```
 
 Then run:
@@ -51,9 +51,10 @@ open `/voice_design/` instead.
 
 ## The PhoneLLM endpoint
 
-`LLM_BASE_URL` is required — the demo ships no endpoint of its own. Leave it
-unset and gradbot falls through to OpenAI's API, which fails against the
-placeholder `api_key: "unused"`.
+`PHONELLM_BASE_URL` is required — the demo ships no endpoint of its own. Leave it
+unset and voice sessions fail with a configuration error before contacting an
+LLM. The demo never falls back to the shared Gemma endpoint. The page remains
+available so a missing setting does not remove the demo from the combined app.
 
 Start PhoneLLM's vLLM server with automatic tool choice and the `qwen3_coder`
 parser; the demo relies on native OpenAI tool calls:
@@ -68,7 +69,7 @@ vllm serve "pipecat-ai/phonellm-alpha-1" \
   --override-generation-config '{"temperature":0}'
 ```
 
-Point `LLM_BASE_URL` at the `/v1` path of wherever that server is reachable —
+Point `PHONELLM_BASE_URL` at the `/v1` path of wherever that server is reachable —
 `http://localhost:8001/v1` locally, or an ngrok/Cloudflare tunnel URL if you're
 running it on a remote GPU box. Keep tunnel URLs out of the repo: an
 unauthenticated tunnel URL is effectively a credential for that server.
@@ -87,9 +88,22 @@ unauthenticated tunnel URL is effectively a credential for that server.
 Create a local `config.yaml` to override any of it. `config.yaml` is
 git-ignored, so it's the right place for a real `gradium.api_key`.
 
-`base_url` is deliberately absent from the YAML: gradbot's config loader only
-applies `LLM_BASE_URL` when the YAML key is missing, so putting it back would
-silently shadow the env var.
+This demo overrides its loaded LLM configuration with `PHONELLM_BASE_URL`,
+`PHONELLM_API_KEY` (optional, defaults to `unused`), and the fixed model name
+`pipecat-ai/phonellm-alpha-1`. These dedicated environment settings take precedence
+over YAML. It does not modify process-wide environment variables or the shared
+`LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` used by the other demos.
+
+On the Gradbot deployment, keep the existing Gemma configuration and add:
+
+```dotenv
+PHONELLM_BASE_URL=https://<phonellm-service>/v1
+# Only if the PhoneLLM service requires authentication:
+PHONELLM_API_KEY=your_key_here
+```
+
+Roll out the updated Gradbot image with these variables. The model service's
+`/v1/models` endpoint must advertise `pipecat-ai/phonellm-alpha-1`.
 
 Operational timeouts, if you need them:
 
