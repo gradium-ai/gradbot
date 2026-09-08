@@ -663,8 +663,13 @@ impl LlmSession {
         let mut request_builder = oai::types::CreateChatCompletionRequestArgs::default();
         request_builder
             .model(&self.model_name)
-            .max_completion_tokens(self.max_completion_tokens)
             .messages(self.messages.clone());
+        // Only send max_completion_tokens if explicitly configured (>0).
+        // Setting it=0 means "let server decide" — important for thinking models
+        // where reasoning tokens eat into the budget.
+        if self.max_completion_tokens > 0 {
+            request_builder.max_completion_tokens(self.max_completion_tokens);
+        }
         if !tools.is_empty() {
             request_builder.tools(tools);
         }
@@ -719,6 +724,11 @@ impl LlmSession {
 
             let mut sse_chunk_count: u64 = 0;
             let mut last_was_channel = false;
+            // <think>...</think> filter: stateful across chunks.
+            // When we see "<think>" we enter "thinking mode" and discard all
+            // subsequent content until we see "</think>".
+            let mut in_think_block = false;
+            let mut think_buf = String::new();
             tracing::info!("LLM SSE: entering byte_stream loop");
             while let Some(chunk_result) = byte_stream.next().await {
                 if tx.is_closed() {
@@ -774,14 +784,55 @@ impl LlmSession {
                         if let Some(c) = choice.delta.content
                             && !c.is_empty()
                         {
-                            let is_channel = c == "<|channel>";
-                            let filter = c.starts_with("<|channel")
-                                || c.starts_with("<channel")
-                                || (last_was_channel && c == "thought");
-                            if !filter {
-                                tx.send(LlmResponseItem::Text(c)).await?;
+                            // Stateful <think>...</think> filter (e.g. MiniMax-M2 reasoning).
+                            // Buffer chunks while inside a think block; emit the tail after </think>.
+                            think_buf.push_str(&c);
+                            let mut emit = String::new();
+                            loop {
+                                if in_think_block {
+                                    if let Some(end_idx) = think_buf.find("</think>") {
+                                        // Drop everything up to and including </think>
+                                        let after = think_buf[end_idx + "</think>".len()..]
+                                            .trim_start_matches(['\n', ' ', '\t'])
+                                            .to_string();
+                                        think_buf = after;
+                                        in_think_block = false;
+                                        continue;
+                                    } else {
+                                        // Still inside think block, no end yet — drop buffered content
+                                        think_buf.clear();
+                                        break;
+                                    }
+                                } else {
+                                    if let Some(start_idx) = think_buf.find("<think>") {
+                                        // Emit anything before <think>, then enter think mode
+                                        emit.push_str(&think_buf[..start_idx]);
+                                        think_buf = think_buf[start_idx + "<think>".len()..].to_string();
+                                        in_think_block = true;
+                                        continue;
+                                    } else {
+                                        // No <think> tag — but we might be partway through one.
+                                        // Hold back the last few chars in case "<think>" is split across chunks.
+                                        let safe_emit_len = think_buf
+                                            .len()
+                                            .saturating_sub("<think>".len() - 1);
+                                        emit.push_str(&think_buf[..safe_emit_len]);
+                                        think_buf = think_buf[safe_emit_len..].to_string();
+                                        break;
+                                    }
+                                }
                             }
-                            last_was_channel = is_channel;
+
+                            if !emit.is_empty() {
+                                let is_channel = emit == "<|channel>";
+                                let filter = emit.starts_with("<|channel")
+                                    || emit.starts_with("<channel")
+                                    || (last_was_channel && emit == "thought");
+                                if !filter {
+                                    tx.send(LlmResponseItem::Text(emit)).await?;
+                                }
+                                last_was_channel = is_channel;
+                            }
                         }
 
                         // Handle tool calls (streamed as chunks)
@@ -810,6 +861,22 @@ impl LlmSession {
             }
 
             tracing::debug!(sse_chunk_count, "LLM SSE stream ended");
+
+            // Flush any remaining text held back in think_buf.
+            // We hold back up to ("<think>".len() - 1) chars at the end of each chunk
+            // in case "<think>" is split across chunks. When the stream ends, we know
+            // there's no more input, so anything left is real content (unless we're
+            // still inside an unclosed think block, in which case discard it).
+            if !in_think_block && !think_buf.is_empty() {
+                let tail = std::mem::take(&mut think_buf);
+                let is_channel = tail == "<|channel>";
+                let filter = tail.starts_with("<|channel")
+                    || tail.starts_with("<channel")
+                    || (last_was_channel && tail == "thought");
+                if !filter {
+                    tx.send(LlmResponseItem::Text(tail)).await?;
+                }
+            }
 
             // Stream ended - finalize any accumulated tool calls
             for (idx, (call_id, tool_name, args_str)) in tool_call_accum {
