@@ -348,3 +348,208 @@ impl Decoder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_i16_passes_through_unchanged() {
+        assert_eq!(Sample::to_i16(&1234i16), 1234);
+        assert_eq!(Sample::to_i16(&-1234i16), -1234);
+    }
+
+    #[test]
+    fn to_i16_scales_in_range_floats() {
+        assert_eq!(Sample::to_i16(&0.0f32), 0);
+        assert_eq!(Sample::to_i16(&0.5f32), 16383);
+        assert_eq!(Sample::to_i16(&-0.5f64), -16383);
+    }
+
+    #[test]
+    fn to_i16_clamps_out_of_range_floats() {
+        assert_eq!(Sample::to_i16(&2.0f32), 32767);
+        assert_eq!(Sample::to_i16(&-2.0f32), -32767);
+        assert_eq!(Sample::to_i16(&1.0f64), 32767);
+        assert_eq!(Sample::to_i16(&-1.0f64), -32767);
+    }
+
+    #[test]
+    fn write_wav_header_produces_correct_byte_layout() {
+        let mut buf = Vec::new();
+        write_wav_header(&mut buf, 16000, 100, 84).unwrap();
+
+        assert_eq!(buf.len(), 44);
+        assert_eq!(&buf[0..4], b"RIFF");
+        assert_eq!(u32::from_le_bytes(buf[4..8].try_into().unwrap()), 100);
+        assert_eq!(&buf[8..12], b"WAVE");
+        assert_eq!(&buf[12..16], b"fmt ");
+        assert_eq!(u32::from_le_bytes(buf[16..20].try_into().unwrap()), 16);
+        assert_eq!(u16::from_le_bytes(buf[20..22].try_into().unwrap()), 1); // PCM
+        assert_eq!(u16::from_le_bytes(buf[22..24].try_into().unwrap()), 1); // mono
+        assert_eq!(u32::from_le_bytes(buf[24..28].try_into().unwrap()), 16000);
+        // byte_rate = sample_rate * channels * bytes_per_sample
+        assert_eq!(u32::from_le_bytes(buf[28..32].try_into().unwrap()), 32000);
+        // block_align = channels * bytes_per_sample
+        assert_eq!(u16::from_le_bytes(buf[32..34].try_into().unwrap()), 2);
+        assert_eq!(u16::from_le_bytes(buf[34..36].try_into().unwrap()), 16);
+        assert_eq!(&buf[36..40], b"data");
+        assert_eq!(u32::from_le_bytes(buf[40..44].try_into().unwrap()), 84);
+    }
+
+    #[test]
+    fn write_pcm_in_wav_writes_little_endian_i16_samples() {
+        let mut buf = Vec::new();
+        let n = write_pcm_in_wav(&mut buf, &[0i16, 1i16, -1i16]).unwrap();
+
+        assert_eq!(n, 6);
+        assert_eq!(buf, vec![0, 0, 1, 0, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn extend_from_vec_replaces_when_target_is_empty() {
+        let mut target: Vec<i32> = Vec::new();
+        extend_from_vec(&mut target, vec![1, 2, 3]);
+        assert_eq!(target, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn extend_from_vec_appends_when_target_is_non_empty() {
+        let mut target = vec![1, 2];
+        extend_from_vec(&mut target, vec![3, 4]);
+        assert_eq!(target, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn master_chunk_parse_rejects_short_buffer() {
+        let data = b"RIFF";
+        assert!(matches!(
+            MasterChunk::parse(data).unwrap(),
+            Parsed::Incomplete
+        ));
+    }
+
+    #[test]
+    fn master_chunk_parse_rejects_invalid_riff_magic() {
+        let mut data = vec![0u8; 12];
+        data[8..12].copy_from_slice(b"WAVE");
+        assert!(MasterChunk::parse(&data).is_err());
+    }
+
+    #[test]
+    fn master_chunk_parse_rejects_invalid_wave_magic() {
+        let mut data = vec![0u8; 12];
+        data[0..4].copy_from_slice(b"RIFF");
+        assert!(MasterChunk::parse(&data).is_err());
+    }
+
+    #[test]
+    fn master_chunk_parse_returns_remaining_bytes() {
+        let mut data = vec![0u8; 14];
+        data[0..4].copy_from_slice(b"RIFF");
+        data[8..12].copy_from_slice(b"WAVE");
+        data[12..14].copy_from_slice(&[7, 8]);
+
+        match MasterChunk::parse(&data).unwrap() {
+            Parsed::Complete(MasterChunk, remaining) => assert_eq!(remaining, &[7, 8]),
+            Parsed::Incomplete => panic!("expected Complete"),
+        }
+    }
+
+    fn fmt_chunk_bytes(audio_format: u16, channels: u16, sample_rate: u32, bits: u16) -> Vec<u8> {
+        let mut b = vec![0u8; 24];
+        b[0..4].copy_from_slice(b"fmt ");
+        b[4..8].copy_from_slice(&16u32.to_le_bytes());
+        b[8..10].copy_from_slice(&audio_format.to_le_bytes());
+        b[10..12].copy_from_slice(&channels.to_le_bytes());
+        b[12..16].copy_from_slice(&sample_rate.to_le_bytes());
+        b[22..24].copy_from_slice(&bits.to_le_bytes());
+        b
+    }
+
+    #[test]
+    fn fmt_chunk_parse_rejects_short_buffer() {
+        assert!(matches!(
+            FmtChunk::parse(&[0u8; 8]).unwrap(),
+            Parsed::Incomplete
+        ));
+    }
+
+    #[test]
+    fn fmt_chunk_parse_reads_expected_fields() {
+        let bytes = fmt_chunk_bytes(1, 2, 44100, 24);
+        match FmtChunk::parse(&bytes).unwrap() {
+            Parsed::Complete(fmt, remaining) => {
+                assert_eq!(fmt.audio_format, 1);
+                assert_eq!(fmt.channels, 2);
+                assert_eq!(fmt.sample_rate, 44100);
+                assert_eq!(fmt.bits_per_sample, 24);
+                assert!(remaining.is_empty());
+            }
+            Parsed::Incomplete => panic!("expected Complete"),
+        }
+    }
+
+    /// Build a minimal mono 16-bit PCM WAV file containing the given samples.
+    fn build_wav(sample_rate: u32, samples: &[i16]) -> Vec<u8> {
+        let data_size = (samples.len() * 2) as u32;
+        let mut buf = Vec::new();
+        write_wav_header(&mut buf, sample_rate, 36 + data_size, data_size).unwrap();
+        write_pcm_in_wav(&mut buf, samples).unwrap();
+        buf
+    }
+
+    #[test]
+    fn decoder_round_trips_pcm_samples_at_matching_sample_rate() {
+        let samples: Vec<i16> = vec![0, 1000, -1000, 32767, -32767, 42];
+        let wav = build_wav(16000, &samples);
+
+        // buffer_samples_by = 1 and a matching target rate means every sample is
+        // flushed immediately with no resampling.
+        let mut decoder = Decoder::new(16000, 1).unwrap();
+        let decoded = decoder.decode(&wav).unwrap();
+
+        assert_eq!(decoded.len(), samples.len());
+        for (got, raw) in decoded.iter().zip(samples.iter()) {
+            let want = *raw as f32 / 32768.0;
+            assert!((got - want).abs() < 1e-6, "got {got}, want {want}");
+        }
+    }
+
+    #[test]
+    fn decoder_handles_input_split_across_multiple_decode_calls() {
+        let samples: Vec<i16> = vec![100, -100, 200, -200];
+        let wav = build_wav(8000, &samples);
+        let (head, tail) = wav.split_at(wav.len() / 2);
+
+        let mut decoder = Decoder::new(8000, 1).unwrap();
+        let mut decoded = decoder.decode(head).unwrap();
+        decoded.extend(decoder.decode(tail).unwrap());
+
+        assert_eq!(decoded.len(), samples.len());
+    }
+
+    #[test]
+    fn decoder_rejects_non_pcm_audio_format() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&36u32.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(&fmt_chunk_bytes(3, 1, 16000, 16)); // 3 = IEEE float, unsupported
+
+        let mut decoder = Decoder::new(16000, 1).unwrap();
+        assert!(decoder.decode(&buf).is_err());
+    }
+
+    #[test]
+    fn decoder_rejects_unsupported_bits_per_sample() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&36u32.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(&fmt_chunk_bytes(1, 1, 16000, 8)); // 8-bit unsupported
+
+        let mut decoder = Decoder::new(16000, 1).unwrap();
+        assert!(decoder.decode(&buf).is_err());
+    }
+}
