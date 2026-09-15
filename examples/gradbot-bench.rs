@@ -262,6 +262,20 @@ struct Args {
     /// the server's trace files, not derivable from client marks alone.
     #[clap(long)]
     out_report: Option<PathBuf>,
+
+    /// Whether the LLM under measurement is co-located with this harness
+    /// (e.g. a self-hosted vLLM on the same cluster), as opposed to a remote
+    /// production LLM. A co-located LLM has ~zero network cost, so the
+    /// report labels its stage `measured-local` to stop a reader concluding
+    /// the LLM is cheap and optimizing the orchestration against a network
+    /// cost that would not exist in production. The harness cannot detect
+    /// this on its own (it does not know the server's LLM configuration) —
+    /// state it explicitly rather than guessing from the URL. Defaults to
+    /// `true` because every backend this harness currently measures against
+    /// is a co-located vLLM; pass `--llm-local=false` when pointing it at a
+    /// remote LLM.
+    #[clap(long, action = clap::ArgAction::Set, default_value_t = true)]
+    llm_local: bool,
 }
 
 /// Client marks recorded during a single fixture manifest replay, plus the
@@ -494,12 +508,11 @@ async fn main() -> Result<()> {
             .as_ref()
             .context("--out-report requires --trace-dir (where the server wrote its trace files)")?;
         let breakdowns = report::breakdown_all(&all_marks, trace_dir)?;
-        // This harness's LLM is always a self-hosted vLLM on the same
-        // cluster (see report::render_markdown's docs) — not a CLI knob,
-        // since there is currently no code path that measures against a
-        // remote LLM. Revisit when this profiler is pointed at a production
-        // backend with a non-co-located LLM.
-        let markdown = report::render_markdown(&breakdowns, &category_summaries, true);
+        // `--llm-local` is an operator statement, not a guess: the harness
+        // has no way to detect whether the server's LLM is co-located (see
+        // Args::llm_local's help text), and a wrong auto-detected label
+        // would be worse than none.
+        let markdown = report::render_markdown(&breakdowns, &category_summaries, args.llm_local);
         std::fs::write(out_report, &markdown)
             .with_context(|| format!("writing report to {}", out_report.display()))?;
         println!("Report written to {}", out_report.display());
@@ -613,5 +626,27 @@ mod tests {
             !residual_is_plausible(400.0, 20.0),
             "a residual 20x the RTT means unattributed server time, not network"
         );
+    }
+
+    /// `--llm-local` must default to `true` (today's reality: every backend
+    /// this harness currently measures is a co-located vLLM) and must accept
+    /// an explicit override to `false` — a plain `bool` field with
+    /// `default_value_t` alone would be inferred by clap as a presence-only
+    /// flag (`ArgAction::SetTrue`) that *cannot* be set to `false` from the
+    /// command line at all, silently defeating the whole point of the flag.
+    /// This pins the CLI wiring itself, not just `render_markdown`'s
+    /// behavior once it has a `bool` in hand.
+    #[test]
+    fn llm_local_flag_defaults_true_and_accepts_an_explicit_false() {
+        let base = ["gradbot-bench", "--url", "ws://x", "--manifest", "m.json", "--out-marks", "o.json"];
+
+        let default_args = Args::try_parse_from(base).unwrap();
+        assert!(default_args.llm_local, "must default to true: this harness's LLM is co-located today");
+
+        let explicit_false = Args::try_parse_from(base.iter().chain(["--llm-local", "false"].iter())).unwrap();
+        assert!(!explicit_false.llm_local, "--llm-local false must be settable from the CLI");
+
+        let explicit_true = Args::try_parse_from(base.iter().chain(["--llm-local", "true"].iter())).unwrap();
+        assert!(explicit_true.llm_local);
     }
 }
