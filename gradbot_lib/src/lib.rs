@@ -88,6 +88,7 @@ pub mod mock;
 mod multiplex;
 mod speech_to_text;
 mod system_prompt;
+pub mod trace;
 pub mod text_to_speech;
 pub mod utils;
 mod wav;
