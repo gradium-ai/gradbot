@@ -83,6 +83,9 @@ impl Config {
         if let Some(name) = config.llm_model_name.as_mut() {
             *name = rev(name);
         }
+        if let Some(dir) = config.trace_dir.as_mut() {
+            *dir = rev(dir);
+        }
 
         Ok(config)
     }
@@ -115,5 +118,41 @@ trace_dir = "/tmp/traces"
 "#;
         let cfg: Config = toml::from_str(toml).unwrap();
         assert_eq!(cfg.trace_dir.as_deref(), Some("/tmp/traces"));
+    }
+
+    struct TmpDir(std::path::PathBuf);
+    impl Drop for TmpDir {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
+
+    #[test]
+    fn trace_dir_expands_env_vars_on_load() {
+        let dir = std::env::temp_dir().join(format!("gradbot-config-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let _cleanup = TmpDir(dir.clone());
+
+        // Safety: test-only, single-threaded w.r.t. this var name.
+        unsafe {
+            std::env::set_var("GRADBOT_TEST_TRACE_DIR", "/tmp/expanded-traces");
+        }
+
+        let toml = r#"
+log_dir = "/tmp/logs"
+addr = "0.0.0.0"
+port = 8000
+gradium_base_url = "https://api.gradium.ai/api"
+trace_dir = "$GRADBOT_TEST_TRACE_DIR/traces"
+"#;
+        let config_path = dir.join("gradbot.toml");
+        std::fs::write(&config_path, toml).unwrap();
+
+        let cfg = Config::load(&config_path).unwrap();
+        assert_eq!(
+            cfg.trace_dir.as_deref(),
+            Some("/tmp/expanded-traces/traces"),
+            "trace_dir must go through the same $VAR expansion as the other path fields"
+        );
     }
 }

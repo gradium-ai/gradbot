@@ -19,6 +19,7 @@ pub struct AppState {
     pub log_dir: String,
     pub trace_dir: Option<String>,
     pub cnt: std::sync::atomic::AtomicU64,
+    pub trace_cnt: std::sync::atomic::AtomicU64,
 }
 
 pub type WebSocketSender = futures::stream::SplitSink<ws::WebSocket, ws::Message>;
@@ -76,7 +77,9 @@ async fn handle_connection_inner(
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos();
-            let cnt = state.cnt.load(std::sync::atomic::Ordering::SeqCst);
+            let cnt = state
+                .trace_cnt
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let path = std::path::PathBuf::from(dir).join(format!("trace_{ts}_{cnt:06}.jsonl"));
             match gradbot::Tracer::to_file(&path) {
                 Ok(t) => {
@@ -320,6 +323,7 @@ pub async fn serve(config: crate::config::Config) -> Result<()> {
         log_dir: config.log_dir.clone(),
         trace_dir: config.trace_dir.clone(),
         cnt: std::sync::atomic::AtomicU64::new(0),
+        trace_cnt: std::sync::atomic::AtomicU64::new(0),
     });
 
     let app = axum::Router::new().route("/ws", axum::routing::get(ws_handler));
