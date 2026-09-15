@@ -15,6 +15,14 @@
 - **Baseline commit:** `db64d77` (gradbot 0.10.5). Branch: `wip/2026-09-15-latency-profiling`.
 - **`cargo` is not on `PATH`.** Every Rust command in this plan must be preceded by:
   `export PATH="$HOME/miniforge3/envs/binaries/bin:$PATH"`
+- **A cold build needs two extra env vars** (discovered in Task 4; pre-existing,
+  unrelated to this plan). A warm `target/` does not, so this only bites after a
+  fresh clone or `cargo clean` — where the failure is confusing and looks like
+  your own change broke the build:
+  ```bash
+  export CMAKE_POLICY_VERSION_MINIMUM=3.5   # audiopus_sys vendored opus vs CMake 4.4.3
+  export LIBRARY_PATH=/usr/lib/python3.12/config-3.12-x86_64-linux-gnu  # gradbot_py -lpython3.12
+  ```
 - **Rust edition 2024**, workspace-level dependency versions only (`{ workspace = true }`). Do not add a new third-party crate without saying so explicitly; every task here is achievable with crates already in `Cargo.toml`.
 - **Tests are inline `#[cfg(test)] mod tests`** at the bottom of the file under test. This is the repo convention (`llm.rs:901`, `mock.rs:415`). Do not create a `tests/` directory for Rust code.
 - **Instrumentation must never block or allocate heavily on the session hot path.** Use `try_send` on a bounded channel and count drops. Instrumentation that perturbs the path it measures is worse than none.
