@@ -21,19 +21,26 @@
 //!   interruption). Substituting 0 would understate latency for exactly the
 //!   turns that went wrong.
 //!
-//! Repetition scoping happens one level up, before this module is called:
-//! `--repetitions N` opens N fresh sessions, so both `ClientMark.turn` and
-//! `TraceRecord.sample_idx` restart at zero every repetition (a new session
-//! restarts the server's sample counter too). `marks` and `trace` here must
-//! already be scoped to a single repetition — pair repetition *i*'s marks
-//! with the *i*-th trace file in timestamp order (valid because the harness
-//! runs exactly one session at a time) before calling `breakdown`. Joining
-//! across repetitions would pair the wrong marks with the wrong trace and
-//! produce confident, wrong numbers with no error anywhere.
+//! Repetition scoping happens one level up, in [`breakdown_all`], before
+//! `breakdown` itself is ever called: `--repetitions N` opens N fresh
+//! sessions, so both `ClientMark.turn` and `TraceRecord.sample_idx` restart
+//! at zero every repetition (a new session restarts the server's sample
+//! counter too). `breakdown`'s own `marks` and `trace` arguments must already
+//! be scoped to a single repetition — `breakdown_all` pairs repetition *i*'s
+//! marks with the *i*-th trace file in timestamp order (valid because the
+//! harness runs exactly one session at a time). Joining across repetitions
+//! would pair the wrong marks with the wrong trace and produce confident,
+//! wrong numbers with no error anywhere — `breakdown` itself has no way to
+//! detect this, since both join keys look identical across repetitions. This
+//! is why `breakdown_all` asserts the discovered trace-file count matches the
+//! repetition count found in `marks` and fails loudly rather than zipping the
+//! two lists to whichever is shorter.
 
-use super::{ClientMark, MarkKind};
+use super::{ClientMark, MarkKind, Summary, summarize};
 use anyhow::{Context, Result};
 use gradbot::{Phase, TraceRecord};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 /// One turn's latency, decomposed into stages, plus the spans that make up
 /// `server_internal_ms` for a Gantt-style render.
@@ -181,6 +188,263 @@ pub fn breakdown(marks: &[ClientMark], trace: &[TraceRecord], turn: u64) -> Resu
     })
 }
 
+/// Extracts the `<unix_nanos>` embedded in a `trace_<unix_nanos>_<counter>.jsonl`
+/// filename, as written by the server (see `gradbot_server::server` and
+/// `openai_server`). Parsed from the name itself, never from filesystem
+/// metadata: mtime can be rewritten by anything that touches the file (a
+/// backup, a `cp -p`, an editor) and is not the ordering the pairing
+/// invariant is defined against.
+fn trace_timestamp(path: &Path) -> Result<u128> {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .with_context(|| format!("trace file name is not valid UTF-8: {}", path.display()))?;
+    let rest = name
+        .strip_prefix("trace_")
+        .with_context(|| format!("{name}: does not start with 'trace_'"))?;
+    let ts_str = rest
+        .split('_')
+        .next()
+        .filter(|s| !s.is_empty())
+        .with_context(|| format!("{name}: no timestamp segment after 'trace_'"))?;
+    ts_str
+        .parse::<u128>()
+        .with_context(|| format!("{name}: timestamp segment {ts_str:?} is not a number"))
+}
+
+/// Every `trace_*.jsonl` file directly inside `trace_dir`, sorted ascending
+/// by the unix-nanosecond timestamp embedded in the filename (see
+/// `trace_timestamp`) — the server writes one such file per session, and
+/// timestamp order is session order because the harness never runs two
+/// sessions concurrently (see module docs).
+pub fn discover_trace_files(trace_dir: &Path) -> Result<Vec<PathBuf>> {
+    let entries = std::fs::read_dir(trace_dir)
+        .with_context(|| format!("reading trace dir {}", trace_dir.display()))?;
+    let mut files = Vec::new();
+    for entry in entries {
+        let path = entry
+            .with_context(|| format!("reading trace dir {}", trace_dir.display()))?
+            .path();
+        let is_trace_file = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("trace_") && n.ends_with(".jsonl"));
+        if !is_trace_file {
+            continue;
+        }
+        let ts = trace_timestamp(&path)?;
+        files.push((ts, path));
+    }
+    files.sort_by_key(|(ts, _)| *ts);
+    Ok(files.into_iter().map(|(_, path)| path).collect())
+}
+
+/// Parses one server trace file into its records, in file (write) order.
+pub fn load_trace_file(path: &Path) -> Result<Vec<TraceRecord>> {
+    let body = std::fs::read_to_string(path)
+        .with_context(|| format!("reading trace file {}", path.display()))?;
+    body.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            serde_json::from_str(line)
+                .with_context(|| format!("parsing trace record in {}: {line}", path.display()))
+        })
+        .collect()
+}
+
+/// Pairs every repetition present in `marks` with the corresponding trace
+/// file in `trace_dir` and runs [`breakdown`] for every turn of every
+/// repetition. See module docs: repetition *i*'s marks pair with the *i*-th
+/// trace file in timestamp order.
+///
+/// **Fails loudly, on purpose, rather than truncating or zip-shortening**,
+/// when the discovered trace-file count does not match the number of
+/// distinct repetitions found in `marks`. `breakdown` cannot detect a
+/// mis-pairing after the fact — both `ClientMark.turn` and
+/// `TraceRecord.sample_idx` reset to the same values every repetition, so
+/// pairing repetition 3's marks with repetition 7's trace would still find
+/// plausible anchors and return confident, wrong numbers. A count mismatch is
+/// the only signal available before that damage is done, so it is treated as
+/// fatal rather than best-effort.
+pub fn breakdown_all(marks: &[ClientMark], trace_dir: &Path) -> Result<Vec<TurnBreakdown>> {
+    let trace_files = discover_trace_files(trace_dir)?;
+    let repetitions: BTreeSet<u64> = marks.iter().map(|m| m.repetition).collect();
+
+    anyhow::ensure!(
+        trace_files.len() == repetitions.len(),
+        "trace-file/repetition count mismatch: found {} trace file(s) in {} but the \
+         marks cover {} repetition(s). Refusing to pair them: breakdown cannot detect a \
+         mis-pairing on its own (turn and sample_idx both reset every repetition), so a \
+         wrong pairing here would silently produce plausible, wrong latency numbers. Check \
+         that --trace-dir points at the trace_dir the server was actually configured with, \
+         and that no trace files from an earlier run are mixed in.",
+        trace_files.len(),
+        trace_dir.display(),
+        repetitions.len(),
+    );
+
+    let mut out = Vec::new();
+    for (repetition, trace_path) in repetitions.into_iter().zip(trace_files.iter()) {
+        let trace = load_trace_file(trace_path)?;
+        let rep_marks: Vec<ClientMark> = marks
+            .iter()
+            .filter(|m| m.repetition == repetition)
+            .cloned()
+            .collect();
+        let turns: BTreeSet<u64> = rep_marks.iter().map(|m| m.turn).collect();
+        for turn in turns {
+            out.push(breakdown(&rep_marks, &trace, turn).with_context(|| {
+                format!("repetition {repetition} (trace file {}), turn {turn}", trace_path.display())
+            })?);
+        }
+    }
+    Ok(out)
+}
+
+/// Verbatim note appended to every span attributed to the LLM stage when the
+/// LLM under measurement is co-located with the harness (see `render_markdown`).
+const LLM_MEASURED_LOCAL_NOTE: &str =
+    "(measured-local — a co-located vLLM has ~zero network cost, unlike a production remote LLM)";
+
+/// Renders one turn's spans as a text Gantt chart, bars positioned by
+/// `(start_ms, end_ms)` relative to `I` (see `TurnBreakdown::spans`).
+/// `label` identifies the turn in the heading — since `TurnBreakdown.turn` is
+/// the *client's* per-repetition turn counter (see module docs), it repeats
+/// across repetitions and cannot uniquely label a turn across a whole
+/// multi-repetition run on its own.
+fn render_gantt(label: &str, b: &TurnBreakdown, llm_local: bool) -> String {
+    const WIDTH: usize = 50;
+    let mut out = String::new();
+    out.push_str(&format!(
+        "### {label} (fixture turn {}, e2e={:.1}ms)\n\n",
+        b.turn, b.e2e_ms
+    ));
+    if b.spans.is_empty() {
+        out.push_str("_(no closed spans recorded for this turn)_\n\n");
+        return out;
+    }
+    let extent = b
+        .spans
+        .iter()
+        .map(|(_, _, end)| *end)
+        .fold(b.server_internal_ms.max(1.0), f64::max);
+
+    out.push_str("```\n");
+    for (name, start, end) in &b.spans {
+        let start_pos = ((start / extent) * WIDTH as f64).round() as usize;
+        let start_pos = start_pos.min(WIDTH.saturating_sub(1));
+        let end_pos = (((end / extent) * WIDTH as f64).round() as usize)
+            .max(start_pos + 1)
+            .min(WIDTH);
+        let mut bar = vec![' '; WIDTH];
+        for c in &mut bar[start_pos..end_pos] {
+            *c = '=';
+        }
+        let bar: String = bar.into_iter().collect();
+        let is_llm_row = name.starts_with("llm.");
+        let suffix = if llm_local && is_llm_row {
+            format!(" {LLM_MEASURED_LOCAL_NOTE}")
+        } else {
+            String::new()
+        };
+        out.push_str(&format!(
+            "[{bar}] {start:>8.1}-{end:<8.1}ms  {name}{suffix}\n"
+        ));
+    }
+    out.push_str("```\n\n");
+    out
+}
+
+/// Renders a percentile row for one named stage, stating `n=` up front —
+/// every aggregate in this report must state how many samples back it,
+/// rather than leaving the reader to assume the same `n` throughout.
+fn render_stage_row(name: &str, values: &[f64]) -> String {
+    match summarize(values) {
+        Some(Summary { n, p50, p90, p99 }) => {
+            format!("| {name} | n={n} | {p50:.2} | {p90:.2} | {p99:.2} |\n")
+        }
+        None => format!(
+            "| {name} | n={} | (insufficient samples for a percentile) | | |\n",
+            values.len()
+        ),
+    }
+}
+
+/// Renders the full markdown report, in order: a percentile table (one row
+/// per fixture category, each stating `n=`), one ASCII Gantt per turn, and
+/// the `detection_lag` / `server_internal` / `network` split.
+///
+/// `detection_lag_ms` is `Option<f64>` because some turns genuinely have no
+/// `endpoint.vad_eot` anchor (see `TurnBreakdown::detection_lag_ms`); `None`
+/// values are filtered out before this function feeds anything to
+/// `summarize`/`percentile`, whose sort panics on `NaN` and must never be fed
+/// a sentinel. Filtering silently would itself mislead, so the report states
+/// how many turns were excluded rather than just quietly shrinking `n`.
+///
+/// When `llm_local` is true, every span whose name starts with `llm.` (the
+/// only stage this harness can measure so far) carries a note that the
+/// measurement excludes real network cost — this harness's LLM is a
+/// self-hosted vLLM on the same cluster, unlike any production deployment
+/// with a remote LLM.
+pub fn render_markdown(
+    breakdowns: &[TurnBreakdown],
+    summaries: &BTreeMap<String, Summary>,
+    llm_local: bool,
+) -> String {
+    let mut out = String::new();
+
+    out.push_str("# Gradbot latency report\n\n");
+
+    out.push_str("## End-to-end latency by fixture category (ms)\n\n");
+    out.push_str("| category | n | p50 | p90 | p99 |\n");
+    out.push_str("| --- | --- | --- | --- | --- |\n");
+    for (category, s) in summaries {
+        out.push_str(&format!(
+            "| {category} | n={} | {:.2} | {:.2} | {:.2} |\n",
+            s.n, s.p50, s.p90, s.p99
+        ));
+    }
+    if summaries.is_empty() {
+        out.push_str("_(no category has enough samples to summarize)_\n");
+    }
+    out.push('\n');
+
+    out.push_str("## Per-turn waterfalls\n\n");
+    if breakdowns.is_empty() {
+        out.push_str("_(no turns to render)_\n\n");
+    } else {
+        for (i, b) in breakdowns.iter().enumerate() {
+            out.push_str(&render_gantt(&format!("Turn {i}"), b, llm_local));
+        }
+    }
+
+    out.push_str("## detection_lag / server_internal / network split (ms)\n\n");
+    let detection_lag_ms: Vec<f64> = breakdowns.iter().filter_map(|b| b.detection_lag_ms).collect();
+    let missing = breakdowns.len() - detection_lag_ms.len();
+    out.push_str(&format!(
+        "{missing} of {} turn(s) had no detection-lag measurement (no `endpoint.vad_eot` \
+         anchor found) and are excluded from the `detection_lag` row below — a percentile \
+         computed over fewer samples than the reader assumes would itself be misleading.\n\n",
+        breakdowns.len()
+    ));
+    let server_internal_ms: Vec<f64> = breakdowns.iter().map(|b| b.server_internal_ms).collect();
+    let network_ms: Vec<f64> = breakdowns.iter().map(|b| b.network_ms).collect();
+
+    if llm_local {
+        out.push_str(&format!(
+            "LLM stage note: this run's LLM is {LLM_MEASURED_LOCAL_NOTE}\n\n"
+        ));
+    }
+
+    out.push_str("| stage | n | p50 | p90 | p99 |\n");
+    out.push_str("| --- | --- | --- | --- | --- |\n");
+    out.push_str(&render_stage_row("detection_lag", &detection_lag_ms));
+    out.push_str(&render_stage_row("server_internal", &server_internal_ms));
+    out.push_str(&render_stage_row("network", &network_ms));
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,5 +548,203 @@ mod tests {
             ClientMark { repetition: 0, turn: 1, kind: MarkKind::FirstAgentAudio, t_us: 900_000, sample_idx: 0 },
         ];
         assert!(breakdown(&marks, &trace, 1).is_err());
+    }
+
+    // --- Task 14: rendering, trace-file pairing, None-filtering ---
+
+    /// Brief's Step 1 test, adapted: the brief's literal snippet builds
+    /// `TurnBreakdown { detection_lag_ms: 60.0, .. }`, but that field has been
+    /// `Option<f64>` since `27ec2e6` (fix(bench): represent a missing
+    /// detection-lag anchor as None, not NaN) — a prior, real fix that
+    /// predates this brief and that the brief itself references by name in
+    /// its own history. `Some(60.0)` is the only value that still compiles
+    /// and preserves the test's intent (a normal, measured turn).
+    #[test]
+    fn report_labels_the_llm_stage_as_measured_local() {
+        let b = TurnBreakdown {
+            turn: 1,
+            e2e_ms: 900.0,
+            detection_lag_ms: Some(60.0),
+            server_internal_ms: 800.0,
+            network_ms: 100.0,
+            spans: vec![("llm.push".to_string(), 10.0, 60.0)],
+        };
+        let out = render_markdown(&[b], &BTreeMap::new(), true);
+        assert!(
+            out.contains("measured-local"),
+            "a locally-hosted LLM flatters its own stage and must be labelled: {out}"
+        );
+    }
+
+    /// A locally-hosted LLM must not be mislabelled when the harness is
+    /// pointed at a real remote LLM: no row should claim `measured-local`.
+    #[test]
+    fn report_omits_the_local_label_when_llm_local_is_false() {
+        let b = TurnBreakdown {
+            turn: 1,
+            e2e_ms: 900.0,
+            detection_lag_ms: Some(60.0),
+            server_internal_ms: 800.0,
+            network_ms: 100.0,
+            spans: vec![("llm.push".to_string(), 10.0, 60.0)],
+        };
+        let out = render_markdown(&[b], &BTreeMap::new(), false);
+        assert!(!out.contains("measured-local"), "got: {out}");
+    }
+
+    #[test]
+    fn report_states_the_repetition_count() {
+        let mut summaries = BTreeMap::new();
+        summaries.insert(
+            "short_answer".to_string(),
+            Summary { n: 20, p50: 800.0, p90: 950.0, p99: 1100.0 },
+        );
+        let out = render_markdown(&[], &summaries, false);
+        assert!(out.contains("n=20"), "every aggregate must state its n: {out}");
+    }
+
+    /// The whole point of Deliverable 3: feeding `render_markdown` a mix of
+    /// `Some`/`None` detection-lag turns must not panic (this codebase's
+    /// `summarize`/`percentile` panic on `NaN` via `partial_cmp().expect(...)`),
+    /// and the omission must be visible in the rendered text, not silently
+    /// absorbed into a smaller `n`.
+    #[test]
+    fn report_filters_none_detection_lag_and_states_the_omission() {
+        let with_lag = TurnBreakdown {
+            turn: 0,
+            e2e_ms: 900.0,
+            detection_lag_ms: Some(60.0),
+            server_internal_ms: 800.0,
+            network_ms: 100.0,
+            spans: vec![],
+        };
+        let without_lag = TurnBreakdown {
+            turn: 1,
+            e2e_ms: 900.0,
+            detection_lag_ms: None,
+            server_internal_ms: 800.0,
+            network_ms: 100.0,
+            spans: vec![],
+        };
+        let out = render_markdown(&[with_lag, without_lag], &BTreeMap::new(), false);
+        assert!(
+            out.contains("1 of 2 turn(s) had no detection-lag measurement"),
+            "the omission must be stated explicitly, not hidden: {out}"
+        );
+    }
+
+    #[test]
+    fn discover_trace_files_sorts_by_embedded_timestamp_not_filename_order() {
+        let dir = std::env::temp_dir().join(format!(
+            "gradbot-report-test-{}-{}",
+            std::process::id(),
+            "sorts_by_embedded_timestamp"
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Filenames deliberately in the *wrong* lexicographic order relative
+        // to their embedded timestamps, so a naive `read_dir` + sort-by-name
+        // (or a sort by mtime, which this test does not control) would fail.
+        std::fs::write(dir.join("trace_200_000001.jsonl"), "").unwrap();
+        std::fs::write(dir.join("trace_100_000000.jsonl"), "").unwrap();
+        std::fs::write(dir.join("trace_9999999999_000002.jsonl"), "").unwrap();
+        std::fs::write(dir.join("not-a-trace-file.txt"), "").unwrap();
+
+        let files = discover_trace_files(&dir).unwrap();
+        let names: Vec<String> = files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["trace_100_000000.jsonl", "trace_200_000001.jsonl", "trace_9999999999_000002.jsonl"],
+            "must be ascending by embedded timestamp, non-trace files excluded"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Deliverable 2's core guarantee: a trace-file/repetition count mismatch
+    /// must fail loudly, never truncate or zip-shortest. This is the failure
+    /// mode `breakdown` itself structurally cannot detect (see module docs).
+    #[test]
+    fn breakdown_all_fails_loudly_on_a_trace_file_count_mismatch() {
+        let dir = std::env::temp_dir().join(format!(
+            "gradbot-report-test-{}-{}",
+            std::process::id(),
+            "count_mismatch"
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        // One trace file...
+        std::fs::write(dir.join("trace_100_000000.jsonl"), "").unwrap();
+
+        // ...but marks spanning two repetitions.
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 0, sample_idx: 24_000 },
+            ClientMark { repetition: 1, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 0, sample_idx: 24_000 },
+        ];
+
+        let err = breakdown_all(&marks, &dir).unwrap_err().to_string();
+        assert!(err.contains("mismatch"), "got: {err}");
+        assert!(err.contains('1'), "should name the trace-file count: {err}");
+        assert!(err.contains('2'), "should name the repetition count: {err}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The happy path: N trace files, N repetitions, correct pairing by
+    /// timestamp order — and the resulting breakdowns are correct, not just
+    /// "no error was raised".
+    #[test]
+    fn breakdown_all_pairs_each_repetition_with_its_own_trace_file_in_timestamp_order() {
+        let dir = std::env::temp_dir().join(format!(
+            "gradbot-report-test-{}-{}",
+            std::process::id(),
+            "happy_path"
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let rec_line = |t_us: u64, turn: u64, span: &str, sample_idx: u64| {
+            serde_json::to_string(&rec(t_us, turn, span, Phase::Point, sample_idx)).unwrap()
+        };
+
+        // Repetition 0's trace (written first, smaller embedded timestamp):
+        // server_internal_ms = 800.0.
+        std::fs::write(
+            dir.join("trace_100_000000.jsonl"),
+            format!(
+                "{}\n{}\n",
+                rec_line(500_000, 1, "audio_in.frame", 24_000),
+                rec_line(1_300_000, 1, "out.first_audio", 0),
+            ),
+        )
+        .unwrap();
+        // Repetition 1's trace (written second): server_internal_ms = 400.0.
+        // If the pairing were reversed (or zipped in file-listing order on a
+        // filesystem that doesn't guarantee name order), this turn would pick
+        // up the wrong numbers with no error.
+        std::fs::write(
+            dir.join("trace_200_000001.jsonl"),
+            format!(
+                "{}\n{}\n",
+                rec_line(500_000, 1, "audio_in.frame", 24_000),
+                rec_line(900_000, 1, "out.first_audio", 0),
+            ),
+        )
+        .unwrap();
+
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 1, kind: MarkKind::UserSpeechEnd, t_us: 9_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 1, kind: MarkKind::FirstAgentAudio, t_us: 9_900_000, sample_idx: 0 },
+            ClientMark { repetition: 1, turn: 1, kind: MarkKind::UserSpeechEnd, t_us: 9_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 1, turn: 1, kind: MarkKind::FirstAgentAudio, t_us: 9_900_000, sample_idx: 0 },
+        ];
+
+        let mut breakdowns = breakdown_all(&marks, &dir).unwrap();
+        breakdowns.sort_by(|a, b| a.server_internal_ms.partial_cmp(&b.server_internal_ms).unwrap());
+        assert_eq!(breakdowns.len(), 2);
+        assert_eq!(breakdowns[0].server_internal_ms, 400.0, "repetition 1 must pair with its own (later) trace file");
+        assert_eq!(breakdowns[1].server_internal_ms, 800.0, "repetition 0 must pair with its own (earlier) trace file");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

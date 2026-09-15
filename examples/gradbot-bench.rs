@@ -250,6 +250,18 @@ struct Args {
     /// Where to write the recorded `ClientMark` JSON array.
     #[clap(long)]
     out_marks: PathBuf,
+
+    /// Directory the server's per-session trace files
+    /// (`trace_<unix_nanos>_<counter>.jsonl`) were written to — must match
+    /// the server's own `trace_dir` config. Required to render `--out-report`.
+    #[clap(long)]
+    trace_dir: Option<PathBuf>,
+
+    /// Where to write the rendered markdown latency report. Requires
+    /// `--trace-dir`, since the waterfall and stage split are joined against
+    /// the server's trace files, not derivable from client marks alone.
+    #[clap(long)]
+    out_report: Option<PathBuf>,
 }
 
 /// Client marks recorded during a single fixture manifest replay, plus the
@@ -459,17 +471,38 @@ async fn main() -> Result<()> {
         all_marks.extend(marks);
     }
 
+    let mut category_summaries: BTreeMap<String, Summary> = BTreeMap::new();
     for (category, values) in &by_category {
         match summarize(values) {
-            Some(s) => println!(
-                "{category}: n={} p50={:.2}ms p90={:.2}ms p99={:.2}ms",
-                s.n, s.p50, s.p90, s.p99
-            ),
+            Some(s) => {
+                println!(
+                    "{category}: n={} p50={:.2}ms p90={:.2}ms p99={:.2}ms",
+                    s.n, s.p50, s.p90, s.p99
+                );
+                category_summaries.insert(category.clone(), s);
+            }
             None => println!(
                 "{category}: only {} sample(s), refusing to summarize",
                 values.len()
             ),
         }
+    }
+
+    if let Some(out_report) = &args.out_report {
+        let trace_dir = args
+            .trace_dir
+            .as_ref()
+            .context("--out-report requires --trace-dir (where the server wrote its trace files)")?;
+        let breakdowns = report::breakdown_all(&all_marks, trace_dir)?;
+        // This harness's LLM is always a self-hosted vLLM on the same
+        // cluster (see report::render_markdown's docs) — not a CLI knob,
+        // since there is currently no code path that measures against a
+        // remote LLM. Revisit when this profiler is pointed at a production
+        // backend with a non-co-located LLM.
+        let markdown = report::render_markdown(&breakdowns, &category_summaries, true);
+        std::fs::write(out_report, &markdown)
+            .with_context(|| format!("writing report to {}", out_report.display()))?;
+        println!("Report written to {}", out_report.display());
     }
 
     let out = std::fs::File::create(&args.out_marks)?;
