@@ -43,8 +43,16 @@ pub struct TurnBreakdown {
     /// First agent audio minus user speech end, on the client's own clock.
     pub e2e_ms: f64,
     /// `V - I`: how long the server took to detect end-of-turn after the
-    /// sample the client marked as speech end.
-    pub detection_lag_ms: f64,
+    /// sample the client marked as speech end. `None` when no
+    /// `endpoint.vad_eot` was found for this turn — some traces genuinely
+    /// carry no such event (`find_v` is a soft anchor). This is `Option`,
+    /// not a sentinel float, on purpose: a `NaN` would silently poison any
+    /// downstream sum/average and panic this codebase's `percentile`
+    /// (`partial_cmp().expect(...)`), while a fake `0.0` would look like a
+    /// real, implausibly instant detection. Do not "simplify" this back to
+    /// `f64` — `None` is the only representation that can't be mistaken for
+    /// a measurement.
+    pub detection_lag_ms: Option<f64>,
     /// `O - I`: everything the server did between receiving that sample and
     /// emitting first agent audio.
     pub server_internal_ms: f64,
@@ -154,9 +162,10 @@ pub fn breakdown(marks: &[ClientMark], trace: &[TraceRecord], turn: u64) -> Resu
     // unmeasurable just because the detection-lag diagnostic is unavailable.
     let o = find_o(trace, v.map_or(i.t_us, |v| v.t_us))?;
 
-    // A missing `V` is "not measured", not "zero lag" (see `find_v`): NaN
-    // makes that visible rather than silently reporting instant detection.
-    let detection_lag_ms = v.map_or(f64::NAN, |v| (v.t_us as f64 - i.t_us as f64) / 1000.0);
+    // A missing `V` is "not measured", not "zero lag" (see `find_v` and the
+    // field doc on `TurnBreakdown::detection_lag_ms`): `None` makes that
+    // explicit rather than smuggling it through as a number.
+    let detection_lag_ms = v.map(|v| (v.t_us as f64 - i.t_us as f64) / 1000.0);
     let server_internal_ms = (o.t_us as f64 - i.t_us as f64) / 1000.0;
     let network_ms = e2e_ms - server_internal_ms;
 
@@ -203,7 +212,7 @@ mod tests {
 
         let b = breakdown(&marks, &trace, 1).unwrap();
         assert_eq!(b.e2e_ms, 900.0);
-        assert_eq!(b.detection_lag_ms, 60.0);   // V - I
+        assert_eq!(b.detection_lag_ms, Some(60.0));   // V - I
         assert_eq!(b.server_internal_ms, 800.0); // O - I
         assert_eq!(b.network_ms, 100.0);         // E2E - (O - I)
     }
@@ -241,8 +250,30 @@ mod tests {
         ];
         // Client turn 1 vs server turns 7 and 9 — none of them equal.
         let b = breakdown(&marks, &trace, 1).unwrap();
-        assert_eq!(b.detection_lag_ms, 60.0);
+        assert_eq!(b.detection_lag_ms, Some(60.0));
         assert_eq!(b.server_internal_ms, 800.0);
+    }
+
+    /// The case that used to produce a `NaN`: no `endpoint.vad_eot` anywhere
+    /// in the trace. `detection_lag_ms` must come back `None` — never a
+    /// number — while the rest of the breakdown, which does not depend on
+    /// `V`, still succeeds and is still correct. This is the whole point of
+    /// treating `V` as a soft anchor rather than failing the turn outright.
+    #[test]
+    fn missing_vad_eot_yields_none_lag_but_the_rest_of_the_breakdown_survives() {
+        let trace = vec![
+            rec(100_000, 1, "audio_in.frame", Phase::Point, 24_000), // I
+            rec(950_000, 1, "out.first_audio", Phase::Point, 0),     // O
+        ];
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 1, kind: MarkKind::UserSpeechEnd, t_us: 9_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 1, kind: MarkKind::FirstAgentAudio, t_us: 9_900_000, sample_idx: 0 },
+        ];
+        let b = breakdown(&marks, &trace, 1).unwrap();
+        assert_eq!(b.detection_lag_ms, None, "no endpoint.vad_eot in the trace: lag is unmeasured, not zero");
+        assert_eq!(b.e2e_ms, 900.0);
+        assert_eq!(b.server_internal_ms, 850.0, "O must still anchor on I when V is absent");
+        assert_eq!(b.network_ms, 50.0);
     }
 
     #[test]
