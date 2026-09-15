@@ -1495,6 +1495,7 @@ async fn run(
         .as_ref()
         .is_some_and(|c| c.assistant_speaks_first);
     let recv_tracer = tracer.clone();
+    let out_tracer = tracer.clone();
     let (mut session, sender) = Session::new(
         tts_client,
         stt_client,
@@ -1534,6 +1535,7 @@ async fn run(
                     .await?;
             }
             let mut last_encoder_turn_idx: u64 = 0;
+            let mut first_audio_turn: Option<u64> = None;
             while let Some(msg) = tts_out_rx.recv().await {
                 // Handle errors from the LLM/TTS task
                 let msg = msg?;
@@ -1575,8 +1577,31 @@ async fn run(
                             }
                             last_encoder_turn_idx = turn_idx;
                         }
+                        let pcm_in = pcm.len();
                         let encoded = encoder.encode(&pcm)?;
+                        let mut attrs = serde_json::Map::new();
+                        attrs.insert("pcm_in".to_string(), serde_json::json!(pcm_in));
+                        attrs.insert(
+                            "bytes_out".to_string(),
+                            serde_json::json!(encoded.data.len()),
+                        );
+                        // Finding E: Opus buffers until a full page, so empty
+                        // results here are the 80ms output quantization.
+                        out_tracer.point(turn_idx, "out.encode", start_s, 0, attrs);
                         if !encoded.data.is_empty() {
+                            if first_audio_turn != Some(turn_idx) {
+                                // Supplies `O`. Deliberately after the
+                                // is_empty check so Opus header packets, which
+                                // carry no audio, never set the anchor.
+                                out_tracer.point(
+                                    turn_idx,
+                                    "out.first_audio",
+                                    start_s,
+                                    0,
+                                    serde_json::Map::new(),
+                                );
+                                first_audio_turn = Some(turn_idx);
+                            }
                             tracing::debug!(
                                 "[out_send] SEND Audio: turn={turn_idx} start_s={start_s:.3} stop_s={stop_s:.3} interrupted={interrupted} bytes={}",
                                 encoded.data.len()
@@ -1860,6 +1885,27 @@ mod trace_tests {
             connect_end < first_text,
             "text cannot be sent before the TTS stream is connected"
         );
+    }
+
+    #[tokio::test]
+    async fn out_first_audio_fires_once_per_turn_and_never_for_empty_encodes() {
+        let (tracer, collector) = Tracer::in_memory();
+        // Simulate: a header (0 bytes of real audio) then two real packets.
+        for (turn, bytes_out, is_first_real) in [(1usize, 0usize, false), (1, 240, true), (1, 240, false)] {
+            let mut attrs = serde_json::Map::new();
+            attrs.insert("pcm_in".to_string(), serde_json::json!(3840));
+            attrs.insert("bytes_out".to_string(), serde_json::json!(bytes_out));
+            tracer.point(turn as u64, "out.encode", 0.0, 0, attrs);
+            if is_first_real {
+                tracer.point(turn as u64, "out.first_audio", 0.0, 0, serde_json::Map::new());
+            }
+        }
+        drop(tracer);
+
+        let recs = collector.records().await;
+        let firsts: Vec<_> = recs.iter().filter(|r| r.span == "out.first_audio").collect();
+        assert_eq!(firsts.len(), 1, "out.first_audio must fire exactly once per turn");
+        assert_well_formed(&recs);
     }
 
     #[test]
