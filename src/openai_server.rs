@@ -25,6 +25,7 @@ pub struct State {
     llm: Arc<Llm>,
     config: Arc<Config>,
     cnt: std::sync::atomic::AtomicU64,
+    trace_cnt: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -200,6 +201,27 @@ pub async fn realtime(
             None
         };
 
+        let tracer = match &state.config.trace_dir {
+            None => gradbot::Tracer::disabled(),
+            Some(dir) => {
+                let ts = start_time.to_int_ns_since_epoch();
+                let cnt = state
+                    .trace_cnt
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let path = std::path::PathBuf::from(dir).join(format!("trace_{ts}_{cnt:06}.jsonl"));
+                match gradbot::Tracer::to_file(&path) {
+                    Ok(t) => {
+                        tracing::info!(path = %path.display(), "latency tracing enabled");
+                        t
+                    }
+                    Err(e) => {
+                        tracing::warn!(?e, "failed to open trace file, continuing untraced");
+                        gradbot::Tracer::disabled()
+                    }
+                }
+            }
+        };
+
         let (input, output) = match gradbot::start_session(
             state.tts_client.clone(),
             state.stt_client.clone(),
@@ -209,7 +231,7 @@ pub async fn realtime(
                 input: gradbot::decoder::Format::pcm(24000),
                 output: gradbot::encoder::Format::OggOpus,
             },
-            gradbot::Tracer::disabled(),
+            tracer,
         )
         .await
         {
@@ -265,6 +287,7 @@ pub async fn serve(config: Config) -> Result<()> {
         llm: Arc::new(llm),
         config: config.clone(),
         cnt: std::sync::atomic::AtomicU64::new(0),
+        trace_cnt: std::sync::atomic::AtomicU64::new(0),
     };
     let state = std::sync::Arc::new(state);
     let app = axum::Router::new().route("/v1/realtime", axum::routing::get(realtime));

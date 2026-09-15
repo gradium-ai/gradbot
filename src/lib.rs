@@ -58,6 +58,9 @@ pub struct Config {
     pub log_sessions: bool,
     pub max_completion_tokens: Option<u32>,
     pub transport: Transport,
+    /// Directory for per-session latency trace JSONL. Tracing is off when unset.
+    #[serde(default)]
+    pub trace_dir: Option<String>,
 }
 
 impl Config {
@@ -83,6 +86,84 @@ impl Config {
         if let Transport::Twilio(twilio) = &mut config.transport {
             twilio.system_prompt = rev(&twilio.system_prompt);
         }
+        if let Some(dir) = config.trace_dir.as_mut() {
+            *dir = rev(dir);
+        }
         Ok(config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trace_dir_defaults_to_none() {
+        let toml = r#"
+log_dir = "/tmp/logs"
+addr = "0.0.0.0"
+port = 8000
+instance_name = "gradbot"
+gradium_api_key = "test-key"
+gradium_base_url = "https://api.gradium.ai/api"
+transport = "ws-openai"
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert!(cfg.trace_dir.is_none(), "tracing must be off unless configured");
+    }
+
+    #[test]
+    fn trace_dir_is_parsed_when_present() {
+        let toml = r#"
+log_dir = "/tmp/logs"
+addr = "0.0.0.0"
+port = 8000
+instance_name = "gradbot"
+gradium_api_key = "test-key"
+gradium_base_url = "https://api.gradium.ai/api"
+transport = "ws-openai"
+trace_dir = "/tmp/traces"
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.trace_dir.as_deref(), Some("/tmp/traces"));
+    }
+
+    struct TmpDir(std::path::PathBuf);
+    impl Drop for TmpDir {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
+
+    #[test]
+    fn trace_dir_expands_env_vars_on_load() {
+        let dir = std::env::temp_dir().join(format!("gradbot-bin-config-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let _cleanup = TmpDir(dir.clone());
+
+        // Safety: test-only, single-threaded w.r.t. this var name.
+        unsafe {
+            std::env::set_var("GRADBOT_TEST_TRACE_DIR", "/tmp/expanded-traces");
+        }
+
+        let toml = r#"
+log_dir = "/tmp/logs"
+addr = "0.0.0.0"
+port = 8000
+instance_name = "gradbot"
+gradium_api_key = "test-key"
+gradium_base_url = "https://api.gradium.ai/api"
+transport = "ws-openai"
+trace_dir = "$GRADBOT_TEST_TRACE_DIR/traces"
+"#;
+        let config_path = dir.join("gradbot.toml");
+        std::fs::write(&config_path, toml).unwrap();
+
+        let cfg = Config::load(&config_path).unwrap();
+        assert_eq!(
+            cfg.trace_dir.as_deref(),
+            Some("/tmp/expanded-traces/traces"),
+            "trace_dir must go through the same $VAR expansion as the other path fields"
+        );
     }
 }
