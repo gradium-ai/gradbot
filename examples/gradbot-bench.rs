@@ -174,21 +174,43 @@ pub fn residual_is_plausible(network_ms: f64, rtt_p50_ms: f64) -> bool {
     network_ms >= 0.0 && network_ms <= rtt_p50_ms * 4.0 + 50.0
 }
 
-/// Measures WebSocket round-trip time with `n` ping/pong exchanges. Run once
-/// per invocation, before fixture playback begins, so it never competes with
-/// the traffic being measured.
+/// Bound on how long a single ping waits for its pong. This probe runs
+/// before any fixture traffic, so a peer that accepts the WebSocket
+/// handshake but never sends a pong back — a wedged process, a proxy that
+/// swallows control frames, a half-open connection — must not be allowed to
+/// hang the whole benchmark indefinitely with zero output. A miss is skipped
+/// (see `probe_rtt_ms`), not fatal; do not remove this timeout to
+/// "simplify" the loop back to the brief's original unbounded sketch.
+const RTT_PING_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Waits for the pong matching an already-sent ping, draining and discarding
+/// any other frames that interleave. Factored out of `probe_rtt_ms` so the
+/// timeout in that function wraps a single, ordinary future.
+async fn wait_for_pong(ws: &mut WebSocket) -> Result<()> {
+    while let Some(msg) = ws.next().await {
+        if let ws::Message::Pong(_) = msg? {
+            return Ok(());
+        }
+    }
+    anyhow::bail!("connection closed while waiting for a pong")
+}
+
+/// Measures WebSocket round-trip time with up to `n` ping/pong exchanges. Run
+/// once per invocation, before fixture playback begins, so it never competes
+/// with the traffic being measured. A ping that does not get a pong back
+/// within `RTT_PING_TIMEOUT` is skipped rather than treated as fatal; only
+/// ending up with fewer than two samples overall is an error, since a
+/// transport this harness cannot characterize must fail loudly rather than
+/// silently produce a bogus baseline.
 pub async fn probe_rtt_ms(ws: &mut WebSocket, n: usize) -> Result<Summary> {
     use futures_util::SinkExt;
     let mut samples = Vec::with_capacity(n);
     for i in 0..n {
         let started = Instant::now();
         ws.send(ws::Message::Ping(vec![i as u8])).await?;
-        // Drain until the matching pong; other frames may interleave.
-        while let Some(msg) = ws.next().await {
-            if let ws::Message::Pong(_) = msg? {
-                samples.push(started.elapsed().as_secs_f64() * 1000.0);
-                break;
-            }
+        match tokio::time::timeout(RTT_PING_TIMEOUT, wait_for_pong(ws)).await {
+            Ok(Ok(())) => samples.push(started.elapsed().as_secs_f64() * 1000.0),
+            Ok(Err(_)) | Err(_) => continue, // read error, close, or timeout: skip this sample
         }
     }
     summarize(&samples).ok_or_else(|| anyhow::anyhow!("rtt probe collected < 2 samples"))
