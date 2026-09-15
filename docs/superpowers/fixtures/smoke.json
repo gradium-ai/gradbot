@@ -1,0 +1,12 @@
+{
+  "name": "smoke",
+  "turns": [
+    {
+      "wav": "/data/home/neil/datasets/gradbot-bench/short_yes.wav",
+      "speech_start_sample": 0,
+      "speech_end_sample": 12000,
+      "gap_after_s": 4.0,
+      "category": "short_answer"
+    }
+  ]
+}
