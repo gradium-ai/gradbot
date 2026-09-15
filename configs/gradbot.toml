@@ -10,3 +10,4 @@ llm_base_url = "$LLM_BASE_URL"
 
 log_sessions = true
 transport = "ws-openai"
+# trace_dir = "$HOME/tmp/gradbot-traces"   # per-session latency spans (JSONL)

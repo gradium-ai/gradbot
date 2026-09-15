@@ -17,6 +17,7 @@ pub struct AppState {
     pub pinned: SessionConfigWire,
     pub log_sessions: bool,
     pub log_dir: String,
+    pub trace_dir: Option<String>,
     pub cnt: std::sync::atomic::AtomicU64,
 }
 
@@ -68,15 +69,29 @@ async fn handle_connection_inner(
         input: gradbot::decoder::Format::OggOpus,
         output: gradbot::encoder::Format::OggOpus,
     };
-    let (input, output) = gradbot::start_session(
-        tts,
-        stt,
-        state.llm.clone(),
-        None,
-        io_format,
-        gradbot::Tracer::disabled(),
-    )
-    .await?;
+    let tracer = match &state.trace_dir {
+        None => gradbot::Tracer::disabled(),
+        Some(dir) => {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let cnt = state.cnt.load(std::sync::atomic::Ordering::SeqCst);
+            let path = std::path::PathBuf::from(dir).join(format!("trace_{ts}_{cnt:06}.jsonl"));
+            match gradbot::Tracer::to_file(&path) {
+                Ok(t) => {
+                    tracing::info!(path = %path.display(), "latency tracing enabled");
+                    t
+                }
+                Err(e) => {
+                    tracing::warn!(?e, "failed to open trace file, continuing untraced");
+                    gradbot::Tracer::disabled()
+                }
+            }
+        }
+    };
+    let (input, output) =
+        gradbot::start_session(tts, stt, state.llm.clone(), None, io_format, tracer).await?;
 
     let (ws_tx, ws_rx) = socket.split();
     let pending_tool_calls: PendingToolCalls = Arc::new(Mutex::new(HashMap::new()));
@@ -303,6 +318,7 @@ pub async fn serve(config: crate::config::Config) -> Result<()> {
         pinned: config.pinned.clone(),
         log_sessions: config.log_sessions,
         log_dir: config.log_dir.clone(),
+        trace_dir: config.trace_dir.clone(),
         cnt: std::sync::atomic::AtomicU64::new(0),
     });
 

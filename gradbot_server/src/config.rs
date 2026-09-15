@@ -42,6 +42,10 @@ pub struct Config {
     pub log_dir: String,
     #[serde(default)]
     pub log_sessions: bool,
+
+    /// Directory for per-session latency trace JSONL. Tracing is off when unset.
+    #[serde(default)]
+    pub trace_dir: Option<String>,
 }
 
 /// Replace `$VAR_NAME` patterns with their environment variable values.
@@ -81,5 +85,35 @@ impl Config {
         }
 
         Ok(config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trace_dir_defaults_to_none() {
+        let toml = r#"
+log_dir = "/tmp/logs"
+addr = "0.0.0.0"
+port = 8000
+gradium_base_url = "https://api.gradium.ai/api"
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert!(cfg.trace_dir.is_none(), "tracing must be off unless configured");
+    }
+
+    #[test]
+    fn trace_dir_is_parsed_when_present() {
+        let toml = r#"
+log_dir = "/tmp/logs"
+addr = "0.0.0.0"
+port = 8000
+gradium_base_url = "https://api.gradium.ai/api"
+trace_dir = "/tmp/traces"
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.trace_dir.as_deref(), Some("/tmp/traces"));
     }
 }
