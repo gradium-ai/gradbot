@@ -551,13 +551,19 @@ impl Session {
                 };
                 tracing::info!(?voice_id, "creating TTS stream");
                 let tts_model_name = std::env::var("GRADIUM_TTS_MODEL_NAME").ok();
+                // Finding A: a fresh, unpooled WebSocket handshake to prod on
+                // every turn, serialized behind the LLM request.
+                llm_tracer.begin(turn_idx, "tts.connect", 0.0, 0, serde_json::Map::new());
                 let (mut tts_tx, tts_rx) =
                     tts_client.tts_stream(tts_model_name, voice_id.clone(), padding_bonus, rewrite_rules.clone(), tts_extra_config.as_deref()).await
                         .context("TTS: failed to create stream")?;
+                llm_tracer.end(turn_idx, "tts.connect", 0.0, 0, serde_json::Map::new());
                 tracing::info!("TTS stream created successfully");
                 // Shared state for tracking last stop_s across futures
                 let last_stop_s =
                     Arc::new(std::sync::atomic::AtomicU64::new(start_time.to_bits()));
+                let llm_to_tts_tracer = llm_tracer.clone();
+                let tts_to_client_tracer = llm_tracer.clone();
                 let llm_to_tts = {
                     let msg_out_tx = msg_out_tx.clone();
                     let stt_sender = stt_sender.clone();
@@ -565,6 +571,7 @@ impl Session {
                     async move {
                         let mut streaming_session = streaming_session;
                         let mut first_word = true;
+                        let mut first_text_sent = true;
                         let mut buffer = String::new();
                         // When the buffer ends with "<digit>." or "<digit>,", we can't
                         // tell if the punctuation is mid-number ($50,000 or 6.1%) or a
@@ -637,6 +644,16 @@ impl Session {
                                         } else {
                                             // Real boundary — flush it
                                             tts_tx.send_text(&held).await?;
+                                            if first_text_sent {
+                                                llm_to_tts_tracer.point(
+                                                    turn_idx,
+                                                    "tts.first_text",
+                                                    0.0,
+                                                    0,
+                                                    serde_json::Map::new(),
+                                                );
+                                                first_text_sent = false;
+                                            }
                                         }
                                     }
                                     buffer.push_str(&chunk);
@@ -656,6 +673,16 @@ impl Session {
                                         );
                                         if is_word_boundary {
                                             tts_tx.send_text(&buffer).await?;
+                                            if first_text_sent {
+                                                llm_to_tts_tracer.point(
+                                                    turn_idx,
+                                                    "tts.first_text",
+                                                    0.0,
+                                                    0,
+                                                    serde_json::Map::new(),
+                                                );
+                                                first_text_sent = false;
+                                            }
                                             buffer.clear();
                                         }
                                     }
@@ -738,6 +765,13 @@ impl Session {
                                     wait_until(start_s - 0.3).await;
 
                                     if first_audio && stop_s > 0.0 {
+                                        tts_to_client_tracer.point(
+                                            turn_idx,
+                                            "tts.first_audio",
+                                            0.0,
+                                            0,
+                                            serde_json::Map::new(),
+                                        );
                                         let time_s = stt_sender.current_time_s().await;
                                         msg_out_tx
                                             .send(MsgOut::Event {
@@ -1807,6 +1841,25 @@ mod trace_tests {
             .find(|r| r.span == "llm.push" && r.phase == Phase::End)
             .unwrap();
         assert_eq!(end.attrs.get("error").unwrap(), &serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn tts_connect_is_a_well_formed_pair_and_precedes_first_text() {
+        let (tracer, collector) = Tracer::in_memory();
+        tracer.begin(1, "tts.connect", 0.0, 0, serde_json::Map::new());
+        tracer.end(1, "tts.connect", 0.0, 0, serde_json::Map::new());
+        tracer.point(1, "tts.first_text", 0.0, 0, serde_json::Map::new());
+        tracer.point(1, "tts.first_audio", 0.0, 0, serde_json::Map::new());
+        drop(tracer);
+
+        let recs = collector.records().await;
+        assert_well_formed(&recs);
+        let connect_end = recs.iter().position(|r| r.span == "tts.connect" && r.phase == Phase::End).unwrap();
+        let first_text = recs.iter().position(|r| r.span == "tts.first_text").unwrap();
+        assert!(
+            connect_end < first_text,
+            "text cannot be sent before the TTS stream is connected"
+        );
     }
 
     #[test]
