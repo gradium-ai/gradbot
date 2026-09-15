@@ -1927,6 +1927,15 @@ git commit -m "feat(bench): repetitions, percentiles, and a transport RTT probe"
 > 3. Every `t_us` is non-decreasing in file order.
 > 4. `tracer.dropped()` is 0. Non-zero means records were lost and the
 >    measurement is incomplete — raise the channel capacity and re-run.
+> 5. **Pin the Opus header assumption with a real-audio test.** The harness
+>    excludes Opus header packets from "first agent audio" by checking that
+>    decoded PCM is non-empty. That this holds rests on `kaudio`'s decoder
+>    returning an empty slice for an `OpusHead`/`OpusTags`-only packet —
+>    verified by reading the crate's source, but pinned by no test in this
+>    repo, so a future `kaudio` bump could break it silently and the harness
+>    would start reporting near-zero latencies that look plausible. Once real
+>    fixture audio exists, add a test that decodes an actual captured server
+>    response and asserts the first packet is rejected and the second accepted.
 >
 > Record the outcome in the ledger. This is the check Phase 1 could not perform.
 
