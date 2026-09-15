@@ -2072,7 +2072,17 @@ Expected: FAIL — `cannot find function breakdown`.
 
 Implement `breakdown` following the spec's decomposition exactly.
 
-**Join by ordering and sample index — never by turn equality.** The client's
+**Scope every join to one repetition first.** `--repetitions N` opens N fresh
+sessions, so the server writes N trace files, and BOTH join keys reset each
+time: `turn` restarts at 0, and `sample_idx` restarts at 0 because a new session
+restarts the server's `samples_sent` counter. A 20-repetition run therefore emits
+twenty marks reading `turn: 0, sample_idx: 24000`. `ClientMark.repetition` is
+what disambiguates them. Pair repetition *i* with the *i*-th trace file in
+timestamp order — valid because the harness runs exactly one session at a time —
+and only then apply the anchoring below. Joining across repetitions would pair
+the wrong marks with the wrong trace and produce confident, wrong numbers.
+
+**Within a repetition, join by ordering and sample index — never by turn equality.** The client's
 `turn` counts fixture turns; the server's `turn_idx` is its own sequence that
 also advances on interruptions, and the OpenAI-compatible protocol carries no
 turn id for the client to adopt. The two numberings are therefore unrelated, and
