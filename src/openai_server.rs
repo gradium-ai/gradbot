@@ -209,6 +209,7 @@ pub async fn realtime(
                 input: gradbot::decoder::Format::pcm(24000),
                 output: gradbot::encoder::Format::OggOpus,
             },
+            gradbot::Tracer::disabled(),
         )
         .await
         {

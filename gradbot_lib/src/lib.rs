@@ -105,6 +105,7 @@ pub use multiplex::{
 pub use speech_to_text::SttClient;
 pub use system_prompt::Lang;
 pub use text_to_speech::TtsClient;
+pub use trace::{Phase, TraceRecord, Tracer};
 
 /// Audio format pair for input (decoding) and output (encoding).
 pub struct IoFormat {
@@ -979,12 +980,24 @@ impl GradbotClients {
         initial_config: Option<SessionConfig>,
         io_format: IoFormat,
     ) -> Result<(SessionInputHandle, SessionOutputHandle)> {
+        self.start_session_traced(initial_config, io_format, Tracer::disabled())
+            .await
+    }
+
+    /// As [`Self::start_session`], but records latency spans to `tracer`.
+    pub async fn start_session_traced(
+        &self,
+        initial_config: Option<SessionConfig>,
+        io_format: IoFormat,
+        tracer: Tracer,
+    ) -> Result<(SessionInputHandle, SessionOutputHandle)> {
         start_session(
             self.tts_client.clone(),
             self.stt_client.clone(),
             self.llm.clone(),
             initial_config,
             io_format,
+            tracer,
         )
         .await
     }

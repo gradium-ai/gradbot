@@ -68,8 +68,15 @@ async fn handle_connection_inner(
         input: gradbot::decoder::Format::OggOpus,
         output: gradbot::encoder::Format::OggOpus,
     };
-    let (input, output) =
-        gradbot::start_session(tts, stt, state.llm.clone(), None, io_format).await?;
+    let (input, output) = gradbot::start_session(
+        tts,
+        stt,
+        state.llm.clone(),
+        None,
+        io_format,
+        gradbot::Tracer::disabled(),
+    )
+    .await?;
 
     let (ws_tx, ws_rx) = socket.split();
     let pending_tool_calls: PendingToolCalls = Arc::new(Mutex::new(HashMap::new()));

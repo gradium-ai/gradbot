@@ -1,5 +1,6 @@
 use crate::speech_to_text::{SttClient, SttStreamReceiver, SttStreamSender};
 use crate::text_to_speech::{TtsClient, TtsOut};
+use crate::trace::Tracer;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -180,6 +181,8 @@ struct Session {
     /// Holds the JoinHandle of a user-interrupted LLM/TTS task while it winds down.
     /// Dropped when the next task starts.
     interrupted_task_jh: Option<crate::utils::JoinHandleAbortOnDrop>,
+    /// Span recorder. Disabled tracers make every call a no-op.
+    tracer: Tracer,
 }
 
 impl Session {
@@ -190,6 +193,7 @@ impl Session {
         tts_out_tx: tokio::sync::mpsc::Sender<Result<TtsOut>>,
         msg_out_tx: tokio::sync::mpsc::Sender<MsgOut>,
         session_config: Option<SessionConfig>,
+        tracer: Tracer,
     ) -> Result<(Self, SttSender)> {
         let stt_lang = session_config
             .as_ref()
@@ -248,6 +252,7 @@ impl Session {
                 .unwrap_or(false),
             user_interrupted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             interrupted_task_jh: None,
+            tracer,
         };
         Ok((slf, stt_sender))
     }
@@ -1321,6 +1326,7 @@ pub async fn start_session(
     llm: Arc<crate::llm::Llm>,
     initial_config: Option<SessionConfig>,
     io_format: crate::IoFormat,
+    tracer: Tracer,
 ) -> Result<(SessionInputHandle, SessionOutputHandle)> {
     let (msg_in_tx, msg_in_rx) = tokio::sync::mpsc::channel::<MsgIn>(MSG_IN_CHANNEL_CAPACITY);
     let (msg_out_tx, msg_out_rx) = tokio::sync::mpsc::channel::<MsgOut>(MSG_OUT_CHANNEL_CAPACITY);
@@ -1335,6 +1341,7 @@ pub async fn start_session(
         msg_out_tx,
         msg_in_rx,
         io_format,
+        tracer,
     ));
 
     let input_handle = SessionInputHandle {
@@ -1359,6 +1366,7 @@ async fn run(
     msg_out_tx: tokio::sync::mpsc::Sender<MsgOut>,
     mut msg_in_rx: tokio::sync::mpsc::Receiver<MsgIn>,
     io_format: crate::IoFormat,
+    tracer: Tracer,
 ) -> Result<()> {
     let input_format = io_format.input;
     let output_format = io_format.output;
@@ -1367,6 +1375,7 @@ async fn run(
     let assistant_speaks_first = initial_config
         .as_ref()
         .is_some_and(|c| c.assistant_speaks_first);
+    let recv_tracer = tracer.clone();
     let (mut session, sender) = Session::new(
         tts_client,
         stt_client,
@@ -1374,6 +1383,7 @@ async fn run(
         tts_out_tx,
         msg_out_tx.clone(),
         initial_config,
+        tracer,
     )
     .await?;
     // If assistant speaks first, trigger initial greeting
@@ -1560,7 +1570,21 @@ async fn run(
                         ));
                     }
                     let audio = decoder.decode(&audio)?;
-                    sender.send_audio(&audio).await?
+                    sender.send_audio(&audio).await?;
+                    // Supplies `I` — the server-side anchor the benchmark joins
+                    // on — and measures the 80ms input quantization (Finding D).
+                    if !audio.is_empty() {
+                        let sample_idx = sender.0.lock().await.samples_sent;
+                        let mut attrs = serde_json::Map::new();
+                        attrs.insert("samples".to_string(), serde_json::json!(audio.len()));
+                        recv_tracer.point(
+                            0,
+                            "audio_in.frame",
+                            sample_idx as f64 / INPUT_SAMPLE_RATE as f64,
+                            sample_idx,
+                            attrs,
+                        );
+                    }
                 }
             }
         }
@@ -1587,5 +1611,69 @@ async fn run(
             }
         },
         res = &mut recv_loop => res.context("audio input loop failed"),
+    }
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use crate::trace::{Phase, TraceRecord, Tracer};
+
+    /// Every span a task in this plan emits must be well-formed: begin/end pairs
+    /// nest per (turn, span), and stamps never go backwards.
+    pub(crate) fn assert_well_formed(recs: &[TraceRecord]) {
+        for w in recs.windows(2) {
+            assert!(w[0].t_us <= w[1].t_us, "stamps went backwards");
+        }
+        let mut open: std::collections::HashMap<(u64, String), u64> =
+            std::collections::HashMap::new();
+        for r in recs {
+            let key = (r.turn, r.span.clone());
+            match r.phase {
+                Phase::Begin => {
+                    let prev = open.insert(key.clone(), r.t_us);
+                    assert!(prev.is_none(), "span {key:?} began twice without ending");
+                }
+                Phase::End => {
+                    let began = open.remove(&key).unwrap_or_else(|| {
+                        panic!("span {key:?} ended without beginning")
+                    });
+                    assert!(r.t_us >= began, "span {key:?} ended before it began");
+                }
+                Phase::Point => {}
+            }
+        }
+        assert!(open.is_empty(), "unclosed spans: {:?}", open.keys());
+    }
+
+    #[tokio::test]
+    async fn input_frames_are_traced() {
+        let (tracer, collector) = Tracer::in_memory();
+        // Emit what the recv_loop emits, to pin the span name and attrs shape.
+        let mut attrs = serde_json::Map::new();
+        attrs.insert("samples".to_string(), serde_json::json!(1920));
+        tracer.point(0, "audio_in.frame", 0.08, 1920, attrs);
+        drop(tracer);
+
+        let recs = collector.records().await;
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].span, "audio_in.frame");
+        assert_eq!(recs[0].sample_idx, 1920);
+        assert_eq!(recs[0].attrs.get("samples").unwrap(), &serde_json::json!(1920));
+        assert_well_formed(&recs);
+    }
+
+    #[test]
+    fn well_formed_rejects_unclosed_spans() {
+        let rec = TraceRecord {
+            t_us: 1,
+            turn: 0,
+            span: "llm.push".to_string(),
+            phase: Phase::Begin,
+            audio_time_s: 0.0,
+            sample_idx: 0,
+            attrs: serde_json::Map::new(),
+        };
+        let result = std::panic::catch_unwind(|| assert_well_formed(&[rec]));
+        assert!(result.is_err(), "an unclosed span must fail the check");
     }
 }
