@@ -52,6 +52,8 @@ use tokio_tungstenite::tungstenite as ws;
 
 #[path = "bench/fixtures.rs"]
 mod fixtures;
+#[path = "bench/report.rs"]
+mod report;
 
 use fixtures::Manifest;
 
