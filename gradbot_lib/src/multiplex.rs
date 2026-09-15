@@ -492,6 +492,16 @@ impl Session {
             Ok(session) => session,
             Err(e) => {
                 tracing::error!(?e, "LLM: failed to push text");
+                let sample_idx = self.stt_sender.0.lock().await.samples_sent;
+                let mut attrs = serde_json::Map::new();
+                attrs.insert("error".to_string(), serde_json::json!(true));
+                self.tracer.end(
+                    turn_idx,
+                    "llm.push",
+                    sample_idx as f64 / INPUT_SAMPLE_RATE as f64,
+                    sample_idx,
+                    attrs,
+                );
                 return None;
             }
         };
@@ -1778,6 +1788,25 @@ mod trace_tests {
             from_push >= from_headers,
             "TTFT from push must include dispatch and so be >= TTFT from headers"
         );
+    }
+
+    #[tokio::test]
+    async fn llm_push_error_closes_the_span_and_is_marked() {
+        let (tracer, collector) = Tracer::in_memory();
+        tracer.begin(3, "llm.push", 5.0, 120000, serde_json::Map::new());
+        let mut attrs = serde_json::Map::new();
+        attrs.insert("error".to_string(), serde_json::json!(true));
+        tracer.end(3, "llm.push", 5.05, 121200, attrs);
+        drop(tracer);
+
+        let recs = collector.records().await;
+        // A failed push must still close its span, not dangle it.
+        assert_well_formed(&recs);
+        let end = recs
+            .iter()
+            .find(|r| r.span == "llm.push" && r.phase == Phase::End)
+            .unwrap();
+        assert_eq!(end.attrs.get("error").unwrap(), &serde_json::json!(true));
     }
 
     #[test]
