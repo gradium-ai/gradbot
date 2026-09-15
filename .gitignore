@@ -46,3 +46,6 @@ evals/runs/
 # Misc
 .crush/
 env-vars*
+
+# Agent scratch (SDD ledgers, briefs, review packages)
+.superpowers/
