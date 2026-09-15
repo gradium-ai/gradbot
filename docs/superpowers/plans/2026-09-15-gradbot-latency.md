@@ -26,6 +26,17 @@
 - **Rust edition 2024**, workspace-level dependency versions only (`{ workspace = true }`). Do not add a new third-party crate without saying so explicitly; every task here is achievable with crates already in `Cargo.toml`.
 - **Tests are inline `#[cfg(test)] mod tests`** at the bottom of the file under test. This is the repo convention (`llm.rs:901`, `mock.rs:415`). Do not create a `tests/` directory for Rust code.
 - **Instrumentation must never block or allocate heavily on the session hot path.** Use `try_send` on a bounded channel and count drops. Instrumentation that perturbs the path it measures is worse than none.
+- **Real traces may contain unclosed spans, by design.** Of the three Begin/End
+  pairs, `llm.push` and `tts.connect` close on their error paths (End carries
+  `attrs: {"error": true}`), but `endpoint.flush` does **not** close when a user
+  interrupts mid-flush — the state machine leaves `Flushing` and the End never
+  fires. That is a legitimately abandoned turn, not a bug; forcing a synthetic
+  End would mean threading cleanup through every exit from `Flushing` to satisfy
+  a tidiness property. Two consequences: `assert_well_formed` stays strict and so
+  any integration test driving a real session must drive a turn that **completes
+  normally**; and the Task 13 join must treat a missing End as "this stage was
+  not measured for this turn" and say so — never as a zero duration, which would
+  silently understate latency for exactly the turns that went wrong.
 - **Never stamp a value by subtracting across two different clocks.** This is the bug class behind Findings G and H.
 - **Backends:** STT/TTS on prod `https://api.gradium.ai/api`; LLM on self-hosted vLLM, Gemma 4 31B dense (`gemma_31b`) with its `-assistant` draft model.
 - **`LLM_BASE_URL` must end in `/v1` with no trailing slash** (`llm.rs:345` appends `/chat/completions` directly).
