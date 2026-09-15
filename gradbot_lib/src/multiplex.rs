@@ -481,14 +481,14 @@ impl Session {
                 serde_json::Map::new(),
             );
         }
-        let streaming_session = match self
+        let push_result = self
             .llm
             .write()
             .await
             .push(text, llm_config, llm_extra_config.as_deref())
             .await
-            .context("LLM: failed to push text")
-        {
+            .context("LLM: failed to push text");
+        let streaming_session = match push_result {
             Ok(session) => session,
             Err(e) => {
                 tracing::error!(?e, "LLM: failed to push text");
