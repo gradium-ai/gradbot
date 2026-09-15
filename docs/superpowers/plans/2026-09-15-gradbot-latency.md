@@ -1401,6 +1401,38 @@ git add -u
 git commit -m "feat(server): optional per-session latency trace via trace_dir"
 ```
 
+---
+
+### Task 9b: Wire tracing into the OpenAI-compatible server
+
+**Why this task exists:** Task 9 wired `trace_dir` into `gradbot_server`, which is
+the wrong binary. `configs/gradbot.toml` sets `transport = "ws-openai"`, which
+drives `gradbot_bin` → `src/openai_server.rs` — and that is the server the
+benchmark connects to. The spec's Non-goals scope this work to "the
+OpenAI-compatible WebSocket path only (`src/openai_server.rs`)". Without this
+task the Phase 2 gate runs against a server whose tracer is permanently
+`disabled()` and produces no trace file at all.
+
+**Files:**
+- Modify: `src/lib.rs` (the `Config` for `gradbot_bin`), `src/openai_server.rs:212`
+
+**Interfaces:**
+- Consumes: `Tracer::to_file` (Task 3), `start_session(..., tracer)` (Task 4).
+- Produces: the same per-session `trace_<unix_nanos>_<counter>.jsonl` behaviour
+  Task 9 gave `gradbot_server`, on the server the benchmark actually uses.
+
+Mirror Task 9 exactly — the same `trace_dir: Option<String>` with
+`#[serde(default)]`, the same `replace_env_vars` treatment, the same dedicated
+`AtomicU64` counter claimed with `fetch_add` (never `load` — see Task 9's
+Critical finding), and the same degrade-to-disabled-on-open-failure behaviour so
+a bad trace path can never kill a voice call. Read Task 9's implementation in
+`gradbot_server/src/{config,server}.rs` and follow it rather than re-deriving.
+
+Keep the `gradbot_server` wiring in place; it is a real server and its tracing
+is correct, just not the one under benchmark.
+
+---
+
 **Phase 1 gate:** the profiler exists and the pipeline is unchanged in behaviour. Confirm `git diff db64d77 --stat` shows no change to endpointing constants, frame sizes, or connection ordering.
 
 ---
@@ -1987,6 +2019,26 @@ mod tests {
     }
 
     #[test]
+    fn client_and_server_turn_numbering_need_not_agree() {
+        // The client counts fixture turns; the server's turn_idx is its own
+        // sequence that also advances on interruptions. A join that matched
+        // them would mis-attribute every stage after the first interruption.
+        let trace = vec![
+            rec(100_000, 7, "audio_in.frame", Phase::Point, 24_000),
+            rec(160_000, 7, "endpoint.vad_eot", Phase::Point, 25_920),
+            rec(900_000, 9, "out.first_audio", Phase::Point, 0),
+        ];
+        let marks = vec![
+            ClientMark { turn: 1, kind: MarkKind::UserSpeechEnd, t_us: 0, sample_idx: 24_000 },
+            ClientMark { turn: 1, kind: MarkKind::FirstAgentAudio, t_us: 900_000, sample_idx: 0 },
+        ];
+        // Client turn 1 vs server turns 7 and 9 — none of them equal.
+        let b = breakdown(&marks, &trace, 1).unwrap();
+        assert_eq!(b.detection_lag_ms, 60.0);
+        assert_eq!(b.server_internal_ms, 800.0);
+    }
+
+    #[test]
     fn missing_anchor_is_an_error_not_a_zero() {
         let trace = vec![rec(100_000, 1, "out.first_audio", Phase::Point, 0)];
         let marks = vec![
@@ -2009,11 +2061,22 @@ Expected: FAIL — `cannot find function breakdown`.
 
 - [ ] **Step 3: Write the implementation**
 
-Implement `breakdown` following the spec's decomposition exactly:
+Implement `breakdown` following the spec's decomposition exactly.
+
+**Join by ordering and sample index — never by turn equality.** The client's
+`turn` counts fixture turns; the server's `turn_idx` is its own sequence that
+also advances on interruptions, and the OpenAI-compatible protocol carries no
+turn id for the client to adopt. The two numberings are therefore unrelated, and
+matching them would silently mis-attribute every stage after the first
+interruption. Anchor on the sample index (which both sides genuinely share) and
+then follow causal order:
 
 - `I` = `t_us` of the **first** `audio_in.frame` whose `sample_idx >= mark.sample_idx` (frames advance in 1920-sample steps, so an exact match is not guaranteed).
-- `V` = `t_us` of the first `endpoint.vad_eot` for the turn at or after `I`.
-- `O` = `t_us` of `out.first_audio` for the turn.
+- `V` = `t_us` of the first `endpoint.vad_eot` with `t_us >= I` — by time, not by turn.
+- `O` = `t_us` of the first `out.first_audio` with `t_us >= V` — by time, not by turn.
+
+The `turn` field on trace records stays useful for grouping spans within the
+waterfall render, but it must not participate in the client↔server join.
 - `e2e_ms = (first_agent_audio.t_us - user_speech_end.t_us) / 1000`
 - `detection_lag_ms = (V - I) / 1000`
 - `server_internal_ms = (O - I) / 1000`
