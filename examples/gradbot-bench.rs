@@ -23,9 +23,14 @@
 //! `run_session`): prod backends carry shared load and network jitter, so a
 //! single measurement carries essentially no information, and reusing one
 //! session would let state from earlier turns bleed into later repetitions.
-//! `e2e_ms` from every repetition is pooled by fixture `category` and reduced
-//! with `summarize`, which refuses to report a summary for fewer than two
-//! samples.
+//! Because each repetition is a fresh session, both the client's `turn`
+//! counter and the server's per-session sample counter restart at zero every
+//! time — so every `ClientMark` also carries `repetition`, and `e2e_ms`
+//! matches on `(repetition, turn)`, never `turn` alone, to avoid silently
+//! conflating marks from different sessions that happen to share a turn and
+//! sample index. `e2e_ms` from every repetition is pooled by fixture
+//! `category` and reduced with `summarize`, which refuses to report a
+//! summary for fewer than two samples.
 //!
 //! A WebSocket RTT probe (`probe_rtt_ms`) runs once per invocation, before any
 //! fixture traffic, on its own short-lived connection so it never competes
@@ -105,6 +110,14 @@ pub enum MarkKind {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClientMark {
+    /// Zero-based repetition index. Each repetition opens a **fresh
+    /// session** (see `run_session`), so both `turn` (the client's own
+    /// per-session counter) and `sample_idx` (the server's per-session
+    /// `samples_sent` counter) restart at zero every repetition and are
+    /// therefore only unique *within* one. `repetition` is what scopes
+    /// them — never join or look up a mark by `turn` or `sample_idx` alone
+    /// across a multi-repetition run.
+    pub repetition: u64,
     /// `u64` to match `TraceRecord.turn`, which Task 13 compares it against.
     pub turn: u64,
     pub kind: MarkKind,
@@ -120,16 +133,18 @@ pub fn is_agent_audio(decoded: &[f32]) -> bool {
     !decoded.is_empty()
 }
 
-/// End-to-end latency for one turn: first agent audio minus user speech end,
-/// both on the harness's own monotonic clock. Returns `None` if the agent
-/// never answered.
-pub fn e2e_ms(marks: &[ClientMark], turn: u64) -> Option<f64> {
-    let end = marks
-        .iter()
-        .find(|m| m.turn == turn && m.kind == MarkKind::UserSpeechEnd)?;
-    let audio = marks
-        .iter()
-        .find(|m| m.turn == turn && m.kind == MarkKind::FirstAgentAudio)?;
+/// End-to-end latency for one turn of one repetition: first agent audio
+/// minus user speech end, both on the harness's own monotonic clock. Returns
+/// `None` if the agent never answered. Matches on `(repetition, turn)`, not
+/// `turn` alone — `turn` resets to zero every repetition, so matching on it
+/// alone would silently conflate marks from different sessions.
+pub fn e2e_ms(marks: &[ClientMark], repetition: u64, turn: u64) -> Option<f64> {
+    let end = marks.iter().find(|m| {
+        m.repetition == repetition && m.turn == turn && m.kind == MarkKind::UserSpeechEnd
+    })?;
+    let audio = marks.iter().find(|m| {
+        m.repetition == repetition && m.turn == turn && m.kind == MarkKind::FirstAgentAudio
+    })?;
     Some((audio.t_us as f64 - end.t_us as f64) / 1000.0)
 }
 
@@ -244,14 +259,17 @@ struct BenchOutput {
 }
 
 /// Streams one full pass of `manifest` over a **fresh** connection and
-/// returns the `ClientMark`s recorded during it. The connection is opened at
-/// the start of this call and dropped when it returns, so callers that loop
-/// over repetitions naturally get one session at a time, never concurrent
-/// ones — reusing a session across repetitions would let state from earlier
-/// turns bleed into later ones, and running two sessions at once would
-/// contend for the same backends and confound the very numbers being
-/// measured.
-async fn run_session(url: &str, manifest: &Manifest) -> Result<Vec<ClientMark>> {
+/// returns the `ClientMark`s recorded during it, all stamped with
+/// `repetition` (see `ClientMark::repetition` for why: this session's own
+/// `turn` counter and the server's `samples_sent` counter both restart at
+/// zero, so `repetition` is the only thing that disambiguates this
+/// session's marks from any other). The connection is opened at the start of
+/// this call and dropped when it returns, so callers that loop over
+/// repetitions naturally get one session at a time, never concurrent ones —
+/// reusing a session across repetitions would let state from earlier turns
+/// bleed into later ones, and running two sessions at once would contend for
+/// the same backends and confound the very numbers being measured.
+async fn run_session(url: &str, manifest: &Manifest, repetition: u64) -> Result<Vec<ClientMark>> {
     let connection = Connection::new(url).await?;
     let (mut sender, mut receiver) = connection.split();
 
@@ -311,6 +329,7 @@ async fn run_session(url: &str, manifest: &Manifest) -> Result<Vec<ClientMark>> 
                         marked_end = true;
                         current_turn.store(turn, Ordering::SeqCst);
                         marks.lock().unwrap().push(ClientMark {
+                            repetition,
                             turn,
                             kind: MarkKind::UserSpeechEnd,
                             t_us: origin.elapsed().as_micros() as u64,
@@ -376,6 +395,7 @@ async fn run_session(url: &str, manifest: &Manifest) -> Result<Vec<ClientMark>> 
                                 if last_marked_turn != Some(turn) {
                                     last_marked_turn = Some(turn);
                                     marks.lock().unwrap().push(ClientMark {
+                                        repetition,
                                         turn,
                                         kind: MarkKind::FirstAgentAudio,
                                         t_us: origin.elapsed().as_micros() as u64,
@@ -428,9 +448,9 @@ async fn main() -> Result<()> {
             args.repetitions,
             args.url
         );
-        let marks = run_session(&args.url, &manifest).await?;
+        let marks = run_session(&args.url, &manifest, rep as u64).await?;
         for (idx, fturn) in manifest.turns.iter().enumerate() {
-            if let Some(ms) = e2e_ms(&marks, idx as u64) {
+            if let Some(ms) = e2e_ms(&marks, rep as u64, idx as u64) {
                 by_category.entry(fturn.category.clone()).or_default().push(ms);
             }
         }
@@ -476,21 +496,41 @@ mod tests {
     #[test]
     fn e2e_is_first_agent_audio_minus_user_speech_end() {
         let marks = vec![
-            ClientMark { turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 1_000_000, sample_idx: 24000 },
-            ClientMark { turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 1_850_000, sample_idx: 0 },
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 1_000_000, sample_idx: 24000 },
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 1_850_000, sample_idx: 0 },
         ];
-        assert_eq!(e2e_ms(&marks, 0), Some(850.0));
+        assert_eq!(e2e_ms(&marks, 0, 0), Some(850.0));
     }
 
     #[test]
     fn e2e_is_none_when_the_agent_never_answered() {
         let marks = vec![ClientMark {
+            repetition: 0,
             turn: 0,
             kind: MarkKind::UserSpeechEnd,
             t_us: 1_000_000,
             sample_idx: 24000,
         }];
-        assert_eq!(e2e_ms(&marks, 0), None);
+        assert_eq!(e2e_ms(&marks, 0, 0), None);
+    }
+
+    /// The bug this test pins: with a fresh session per repetition, `turn`
+    /// and `sample_idx` both restart at zero every repetition, so two
+    /// different repetitions' marks can be bit-for-bit identical except for
+    /// `repetition` and `t_us`. Matching on `turn` alone (the pre-fix
+    /// behavior) would silently pick marks from the wrong repetition —
+    /// confident, wrong output. Matching on `(repetition, turn)` must not
+    /// conflate them.
+    #[test]
+    fn e2e_ms_does_not_conflate_marks_from_different_repetitions() {
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 1_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 1_850_000, sample_idx: 0 },
+            ClientMark { repetition: 1, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 1_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 1, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 1_500_000, sample_idx: 0 },
+        ];
+        assert_eq!(e2e_ms(&marks, 0, 0), Some(850.0), "repetition 0 must not pick up repetition 1's audio mark");
+        assert_eq!(e2e_ms(&marks, 1, 0), Some(500.0), "repetition 1 must not pick up repetition 0's audio mark");
     }
 
     /// The single easiest way to produce a fake good number: Opus header
