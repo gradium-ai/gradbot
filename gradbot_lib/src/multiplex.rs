@@ -467,6 +467,20 @@ impl Session {
                 user_text: text.to_string(),
             })
             .await;
+        // Finding G: `push()` awaits the full HTTP POST and returns only on
+        // response headers, so the clock for a true TTFT must start here —
+        // before the push — not after it.
+        let llm_push_start = std::time::Instant::now();
+        {
+            let sample_idx = self.stt_sender.0.lock().await.samples_sent;
+            self.tracer.begin(
+                turn_idx,
+                "llm.push",
+                sample_idx as f64 / INPUT_SAMPLE_RATE as f64,
+                sample_idx,
+                serde_json::Map::new(),
+            );
+        }
         let streaming_session = match self
             .llm
             .write()
@@ -481,6 +495,16 @@ impl Session {
                 return None;
             }
         };
+        {
+            let sample_idx = self.stt_sender.0.lock().await.samples_sent;
+            self.tracer.end(
+                turn_idx,
+                "llm.push",
+                sample_idx as f64 / INPUT_SAMPLE_RATE as f64,
+                sample_idx,
+                serde_json::Map::new(),
+            );
+        }
         // Drop any previous interrupted task and reset the flag
         self.interrupted_task_jh = None;
         self.user_interrupted
@@ -491,6 +515,7 @@ impl Session {
         let msg_out_tx = self.msg_out_tx.clone();
         let start_time = self.audio_time_s().await;
         let llm_request_start = std::time::Instant::now();
+        let llm_tracer = self.tracer.clone();
         let _ = self.send_event(Event::LlmStarted).await;
         let stt_sender = self.stt_sender.clone();
         let session_config = self.session_config.clone();
@@ -569,11 +594,23 @@ impl Session {
                                         continue;
                                     }
                                     if first_word {
+                                        let from_push = llm_push_start.elapsed().as_millis();
                                         let ttft_ms = llm_request_start.elapsed().as_millis();
                                         tracing::info!(
-                                            ttft_ms,
+                                            ttft_from_push_ms = from_push,
+                                            ttft_from_headers_ms = ttft_ms,
                                             "LLM time-to-first-token"
                                         );
+                                        let mut attrs = serde_json::Map::new();
+                                        attrs.insert(
+                                            "ttft_from_push_ms".to_string(),
+                                            serde_json::json!(from_push),
+                                        );
+                                        attrs.insert(
+                                            "ttft_from_headers_ms".to_string(),
+                                            serde_json::json!(ttft_ms),
+                                        );
+                                        llm_tracer.point(turn_idx, "llm.ttft", 0.0, 0, attrs);
                                         let time_s = stt_sender.current_time_s().await;
                                         msg_out_tx
                                             .send(MsgOut::Event { time_s, event: Event::FirstWord })
@@ -646,6 +683,9 @@ impl Session {
                             llm_total_ms,
                             "LLM stream complete"
                         );
+                        let mut attrs = serde_json::Map::new();
+                        attrs.insert("total_ms".to_string(), serde_json::json!(llm_total_ms));
+                        llm_tracer.point(turn_idx, "llm.complete", 0.0, 0, attrs);
                         tts_tx.send_end_of_stream().await?;
                         Ok::<(), anyhow::Error>(())
                     }
@@ -1715,6 +1755,29 @@ mod trace_tests {
         );
         // The gate cost (Finding B) is the span's duration.
         assert!(recs[1].t_us >= recs[0].t_us);
+    }
+
+    #[tokio::test]
+    async fn llm_ttft_records_both_origins() {
+        let (tracer, collector) = Tracer::in_memory();
+        tracer.begin(2, "llm.push", 5.0, 120000, serde_json::Map::new());
+        tracer.end(2, "llm.push", 5.1, 122400, serde_json::Map::new());
+        let mut attrs = serde_json::Map::new();
+        attrs.insert("ttft_from_push_ms".to_string(), serde_json::json!(180u128));
+        attrs.insert("ttft_from_headers_ms".to_string(), serde_json::json!(90u128));
+        tracer.point(2, "llm.ttft", 5.2, 124800, attrs);
+        drop(tracer);
+
+        let recs = collector.records().await;
+        assert_well_formed(&recs);
+        let ttft = recs.iter().find(|r| r.span == "llm.ttft").unwrap();
+        let from_push = ttft.attrs.get("ttft_from_push_ms").unwrap().as_u64().unwrap();
+        let from_headers = ttft.attrs.get("ttft_from_headers_ms").unwrap().as_u64().unwrap();
+        // Finding G: the pre-existing metric is the smaller, misleading one.
+        assert!(
+            from_push >= from_headers,
+            "TTFT from push must include dispatch and so be >= TTFT from headers"
+        );
     }
 
     #[test]
