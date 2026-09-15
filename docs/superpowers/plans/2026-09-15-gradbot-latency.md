@@ -1873,7 +1873,32 @@ git add -u
 git commit -m "feat(bench): repetitions, percentiles, and a transport RTT probe"
 ```
 
-**Phase 2 gate — first real measurement.** Requires the vLLM job and credentials:
+**Phase 2 gate — first real measurement, AND the profiler's first real proof of life.**
+
+> **Why this gate carries extra weight.** Phase 1 closes with *no* in-process
+> evidence that spans are ever emitted. An integration test was attempted and
+> found impossible without restructuring: `multiplex::start_session` takes
+> concrete `Arc<TtsClient>` / `Arc<SttClient>` / `Arc<Llm>`, `multiplex.rs` never
+> references `mock`, and `mock.rs` never drives `Session`/`run` — there is no
+> trait seam. Creating one means making the session generic across ~30+ call
+> sites, which would break this plan's own "phases 1-3 change no pipeline
+> behaviour" rule. So every Phase 1 test pins span *shapes* via the `Tracer` API;
+> all of them would still pass if the instrumentation were deleted outright.
+>
+> **Therefore, before trusting any number from this gate, verify the trace file
+> itself:**
+> 1. A trace file exists for the session and is **non-empty**. An empty or
+>    missing file means the instrumentation never ran — stop and fix that first.
+> 2. It contains at least `audio_in.frame`, `endpoint.vad_eot`, `llm.push`,
+>    `tts.connect`, and `out.first_audio`. A missing span name means that call
+>    site is dead.
+> 3. Every `t_us` is non-decreasing in file order.
+> 4. `tracer.dropped()` is 0. Non-zero means records were lost and the
+>    measurement is incomplete — raise the channel capacity and re-run.
+>
+> Record the outcome in the ledger. This is the check Phase 1 could not perform.
+
+Requires the vLLM job and credentials:
 
 ```bash
 cd ~/code/audium
