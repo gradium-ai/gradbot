@@ -554,10 +554,18 @@ impl Session {
                 // Finding A: a fresh, unpooled WebSocket handshake to prod on
                 // every turn, serialized behind the LLM request.
                 llm_tracer.begin(turn_idx, "tts.connect", 0.0, 0, serde_json::Map::new());
-                let (mut tts_tx, tts_rx) =
-                    tts_client.tts_stream(tts_model_name, voice_id.clone(), padding_bonus, rewrite_rules.clone(), tts_extra_config.as_deref()).await
-                        .context("TTS: failed to create stream")?;
-                llm_tracer.end(turn_idx, "tts.connect", 0.0, 0, serde_json::Map::new());
+                let tts_result = tts_client
+                    .tts_stream(tts_model_name, voice_id.clone(), padding_bonus, rewrite_rules.clone(), tts_extra_config.as_deref())
+                    .await;
+                match &tts_result {
+                    Ok(_) => llm_tracer.end(turn_idx, "tts.connect", 0.0, 0, serde_json::Map::new()),
+                    Err(_) => {
+                        let mut attrs = serde_json::Map::new();
+                        attrs.insert("error".to_string(), serde_json::json!(true));
+                        llm_tracer.end(turn_idx, "tts.connect", 0.0, 0, attrs);
+                    }
+                }
+                let (mut tts_tx, tts_rx) = tts_result.context("TTS: failed to create stream")?;
                 tracing::info!("TTS stream created successfully");
                 // Shared state for tracking last stop_s across futures
                 let last_stop_s =
@@ -1885,6 +1893,25 @@ mod trace_tests {
             connect_end < first_text,
             "text cannot be sent before the TTS stream is connected"
         );
+    }
+
+    #[tokio::test]
+    async fn tts_connect_error_closes_the_span_and_is_marked() {
+        let (tracer, collector) = Tracer::in_memory();
+        tracer.begin(4, "tts.connect", 0.0, 0, serde_json::Map::new());
+        let mut attrs = serde_json::Map::new();
+        attrs.insert("error".to_string(), serde_json::json!(true));
+        tracer.end(4, "tts.connect", 0.0, 0, attrs);
+        drop(tracer);
+
+        let recs = collector.records().await;
+        // A failed TTS connect must still close its span, not dangle it.
+        assert_well_formed(&recs);
+        let end = recs
+            .iter()
+            .find(|r| r.span == "tts.connect" && r.phase == Phase::End)
+            .unwrap();
+        assert_eq!(end.attrs.get("error").unwrap(), &serde_json::json!(true));
     }
 
     #[tokio::test]
