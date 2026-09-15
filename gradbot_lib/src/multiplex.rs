@@ -868,6 +868,14 @@ impl Session {
             })
             .await?;
             self.stt_sender.send_flush(flush_duration_s).await?;
+            let mut attrs = serde_json::Map::new();
+            attrs.insert(
+                "flush_duration_s".to_string(),
+                serde_json::json!(flush_duration_s),
+            );
+            let sample_idx = self.stt_sender.0.lock().await.samples_sent;
+            self.tracer
+                .begin(turn_idx, "endpoint.flush", stt_time, sample_idx, attrs);
             *self.state.lock().await = State::Flushing {
                 since_s: stt_time,
                 texts,
@@ -885,9 +893,21 @@ impl Session {
     async fn on_step(
         &mut self,
         stt_time: f64,
-        _end_of_turn: bool,
+        end_of_turn: bool,
         inactivity_prob: f64,
     ) -> Result<()> {
+        if end_of_turn {
+            let mut attrs = serde_json::Map::new();
+            attrs.insert(
+                "inactivity_prob".to_string(),
+                serde_json::json!(inactivity_prob),
+            );
+            let turn = self.state.lock().await.turn_idx();
+            let sample_idx = self.stt_sender.0.lock().await.samples_sent;
+            self.tracer
+                .point(turn, "endpoint.vad_eot", stt_time, sample_idx, attrs);
+        }
+
         // VAD-based interruption: if we're generating/speaking and the VAD
         // detects likely voice activity (inactivity_prob < 0.4), signal
         // interruption immediately instead of waiting for STT text.
@@ -922,8 +942,17 @@ impl Session {
             {
                 let text = texts.join(" ");
                 let turn_idx = *turn_idx;
+                let flush_end_turn = turn_idx;
                 // Release lock before async operations
                 drop(state);
+                let sample_idx = self.stt_sender.0.lock().await.samples_sent;
+                self.tracer.end(
+                    flush_end_turn,
+                    "endpoint.flush",
+                    stt_time,
+                    sample_idx,
+                    serde_json::Map::new(),
+                );
                 let _ = self.send_event(Event::EndOfTurn).await;
                 self.llm_tts(&text, turn_idx).await
             } else if let State::Listening {
@@ -1028,6 +1057,12 @@ impl Session {
             silence_prompts = self.silence_prompts,
             "on_text called"
         );
+        let mut attrs = serde_json::Map::new();
+        attrs.insert("stt_start_s".to_string(), serde_json::json!(stt_time));
+        attrs.insert("chars".to_string(), serde_json::json!(text.len()));
+        let turn = self.state.lock().await.turn_idx();
+        let sample_idx = self.stt_sender.0.lock().await.samples_sent;
+        self.tracer.point(turn, "stt.text", stt_time, sample_idx, attrs);
         self.msg_out_tx
             .send(MsgOut::SttText {
                 text: text.clone(),
@@ -1660,6 +1695,26 @@ mod trace_tests {
         assert_eq!(recs[0].sample_idx, 1920);
         assert_eq!(recs[0].attrs.get("samples").unwrap(), &serde_json::json!(1920));
         assert_well_formed(&recs);
+    }
+
+    #[tokio::test]
+    async fn endpoint_flush_span_is_a_well_formed_pair() {
+        let (tracer, collector) = Tracer::in_memory();
+        let mut attrs = serde_json::Map::new();
+        attrs.insert("flush_duration_s".to_string(), serde_json::json!(0.5));
+        tracer.begin(1, "endpoint.flush", 3.0, 72000, attrs);
+        tracer.end(1, "endpoint.flush", 3.5, 84000, serde_json::Map::new());
+        drop(tracer);
+
+        let recs = collector.records().await;
+        assert_well_formed(&recs);
+        assert_eq!(recs[0].span, "endpoint.flush");
+        assert_eq!(
+            recs[0].attrs.get("flush_duration_s").unwrap(),
+            &serde_json::json!(0.5)
+        );
+        // The gate cost (Finding B) is the span's duration.
+        assert!(recs[1].t_us >= recs[0].t_us);
     }
 
     #[test]
