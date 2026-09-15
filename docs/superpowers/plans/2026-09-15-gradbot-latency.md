@@ -1969,7 +1969,7 @@ Confirm the p50 is stable across two independent 20-repetition runs before trust
 
 **Interfaces:**
 - Consumes: `TraceRecord` (Task 1), `ClientMark` (Task 11).
-- Produces: `TurnBreakdown { turn: u64, e2e_ms: f64, detection_lag_ms: f64, server_internal_ms: f64, network_ms: f64, spans: Vec<(String, f64, f64)> }` and `fn breakdown(marks: &[ClientMark], trace: &[TraceRecord], turn: u64) -> Result<TurnBreakdown>`.
+- Produces: `TurnBreakdown { turn: u64, e2e_ms: f64, detection_lag_ms: Option<f64>, server_internal_ms: f64, network_ms: f64, spans: Vec<(String, f64, f64)> }` and `fn breakdown(marks: &[ClientMark], trace: &[TraceRecord], turn: u64) -> Result<TurnBreakdown>`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2091,7 +2091,14 @@ interruption. Anchor on the sample index (which both sides genuinely share) and
 then follow causal order:
 
 - `I` = `t_us` of the **first** `audio_in.frame` whose `sample_idx >= mark.sample_idx` (frames advance in 1920-sample steps, so an exact match is not guaranteed).
-- `V` = `t_us` of the first `endpoint.vad_eot` with `t_us >= I` — by time, not by turn.
+- `V` = `t_us` of the first `endpoint.vad_eot` with `t_us >= I` — by time, not by
+  turn. **`V` is a SOFT anchor**, unlike `I` and `O`: it feeds only
+  `detection_lag_ms`, so when it is absent the breakdown still returns, with
+  `detection_lag_ms: None` and `O`'s search floor falling back to `I`. Failing
+  the whole breakdown would discard a perfectly good `e2e_ms`,
+  `server_internal_ms` and `network_ms` over one missing sub-metric. Represent
+  the absence as `Option<f64>` — never `NaN`, which propagates silently through
+  arithmetic and panics this codebase's `percentile` at a distance.
 - `O` = `t_us` of the first `out.first_audio` with `t_us >= V` — by time, not by turn.
 
 The `turn` field on trace records stays useful for grouping spans within the
@@ -2130,6 +2137,16 @@ git commit -m "feat(bench): join client marks to server trace by sample index"
 
 **Interfaces:**
 - Consumes: `TurnBreakdown` (Task 13), `Summary` (Task 12).
+- **Also owns multi-repetition trace-file pairing** (unassigned until now, found
+  during Task 13). `--repetitions N` produces N marks-groups and N server trace
+  files. Pair repetition *i* with the *i*-th trace file in timestamp order —
+  valid because the harness runs exactly one session at a time. `breakdown`
+  itself CANNOT detect a mis-pairing, because `turn` and `sample_idx` repeat
+  identically across repetitions, so a wrong pairing yields plausible wrong
+  numbers silently. Assert the file count matches the repetition count and fail
+  loudly if it does not.
+- `detection_lag_ms` is `Option<f64>`; filter `None` out before summarizing —
+  `summarize`/`percentile` panic on NaN and must never be fed a sentinel.
 - Produces: `fn render_markdown(breakdowns: &[TurnBreakdown], summaries: &BTreeMap<String, Summary>, llm_local: bool) -> String`.
 
 - [ ] **Step 1: Write the failing test**
