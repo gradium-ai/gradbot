@@ -206,6 +206,14 @@ impl Tracer {
 mod tests {
     use super::*;
 
+    /// Drop guard for temp directories: ensures cleanup happens even if a test panics.
+    struct TmpDir(std::path::PathBuf);
+    impl Drop for TmpDir {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
+
     #[test]
     fn trace_record_jsonl_round_trip() {
         let rec = TraceRecord {
@@ -305,6 +313,7 @@ mod tests {
     async fn to_file_writes_one_json_object_per_line() {
         let dir = std::env::temp_dir().join(format!("gradbot-trace-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        let _cleanup = TmpDir(dir.clone());
         let path = dir.join("trace.jsonl");
 
         let tracer = Tracer::to_file(&path).unwrap();
@@ -326,6 +335,23 @@ mod tests {
         let first: TraceRecord = serde_json::from_str(lines[0]).unwrap();
         assert_eq!(first.span, "llm.push");
         assert_eq!(first.phase, Phase::Begin);
-        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn to_file_returns_err_when_path_is_invalid() {
+        // Create a temp directory and a file inside it
+        let dir = std::env::temp_dir().join(format!("gradbot-trace-err-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let _cleanup = TmpDir(dir.clone());
+
+        // Create a file
+        let file_path = dir.join("file");
+        std::fs::write(&file_path, b"").unwrap();
+
+        // Try to create a tracer with a path that has a file as its parent
+        // (which will fail because we can't create a directory where a file exists)
+        let invalid_path = file_path.join("trace.jsonl");
+        let result = Tracer::to_file(&invalid_path);
+        assert!(result.is_err(), "expected Err when parent is a file, got Ok");
     }
 }
