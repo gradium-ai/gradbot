@@ -2600,6 +2600,29 @@ Synthesize the six categories from the spec — short answers, mid-sentence paus
 
 For `flush_duration_s` in {0.2, 0.3, 0.4, 0.5, 0.7} × `min_listen_before_flush_s` in {0.2, 0.5}, run 20 repetitions of `turn_taking.json` and record p50 latency against `premature_cut_rate`.
 
+- [ ] **Step 2b: Guard against survivorship bias in the plot**
+
+**Excluded turns bias latency percentiles OPTIMISTICALLY, and the bias grows
+exactly where the sweep gets interesting.** A turn that cannot be measured is
+excluded from the percentiles, and aggressive endpointing cuts the *slowest*
+turns first — so p50/p90 improve partly because the hard cases disappeared, not
+because the system got faster. Comparing percentiles across sweep points with
+different coverage overstates the benefit of aggressive settings, in precisely
+the direction that makes a bad operating point look good.
+
+Therefore, when plotting:
+- Record measured-turn COUNT alongside every latency percentile, and treat any
+  sweep point whose coverage differs materially from the baseline's as not
+  directly comparable.
+- Prefer `premature_cut_rate` as the quality axis: it is computed from client
+  marks, so it counts every turn including the unmeasurable ones, and it does
+  not shrink as settings get aggressive.
+- Note that the category table's `n` (client marks) and the stage table's `n`
+  (trace join) have different denominators and will legitimately disagree at
+  aggressive settings — that is not a bug.
+- If coverage drops sharply at a sweep point, say so in the write-up rather
+  than plotting its percentile next to the others as though equivalent.
+
 - [ ] **Step 3: Plot and write up**
 
 Write `2026-09-15-sweep-results.md` with the full table, the Pareto-optimal subset, and the same sweep re-run on `real_check.json` at the two or three most promising points. **If the synthetic and real sets disagree, the real set wins** and the disagreement itself is the finding.
