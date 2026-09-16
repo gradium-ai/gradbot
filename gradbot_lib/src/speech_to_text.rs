@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 const VAD_INDEX: usize = 2;
 
 pub struct SttClient(gradium::Client);
-pub struct SttStreamReceiver(gradium::stt::SttStreamReceiver);
+pub struct SttStreamReceiver(gradium::stt::SttStreamReceiver, f64);
 pub struct SttStreamSender(gradium::stt::SttStreamSender);
 
 #[derive(Debug)]
@@ -38,6 +38,7 @@ impl SttClient {
         model_name: Option<String>,
         lang: crate::Lang,
         extra_config: Option<&str>,
+        vad_eot_threshold: f64,
     ) -> Result<(SttStreamSender, SttStreamReceiver)> {
         let lang_code = match lang {
             crate::Lang::En => "en",
@@ -68,7 +69,10 @@ impl SttClient {
             .await
             .context("STT: failed to connect")?;
         let (tx, rx) = stream.split();
-        Ok((SttStreamSender(tx), SttStreamReceiver(rx)))
+        Ok((
+            SttStreamSender(tx),
+            SttStreamReceiver(rx, vad_eot_threshold),
+        ))
     }
 }
 
@@ -102,7 +106,7 @@ impl SttStreamReceiver {
                         .get(VAD_INDEX)
                         .map(|v| v.inactivity_prob)
                         .unwrap_or(1.0);
-                    let end_of_turn = inactivity_prob > 0.8;
+                    let end_of_turn = inactivity_prob > self.1;
                     return Ok(Some(Msg::Step {
                         end_of_turn,
                         current_s: vad_event.total_duration_s,

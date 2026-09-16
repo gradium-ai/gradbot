@@ -202,9 +202,12 @@ impl Session {
         let stt_extra = session_config
             .as_ref()
             .and_then(|c| c.stt_extra_config.as_deref());
+        let vad_eot_threshold = session_config
+            .as_ref()
+            .map_or(0.8, |c| c.vad_eot_threshold);
         let stt_model_name = std::env::var("GRADIUM_STT_MODEL_NAME").ok();
         let (ss, stt_receiver) = stt_client
-            .stt_stream(stt_model_name, stt_lang, stt_extra)
+            .stt_stream(stt_model_name, stt_lang, stt_extra, vad_eot_threshold)
             .await
             .context("STT: failed to create stream")?;
         let llm = Arc::new(tokio::sync::RwLock::new(
@@ -278,10 +281,11 @@ impl Session {
         let stt_extra = config_guard
             .as_ref()
             .and_then(|c| c.stt_extra_config.as_deref());
+        let vad_eot_threshold = config_guard.as_ref().map_or(0.8, |c| c.vad_eot_threshold);
         let stt_model_name = std::env::var("GRADIUM_STT_MODEL_NAME").ok();
         let (ss, stt_receiver) = self
             .stt_client
-            .stt_stream(stt_model_name, stt_lang, stt_extra)
+            .stt_stream(stt_model_name, stt_lang, stt_extra, vad_eot_threshold)
             .await
             .context("STT: failed to reconnect stream")?;
         drop(config_guard);
@@ -939,7 +943,13 @@ impl Session {
                 }
                 return Ok(());
             }
-            if stt_time - *since_s <= 0.5 {
+            let min_listen_s = self
+                .session_config
+                .lock()
+                .await
+                .as_ref()
+                .map_or(0.5, |c| c.min_listen_before_flush_s);
+            if stt_time - *since_s <= min_listen_s {
                 return Ok(());
             }
             let flush_duration_s = self
@@ -1250,6 +1260,12 @@ pub struct SessionConfig {
     pub tts_extra_config: Option<String>,
     /// Extra JSON config to merge into the LLM chat completion request body.
     pub llm_extra_config: Option<String>,
+    /// Minimum seconds of listening before a detected end-of-turn is allowed to flush.
+    /// Replaces the literal previously hardcoded in `on_end_of_turn`. Default is 0.5s.
+    pub min_listen_before_flush_s: f64,
+    /// VAD inactivity probability above which STT reports end-of-turn.
+    /// Replaces the literal previously hardcoded in `speech_to_text.rs`. Default is 0.8.
+    pub vad_eot_threshold: f64,
 }
 
 pub enum MsgIn {
@@ -1948,5 +1964,37 @@ mod trace_tests {
         };
         let result = std::panic::catch_unwind(|| assert_well_formed(&[rec]));
         assert!(result.is_err(), "an unclosed span must fail the check");
+    }
+}
+
+#[cfg(test)]
+mod session_config_tests {
+    use super::SessionConfig;
+
+    // `SessionConfig` has no `Default` impl, so construct it explicitly here with
+    // every field rather than adding one just for this test.
+    #[test]
+    fn endpointing_knobs_default_to_current_hardcoded_values() {
+        let c = SessionConfig {
+            voice_id: None,
+            instructions: None,
+            language: crate::system_prompt::Lang::En,
+            assistant_speaks_first: true,
+            silence_timeout_s: 3.0,
+            tools: vec![],
+            flush_duration_s: crate::DEFAULT_FLUSH_FOR_S,
+            padding_bonus: 0.0,
+            rewrite_rules: None,
+            stt_extra_config: None,
+            tts_extra_config: None,
+            llm_extra_config: None,
+            min_listen_before_flush_s: 0.5,
+            vad_eot_threshold: 0.8,
+        };
+        assert_eq!(
+            c.min_listen_before_flush_s, 0.5,
+            "must match multiplex.rs:845"
+        );
+        assert_eq!(c.vad_eot_threshold, 0.8, "must match speech_to_text.rs:105");
     }
 }

@@ -151,6 +151,8 @@ async fn msg_in_producer(
                         stt_extra_config: None,
                         tts_extra_config: None,
                         llm_extra_config: None,
+                        min_listen_before_flush_s: 0.5,
+                        vad_eot_threshold: 0.8,
                     })
                     .await?;
             }

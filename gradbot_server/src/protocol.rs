@@ -151,6 +151,8 @@ impl SessionConfigWire {
             stt_extra_config: self.stt_extra_config.clone(),
             tts_extra_config: self.tts_extra_config.clone(),
             llm_extra_config: self.llm_extra_config.clone(),
+            min_listen_before_flush_s: 0.5,
+            vad_eot_threshold: 0.8,
         }
     }
 }
