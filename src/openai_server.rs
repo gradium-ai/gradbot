@@ -143,6 +143,20 @@ async fn msg_in_producer(
                         voice_id: session.voice_id,
                         instructions,
                         language,
+                        // BENCHMARK TRAP: hardcoded, and there is no wire
+                        // field to turn it off. `gradbot-bench` sends no
+                        // `session.update` today, so it never reaches this
+                        // line and never gets a greeting. The moment a sweep
+                        // task sends one to reach the endpointing knobs
+                        // below, the server will greet on `[start]` and that
+                        // greeting becomes the first agent audio the harness
+                        // sees — recorded as turn 0's `FirstAgentAudio`, with
+                        // a latency that measures the greeting, not any
+                        // answer. Turn 0 of *every* repetition is poisoned,
+                        // silently and plausibly. Before sending a
+                        // `session.update` from the benchmark, either make
+                        // this configurable from the wire and set it false,
+                        // or discard turn 0 explicitly in the report.
                         assistant_speaks_first: true,
                         silence_timeout_s: endpointing.silence_timeout_s,
                         tools: vec![],
