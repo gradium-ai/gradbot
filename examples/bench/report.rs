@@ -20,6 +20,14 @@
 //!   contain unclosed spans (e.g. `endpoint.flush` abandoned by a mid-flush
 //!   interruption). Substituting 0 would understate latency for exactly the
 //!   turns that went wrong.
+//! - **A forward search stops at the next turn.** `find_v` and `find_o`
+//!   search forward from `I`; on a premature cut this turn's own records
+//!   precede `I`, and an unbounded search would return the next turn's
+//!   instead — plausible numbers, wrong turn, no error anywhere. Both are
+//!   bounded by the next turn's `I` (`next_turn_ceiling_t_us`), and hitting
+//!   the bound yields "not measured", never a borrowed value. What survives
+//!   that bound is caught by `residual_is_plausible`, checked per turn in
+//!   `render_markdown` against the run's own RTT probe.
 //!
 //! Repetition scoping happens one level up, in [`breakdown_all`], before
 //! `breakdown` itself is ever called: `--repetitions N` opens N fresh
@@ -37,7 +45,7 @@
 //! two lists to whichever is shorter.
 
 use super::fixtures::Manifest;
-use super::{ClientMark, MarkKind, RunFailure, Summary, summarize};
+use super::{ClientMark, MarkKind, RunFailure, Summary, residual_is_plausible, summarize};
 use anyhow::{Context, Result};
 use gradbot::{Phase, TraceRecord};
 use std::collections::{BTreeMap, BTreeSet};
@@ -52,8 +60,10 @@ pub struct TurnBreakdown {
     pub e2e_ms: f64,
     /// `V - I`: how long the server took to detect end-of-turn after the
     /// sample the client marked as speech end. `None` when no
-    /// `endpoint.vad_eot` was found for this turn — some traces genuinely
-    /// carry no such event (`find_v` is a soft anchor). This is `Option`,
+    /// `endpoint.vad_eot` was found for this turn — either because the trace
+    /// genuinely carries no such event (`find_v` is a soft anchor) or because
+    /// the only one in range belongs to the next turn (see
+    /// `next_turn_ceiling_t_us`). This is `Option`,
     /// not a sentinel float, on purpose: a `NaN` would silently poison any
     /// downstream sum/average and panic this codebase's `percentile`
     /// (`partial_cmp().expect(...)`), while a fake `0.0` would look like a
@@ -105,26 +115,77 @@ fn find_i(trace: &[TraceRecord], target_sample_idx: u64) -> Result<&TraceRecord>
         .context("missing span: audio_in.frame (I) — no frame reached the marked sample index")
 }
 
-/// `V`: the first `endpoint.vad_eot` at or after `t_us_floor` — by time, not
+/// Exclusive upper bound on a forward search, or `None` for "no next turn to
+/// confuse this one with" — see [`next_turn_ceiling_t_us`].
+type Ceiling = Option<u64>;
+
+/// Whether `r` falls in `[t_us_floor, ceiling)`.
+fn within(r: &TraceRecord, t_us_floor: u64, ceiling: Ceiling) -> bool {
+    r.t_us >= t_us_floor && ceiling.is_none_or(|c| r.t_us < c)
+}
+
+/// The trace timestamp where the *next* fixture turn's `I` lands, used as an
+/// exclusive ceiling on the forward searches below.
+///
+/// Both `find_v` and `find_o` search forward from `I`. On a **premature cut**
+/// — the server endpointed before the client's marked speech end — this
+/// turn's real `endpoint.vad_eot` and `out.first_audio` both *precede* `I`,
+/// so an unbounded forward search silently returns the NEXT turn's records:
+/// `detection_lag_ms` and `server_internal_ms` become another turn's numbers,
+/// `e2e_ms - server_internal_ms` goes negative, and `network_ms` is printed
+/// in the percentile table as a plain number. Nothing downstream can tell.
+///
+/// `None` when `turn` is the last turn in `marks` (there is no later turn to
+/// borrow from) or when the next turn's own `I` is not in the trace.
+///
+/// This bound is necessary, not sufficient: if the *next* turn is itself
+/// prematurely cut, its `O` also precedes its `I` and lands inside this
+/// window. That residue is what `residual_is_plausible` is checked for in
+/// `render_markdown`.
+fn next_turn_ceiling_t_us(marks: &[ClientMark], trace: &[TraceRecord], turn: u64) -> Ceiling {
+    let next = marks
+        .iter()
+        .filter(|m| m.kind == MarkKind::UserSpeechEnd && m.turn > turn)
+        .min_by_key(|m| m.turn)?;
+    find_i(trace, next.sample_idx).ok().map(|r| r.t_us)
+}
+
+/// `V`: the first `endpoint.vad_eot` in `[t_us_floor, ceiling)` — by time, not
 /// by turn. Unlike `I` and `O`, a missing `V` does not fail the whole
 /// breakdown: some traces genuinely carry no endpoint-detection event for a
 /// turn (see `breakdown`'s handling of `None` here), and `server_internal_ms`
 /// — the number this profiler exists to produce — does not depend on it.
-fn find_v(trace: &[TraceRecord], t_us_floor: u64) -> Option<&TraceRecord> {
+/// "Not found before the next turn began" returns the same `None` as "not
+/// recorded at all": both mean *not measured*, and neither may be filled in
+/// with a value belonging to another turn.
+fn find_v(trace: &[TraceRecord], t_us_floor: u64, ceiling: Ceiling) -> Option<&TraceRecord> {
     trace
         .iter()
-        .filter(|r| r.span == "endpoint.vad_eot" && r.t_us >= t_us_floor)
+        .filter(|r| r.span == "endpoint.vad_eot" && within(r, t_us_floor, ceiling))
         .min_by_key(|r| r.t_us)
 }
 
-/// `O`: the first `out.first_audio` at or after `t_us_floor` — by time, not
-/// by turn.
-fn find_o(trace: &[TraceRecord], t_us_floor: u64) -> Result<&TraceRecord> {
-    trace
+/// `O`: the first `out.first_audio` in `[t_us_floor, ceiling)` — by time, not
+/// by turn. Running past `ceiling` would hand this turn the next turn's first
+/// audio, so hitting the bound is an error, never the next turn's record.
+fn find_o(trace: &[TraceRecord], t_us_floor: u64, ceiling: Ceiling) -> Result<&TraceRecord> {
+    let found = trace
         .iter()
-        .filter(|r| r.span == "out.first_audio" && r.t_us >= t_us_floor)
-        .min_by_key(|r| r.t_us)
-        .context("missing span: out.first_audio (O)")
+        .filter(|r| r.span == "out.first_audio" && within(r, t_us_floor, ceiling))
+        .min_by_key(|r| r.t_us);
+    match (found, ceiling) {
+        (Some(o), _) => Ok(o),
+        (None, None) => anyhow::bail!("missing span: out.first_audio (O)"),
+        (None, Some(c)) => anyhow::bail!(
+            "missing span: out.first_audio (O) — none in [{t_us_floor}us, {c}us), the window \
+             between this turn's marked speech end and the next turn's. There is an \
+             `out.first_audio` later in the trace, but it belongs to the next turn and using \
+             it would report that turn's latency as this one's. The usual cause is a premature \
+             cut: the server endpointed before the client's marked speech end, so this turn's \
+             own `out.first_audio` precedes `I` and is outside the window. See \
+             `premature_cut_rate` in the turn-taking section."
+        ),
+    }
 }
 
 /// Every closed Begin/End pair recorded under `server_turn` — which must be
@@ -174,13 +235,16 @@ pub fn breakdown(marks: &[ClientMark], trace: &[TraceRecord], turn: u64) -> Resu
     let e2e_ms = (first_agent_audio.t_us as f64 - user_speech_end.t_us as f64) / 1000.0;
 
     let i = find_i(trace, user_speech_end.sample_idx)?;
-    let v = find_v(trace, i.t_us);
+    // Both forward searches stop at the next turn's `I`: past that point every
+    // candidate belongs to the next turn (see `next_turn_ceiling_t_us`).
+    let ceiling = next_turn_ceiling_t_us(marks, trace, turn);
+    let v = find_v(trace, i.t_us, ceiling);
     // `O` follows `V` when `V` was found (the normal case: this also guards
     // against picking up a stale `out.first_audio` from before the endpoint
     // was actually detected). When no `endpoint.vad_eot` exists for this
     // turn, fall back to searching from `I` — `O` must not become
     // unmeasurable just because the detection-lag diagnostic is unavailable.
-    let o = find_o(trace, v.map_or(i.t_us, |v| v.t_us))?;
+    let o = find_o(trace, v.map_or(i.t_us, |v| v.t_us), ceiling)?;
 
     // A missing `V` is "not measured", not "zero lag" (see `find_v` and the
     // field doc on `TurnBreakdown::detection_lag_ms`): `None` makes that
@@ -407,7 +471,7 @@ fn turn_taking_counts(
         });
         if let Some(end) = user_speech_end
             && let Ok(i) = find_i(trace, end.sample_idx)
-            && let Some(v) = find_v(trace, i.t_us)
+            && let Some(v) = find_v(trace, i.t_us, next_turn_ceiling_t_us(marks, trace, turn))
         {
             counts.delays_ms.push((v.t_us as f64 - i.t_us as f64) / 1000.0);
         }
@@ -488,17 +552,54 @@ pub fn turn_taking_all(marks: &[ClientMark], trace_dir: &Path, manifest: &Manife
 const LLM_MEASURED_LOCAL_NOTE: &str =
     "(measured-local — a co-located vLLM has ~zero network cost, unlike a production remote LLM)";
 
+/// Why one turn's `network_ms` cannot be believed, or `None` when it can (or
+/// when there is no RTT to check it against).
+///
+/// `network_ms` is a residual — `e2e_ms` minus everything the server could
+/// account for — so it absorbs every error in the join rather than reporting
+/// one. `residual_is_plausible` is the check that catches that; until this
+/// was wired in, it was referenced only by its own unit test while the
+/// measured RTT went to `--out-marks` and never reached the report.
+fn residual_complaint(b: &TurnBreakdown, rtt_p50_ms: Option<f64>) -> Option<String> {
+    let rtt = rtt_p50_ms?;
+    if residual_is_plausible(b.network_ms, rtt) {
+        return None;
+    }
+    let why = if b.network_ms < 0.0 {
+        "negative, so the client/server join for this turn is wrong"
+    } else {
+        "far above the round trip, so server time went unattributed"
+    };
+    Some(format!(
+        "IMPLAUSIBLE network residual {:.2}ms vs measured p50 RTT {rtt:.2}ms — {why}",
+        b.network_ms
+    ))
+}
+
 /// Renders one turn's spans as a text Gantt chart, bars positioned by
 /// `(start_ms, end_ms)` relative to `I` (see `TurnBreakdown::spans`).
 /// `label` identifies the turn in the heading — since `TurnBreakdown.turn` is
 /// the *client's* per-repetition turn counter (see module docs), it repeats
 /// across repetitions and cannot uniquely label a turn across a whole
 /// multi-repetition run on its own.
-fn render_gantt(label: &str, b: &TurnBreakdown, llm_local: bool) -> String {
+///
+/// A turn whose residual fails `residual_is_plausible` is called out in its
+/// own heading: the stage split below is an aggregate, and a reader scanning
+/// waterfalls must not be able to take an untrustworthy turn for a normal one.
+fn render_gantt(
+    label: &str,
+    b: &TurnBreakdown,
+    llm_local: bool,
+    rtt_p50_ms: Option<f64>,
+) -> String {
     const WIDTH: usize = 50;
     let mut out = String::new();
+    let complaint = match residual_complaint(b, rtt_p50_ms) {
+        Some(c) => format!(" — **{c}**"),
+        None => String::new(),
+    };
     out.push_str(&format!(
-        "### {label} (fixture turn {}, e2e={:.1}ms)\n\n",
+        "### {label} (fixture turn {}, e2e={:.1}ms){complaint}\n\n",
         b.turn, b.e2e_ms
     ));
     if b.spans.is_empty() {
@@ -591,6 +692,50 @@ fn render_run_failures(run_failures: &[RunFailure]) -> String {
     out
 }
 
+/// The `network` row's plausibility audit: one line per turn whose residual
+/// fails `residual_is_plausible` against the run's own measured RTT.
+///
+/// Always rendered, including when everything passes — "checked, all fine" and
+/// "never checked" are different states, and a section that only appears on
+/// failure leaves the reader unable to tell which one they are looking at.
+fn render_residual_plausibility(breakdowns: &[TurnBreakdown], rtt_p50_ms: Option<f64>) -> String {
+    let mut out = String::new();
+    out.push_str("### network residual plausibility\n\n");
+    let Some(rtt) = rtt_p50_ms else {
+        out.push_str(
+            "**Not checked**: this run has no RTT probe, so nothing bounds the `network` \
+             row above. It is a residual (`e2e_ms - server_internal_ms`), not a \
+             measurement — treat it as unvalidated.\n\n",
+        );
+        return out;
+    };
+    let complaints: Vec<(usize, String)> = breakdowns
+        .iter()
+        .enumerate()
+        .filter_map(|(i, b)| residual_complaint(b, Some(rtt)).map(|c| (i, c)))
+        .collect();
+    if complaints.is_empty() {
+        out.push_str(&format!(
+            "All {} turn(s) pass `residual_is_plausible` against the measured p50 RTT of \
+             {rtt:.2}ms.\n\n",
+            breakdowns.len()
+        ));
+        return out;
+    }
+    out.push_str(&format!(
+        "**{} of {} turn(s) FAIL `residual_is_plausible`.** Their `network_ms` is not a \
+         transport cost and their stage split must not be used for any optimization \
+         decision; the `network` percentile row above pools them in with the rest.\n\n",
+        complaints.len(),
+        breakdowns.len()
+    ));
+    for (i, complaint) in complaints {
+        out.push_str(&format!("- Turn {i}: {complaint}\n"));
+    }
+    out.push('\n');
+    out
+}
+
 /// Renders the full markdown report, in order: a percentile table (one row
 /// per fixture category, each stating `n=`), one ASCII Gantt per turn, and
 /// the `detection_lag` / `server_internal` / `network` split.
@@ -618,6 +763,7 @@ pub fn render_markdown(
     summaries: &BTreeMap<String, Summary>,
     turn_taking: &TurnTaking,
     llm_local: bool,
+    rtt_p50_ms: Option<f64>,
     run_failures: &[RunFailure],
 ) -> String {
     let mut out = String::new();
@@ -644,7 +790,7 @@ pub fn render_markdown(
         out.push_str("_(no turns to render)_\n\n");
     } else {
         for (i, b) in breakdowns.iter().enumerate() {
-            out.push_str(&render_gantt(&format!("Turn {i}"), b, llm_local));
+            out.push_str(&render_gantt(&format!("Turn {i}"), b, llm_local, rtt_p50_ms));
         }
     }
 
@@ -672,6 +818,8 @@ pub fn render_markdown(
     out.push_str(&render_stage_row("server_internal", &server_internal_ms));
     out.push_str(&render_stage_row("network", &network_ms));
     out.push('\n');
+
+    out.push_str(&render_residual_plausibility(breakdowns, rtt_p50_ms));
 
     out.push_str("## Turn-taking quality\n\n");
     out.push_str(
@@ -853,6 +1001,109 @@ mod tests {
         assert_eq!(b.network_ms, 50.0);
     }
 
+    /// The failure I3 names: on a **premature cut** the server endpointed
+    /// before the client's marked speech end, so this turn's real
+    /// `endpoint.vad_eot` and `out.first_audio` both precede `I`. `find_v`
+    /// and `find_o` search forward, so unbounded they return the NEXT turn's
+    /// records: `detection_lag_ms` and `server_internal_ms` silently become
+    /// another turn's numbers and `network_ms` goes negative — printed as a
+    /// plain number in the percentile table. Bounded by the next turn's `I`,
+    /// nothing is found and the turn fails loudly instead.
+    #[test]
+    fn a_premature_cut_never_borrows_the_next_turns_anchors() {
+        let trace = vec![
+            // Turn 0's real answer, produced *before* the client's marked
+            // speech end — the server cut the user off.
+            rec(100_000, 1, "endpoint.vad_eot", Phase::Point, 20_000),
+            rec(200_000, 1, "out.first_audio", Phase::Point, 0),
+            rec(500_000, 0, "audio_in.frame", Phase::Point, 24_000), // turn 0's I
+            // Turn 1: its own I, and its own (well-behaved) anchors after it.
+            rec(3_000_000, 0, "audio_in.frame", Phase::Point, 96_000), // turn 1's I
+            rec(3_060_000, 2, "endpoint.vad_eot", Phase::Point, 97_920),
+            rec(3_800_000, 2, "out.first_audio", Phase::Point, 0),
+        ];
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 9_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 8_800_000, sample_idx: 0 },
+            ClientMark { repetition: 0, turn: 1, kind: MarkKind::UserSpeechEnd, t_us: 12_000_000, sample_idx: 96_000 },
+            ClientMark { repetition: 0, turn: 1, kind: MarkKind::FirstAgentAudio, t_us: 12_900_000, sample_idx: 0 },
+        ];
+
+        let err = breakdown(&marks, &trace, 0)
+            .expect_err("turn 0's O precedes its I; borrowing turn 1's must not be allowed")
+            .to_string();
+        assert!(err.contains("out.first_audio"), "got: {err}");
+        assert!(err.contains("premature cut"), "the error must name the cause: {err}");
+
+        // Turn 1, whose anchors are where they belong, is unaffected.
+        let b = breakdown(&marks, &trace, 1).unwrap();
+        assert_eq!(b.detection_lag_ms, Some(60.0));
+        assert_eq!(b.server_internal_ms, 800.0);
+    }
+
+    /// The ceiling must not swallow a legitimately-measured `V`: a turn whose
+    /// detection lands normally, before the next turn begins, still measures.
+    #[test]
+    fn a_normal_turn_still_finds_its_anchors_inside_the_window() {
+        let trace = vec![
+            rec(500_000, 0, "audio_in.frame", Phase::Point, 24_000), // turn 0's I
+            rec(560_000, 1, "endpoint.vad_eot", Phase::Point, 25_920),
+            rec(1_300_000, 1, "out.first_audio", Phase::Point, 0),
+            rec(3_000_000, 0, "audio_in.frame", Phase::Point, 96_000), // turn 1's I
+            rec(3_060_000, 2, "endpoint.vad_eot", Phase::Point, 97_920),
+            rec(3_800_000, 2, "out.first_audio", Phase::Point, 0),
+        ];
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 9_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 9_900_000, sample_idx: 0 },
+            ClientMark { repetition: 0, turn: 1, kind: MarkKind::UserSpeechEnd, t_us: 12_000_000, sample_idx: 96_000 },
+            ClientMark { repetition: 0, turn: 1, kind: MarkKind::FirstAgentAudio, t_us: 12_900_000, sample_idx: 0 },
+        ];
+        let b = breakdown(&marks, &trace, 0).unwrap();
+        assert_eq!(b.detection_lag_ms, Some(60.0), "turn 0's own V is inside the window");
+        assert_eq!(b.server_internal_ms, 800.0, "turn 0's own O is inside the window");
+    }
+
+    /// A `V` that only exists *after* the next turn started is not this
+    /// turn's, and "not measured" (`None`) is the only honest answer — the
+    /// same one a trace with no `endpoint.vad_eot` at all produces.
+    #[test]
+    fn a_vad_eot_belonging_to_the_next_turn_reads_as_not_measured() {
+        let trace = vec![
+            rec(500_000, 0, "audio_in.frame", Phase::Point, 24_000), // turn 0's I
+            rec(1_300_000, 1, "out.first_audio", Phase::Point, 0),   // turn 0's O
+            rec(3_000_000, 0, "audio_in.frame", Phase::Point, 96_000), // turn 1's I
+            rec(3_060_000, 2, "endpoint.vad_eot", Phase::Point, 97_920), // turn 1's V
+        ];
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 9_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 9_900_000, sample_idx: 0 },
+            ClientMark { repetition: 0, turn: 1, kind: MarkKind::UserSpeechEnd, t_us: 12_000_000, sample_idx: 96_000 },
+        ];
+        let b = breakdown(&marks, &trace, 0).unwrap();
+        assert_eq!(
+            b.detection_lag_ms, None,
+            "turn 1's vad_eot must not be reported as turn 0's detection lag"
+        );
+        assert_eq!(b.server_internal_ms, 800.0, "O is still turn 0's own");
+    }
+
+    /// The last turn has no next turn to bound against, so its search stays
+    /// unbounded — a late answer there is still the answer to that turn.
+    #[test]
+    fn the_last_turn_has_no_ceiling() {
+        let trace = vec![
+            rec(500_000, 0, "audio_in.frame", Phase::Point, 24_000),
+            rec(9_000_000, 1, "out.first_audio", Phase::Point, 0),
+        ];
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 1_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 9_500_000, sample_idx: 0 },
+        ];
+        let b = breakdown(&marks, &trace, 0).unwrap();
+        assert_eq!(b.server_internal_ms, 8500.0);
+    }
+
     #[test]
     fn missing_anchor_is_an_error_not_a_zero() {
         let trace = vec![rec(100_000, 1, "out.first_audio", Phase::Point, 0)];
@@ -882,7 +1133,7 @@ mod tests {
             network_ms: 100.0,
             spans: vec![("llm.push".to_string(), 10.0, 60.0)],
         };
-        let out = render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), true, &[]);
+        let out = render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), true, None, &[]);
         assert!(
             out.contains("measured-local"),
             "a locally-hosted LLM flatters its own stage and must be labelled: {out}"
@@ -901,7 +1152,7 @@ mod tests {
             network_ms: 100.0,
             spans: vec![("llm.push".to_string(), 10.0, 60.0)],
         };
-        let out = render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), false, &[]);
+        let out = render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
         assert!(!out.contains("measured-local"), "got: {out}");
     }
 
@@ -912,7 +1163,7 @@ mod tests {
             "short_answer".to_string(),
             Summary { n: 20, p50: 800.0, p90: 950.0, p99: 1100.0 },
         );
-        let out = render_markdown(&[], &summaries, &no_turn_taking(), false, &[]);
+        let out = render_markdown(&[], &summaries, &no_turn_taking(), false, None, &[]);
         assert!(out.contains("n=20"), "every aggregate must state its n: {out}");
     }
 
@@ -939,7 +1190,7 @@ mod tests {
             network_ms: 100.0,
             spans: vec![],
         };
-        let out = render_markdown(&[with_lag, without_lag], &BTreeMap::new(), &no_turn_taking(), false, &[]);
+        let out = render_markdown(&[with_lag, without_lag], &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
         assert!(
             out.contains("1 of 2 turn(s) had no detection-lag measurement"),
             "the omission must be stated explicitly, not hidden: {out}"
@@ -1185,7 +1436,7 @@ mod tests {
             repetition: 2,
             error: "recv_loop error: Error from server: timeout".to_string(),
         }];
-        let out = render_markdown(&[], &BTreeMap::new(), &tt, false, &failures);
+        let out = render_markdown(&[], &BTreeMap::new(), &tt, false, None, &failures);
 
         assert!(out.contains("INCOMPLETE RUN"), "the banner must be present: {out}");
         assert!(out.contains("repetition 2"), "the failed repetition must be named: {out}");
@@ -1203,9 +1454,94 @@ mod tests {
 
     /// The banner must not appear on a clean run: one that shows up every
     /// time is one the reader stops seeing.
+    /// `residual_is_plausible` documented itself as the check that catches a
+    /// broken join, and was referenced only by its own unit test: the measured
+    /// RTT went to `--out-marks` and never reached the report, so a turn whose
+    /// `network_ms` was negative rendered as an ordinary row. It must now be
+    /// impossible to read such a turn as normal.
+    #[test]
+    fn an_implausible_residual_is_called_out_per_turn() {
+        let bad = TurnBreakdown {
+            turn: 0,
+            e2e_ms: 700.0,
+            detection_lag_ms: Some(60.0),
+            server_internal_ms: 900.0,
+            network_ms: -200.0, // e2e < server_internal: the join is wrong
+            spans: vec![("llm.push".to_string(), 10.0, 60.0)],
+        };
+        let good = TurnBreakdown {
+            turn: 1,
+            e2e_ms: 900.0,
+            detection_lag_ms: Some(60.0),
+            server_internal_ms: 880.0,
+            network_ms: 20.0,
+            spans: vec![("llm.push".to_string(), 10.0, 60.0)],
+        };
+        let out = render_markdown(
+            &[bad, good],
+            &BTreeMap::new(),
+            &no_turn_taking(),
+            false,
+            Some(20.0),
+            &[],
+        );
+
+        assert!(
+            out.contains("1 of 2 turn(s) FAIL"),
+            "the audit must count the failures: {out}"
+        );
+        assert!(
+            out.contains("Turn 0: IMPLAUSIBLE"),
+            "the failing turn must be named: {out}"
+        );
+        assert!(
+            !out.contains("Turn 1: IMPLAUSIBLE"),
+            "the plausible turn must not be flagged: {out}"
+        );
+        // And the waterfall itself, not just the audit section.
+        let heading = out
+            .lines()
+            .find(|l| l.starts_with("### Turn 0 "))
+            .expect("turn 0 must have a waterfall heading");
+        assert!(
+            heading.contains("IMPLAUSIBLE"),
+            "a reader scanning waterfalls must not take it for a normal turn: {heading}"
+        );
+    }
+
+    /// "Checked, all fine" and "never checked" must not look the same.
+    #[test]
+    fn the_residual_audit_distinguishes_all_clear_from_never_checked() {
+        let b = TurnBreakdown {
+            turn: 0,
+            e2e_ms: 900.0,
+            detection_lag_ms: Some(60.0),
+            server_internal_ms: 880.0,
+            network_ms: 20.0,
+            spans: vec![],
+        };
+        let checked = render_markdown(
+            &[b.clone()],
+            &BTreeMap::new(),
+            &no_turn_taking(),
+            false,
+            Some(20.0),
+            &[],
+        );
+        assert!(checked.contains("All 1 turn(s) pass"), "got: {checked}");
+
+        let unchecked =
+            render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
+        assert!(unchecked.contains("Not checked"), "got: {unchecked}");
+        assert!(
+            !unchecked.contains("pass `residual_is_plausible`"),
+            "no RTT means no verdict at all: {unchecked}"
+        );
+    }
+
     #[test]
     fn a_clean_run_renders_no_incomplete_run_banner() {
-        let out = render_markdown(&[], &BTreeMap::new(), &no_turn_taking(), false, &[]);
+        let out = render_markdown(&[], &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
         assert!(!out.contains("INCOMPLETE RUN"), "got: {out}");
     }
 
@@ -1216,7 +1552,7 @@ mod tests {
             endpoint_delay_ms: Some(Summary { n: 4, p50: 60.0, p90: 90.0, p99: 99.0 }),
             missed_endpoint_rate: 0.1,
         };
-        let out = render_markdown(&[], &BTreeMap::new(), &tt, false, &[]);
+        let out = render_markdown(&[], &BTreeMap::new(), &tt, false, None, &[]);
         assert!(out.contains("25.0%"), "premature_cut_rate must be surfaced: {out}");
         assert!(out.contains("10.0%"), "missed_endpoint_rate must be surfaced: {out}");
         assert!(out.contains("endpoint_delay_ms"), "endpoint_delay_ms must be surfaced: {out}");

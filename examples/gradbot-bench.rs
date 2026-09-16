@@ -649,11 +649,14 @@ async fn main() -> Result<()> {
         // has no way to detect whether the server's LLM is co-located (see
         // Args::llm_local's help text), and a wrong auto-detected label
         // would be worse than none.
+        // The measured RTT is what makes `network_ms` — a residual, not a
+        // measurement — checkable at all (`residual_is_plausible`).
         let markdown = report::render_markdown(
             &breakdowns,
             &category_summaries,
             &turn_taking,
             args.llm_local,
+            rtt_probe_ms.as_ref().map(|s| s.p50),
             &failures,
         );
         std::fs::write(out_report, &markdown)
