@@ -37,7 +37,7 @@
 //! two lists to whichever is shorter.
 
 use super::fixtures::Manifest;
-use super::{ClientMark, MarkKind, Summary, summarize};
+use super::{ClientMark, MarkKind, RunFailure, Summary, summarize};
 use anyhow::{Context, Result};
 use gradbot::{Phase, TraceRecord};
 use std::collections::{BTreeMap, BTreeSet};
@@ -564,6 +564,33 @@ fn render_summary_row(name: &str, summary: &Option<Summary>) -> String {
     }
 }
 
+/// A blockquoted banner naming every repetition whose session did not
+/// complete, rendered at the very top of the report. Empty when the run was
+/// clean — a banner that appears unconditionally is one a reader learns to
+/// skip.
+fn render_run_failures(run_failures: &[RunFailure]) -> String {
+    if run_failures.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    out.push_str("> ## INCOMPLETE RUN — READ THIS BEFORE ANY NUMBER BELOW\n>\n");
+    out.push_str(&format!(
+        "> {} of this run's repetition(s) ended before the manifest did:\n>\n",
+        run_failures.len()
+    ));
+    for f in run_failures {
+        out.push_str(&format!("> - **repetition {}**: {}\n", f.repetition, f.error));
+    }
+    out.push_str(
+        ">\n> Every turn those repetitions never reached has no `FirstAgentAudio` \
+         mark and is therefore counted in `missed_endpoint_rate` below. For those \
+         repetitions that number measures a dead session, **not** an endpointing \
+         failure, and the latency percentiles are drawn from whatever subset of \
+         turns did run.\n\n",
+    );
+    out
+}
+
 /// Renders the full markdown report, in order: a percentile table (one row
 /// per fixture category, each stating `n=`), one ASCII Gantt per turn, and
 /// the `detection_lag` / `server_internal` / `network` split.
@@ -580,15 +607,23 @@ fn render_summary_row(name: &str, summary: &Option<Summary>) -> String {
 /// measurement excludes real network cost — this harness's LLM is a
 /// self-hosted vLLM on the same cluster, unlike any production deployment
 /// with a remote LLM.
+///
+/// `run_failures` is rendered *before* any number, because a repetition whose
+/// session died produces turns with no `FirstAgentAudio` mark, and those are
+/// indistinguishable from turns the server genuinely failed to endpoint (see
+/// [`RunFailure`]). A reader who does not know the session died will read
+/// `missed_endpoint_rate` as an endpointing result.
 pub fn render_markdown(
     breakdowns: &[TurnBreakdown],
     summaries: &BTreeMap<String, Summary>,
     turn_taking: &TurnTaking,
     llm_local: bool,
+    run_failures: &[RunFailure],
 ) -> String {
     let mut out = String::new();
 
     out.push_str("# Gradbot latency report\n\n");
+    out.push_str(&render_run_failures(run_failures));
 
     out.push_str("## End-to-end latency by fixture category (ms)\n\n");
     out.push_str("| category | n | p50 | p90 | p99 |\n");
@@ -847,7 +882,7 @@ mod tests {
             network_ms: 100.0,
             spans: vec![("llm.push".to_string(), 10.0, 60.0)],
         };
-        let out = render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), true);
+        let out = render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), true, &[]);
         assert!(
             out.contains("measured-local"),
             "a locally-hosted LLM flatters its own stage and must be labelled: {out}"
@@ -866,7 +901,7 @@ mod tests {
             network_ms: 100.0,
             spans: vec![("llm.push".to_string(), 10.0, 60.0)],
         };
-        let out = render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), false);
+        let out = render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), false, &[]);
         assert!(!out.contains("measured-local"), "got: {out}");
     }
 
@@ -877,7 +912,7 @@ mod tests {
             "short_answer".to_string(),
             Summary { n: 20, p50: 800.0, p90: 950.0, p99: 1100.0 },
         );
-        let out = render_markdown(&[], &summaries, &no_turn_taking(), false);
+        let out = render_markdown(&[], &summaries, &no_turn_taking(), false, &[]);
         assert!(out.contains("n=20"), "every aggregate must state its n: {out}");
     }
 
@@ -904,7 +939,7 @@ mod tests {
             network_ms: 100.0,
             spans: vec![],
         };
-        let out = render_markdown(&[with_lag, without_lag], &BTreeMap::new(), &no_turn_taking(), false);
+        let out = render_markdown(&[with_lag, without_lag], &BTreeMap::new(), &no_turn_taking(), false, &[]);
         assert!(
             out.contains("1 of 2 turn(s) had no detection-lag measurement"),
             "the omission must be stated explicitly, not hidden: {out}"
@@ -1134,6 +1169,46 @@ mod tests {
         assert_eq!(delay.n, 2);
     }
 
+    /// A repetition whose session died produces turns with no
+    /// `FirstAgentAudio` mark, which `missed_endpoint_rate` counts exactly
+    /// like a turn the server failed to endpoint. The report must name the
+    /// dead session before the reader reaches that number, or the run gets
+    /// filed as an endpointing regression.
+    #[test]
+    fn a_failed_session_is_reported_as_an_incomplete_run_not_as_missed_endpoints() {
+        let tt = TurnTaking {
+            premature_cut_rate: 0.0,
+            endpoint_delay_ms: None,
+            missed_endpoint_rate: 1.0,
+        };
+        let failures = vec![RunFailure {
+            repetition: 2,
+            error: "recv_loop error: Error from server: timeout".to_string(),
+        }];
+        let out = render_markdown(&[], &BTreeMap::new(), &tt, false, &failures);
+
+        assert!(out.contains("INCOMPLETE RUN"), "the banner must be present: {out}");
+        assert!(out.contains("repetition 2"), "the failed repetition must be named: {out}");
+        assert!(
+            out.contains("Error from server: timeout"),
+            "the underlying error must be shown, not just its existence: {out}"
+        );
+        let banner = out.find("INCOMPLETE RUN").unwrap();
+        let missed = out.find("missed_endpoint_rate").unwrap();
+        assert!(
+            banner < missed,
+            "the banner must come before the metric it disclaims: {out}"
+        );
+    }
+
+    /// The banner must not appear on a clean run: one that shows up every
+    /// time is one the reader stops seeing.
+    #[test]
+    fn a_clean_run_renders_no_incomplete_run_banner() {
+        let out = render_markdown(&[], &BTreeMap::new(), &no_turn_taking(), false, &[]);
+        assert!(!out.contains("INCOMPLETE RUN"), "got: {out}");
+    }
+
     #[test]
     fn render_markdown_surfaces_all_three_turn_taking_metrics() {
         let tt = TurnTaking {
@@ -1141,7 +1216,7 @@ mod tests {
             endpoint_delay_ms: Some(Summary { n: 4, p50: 60.0, p90: 90.0, p99: 99.0 }),
             missed_endpoint_rate: 0.1,
         };
-        let out = render_markdown(&[], &BTreeMap::new(), &tt, false);
+        let out = render_markdown(&[], &BTreeMap::new(), &tt, false, &[]);
         assert!(out.contains("25.0%"), "premature_cut_rate must be surfaced: {out}");
         assert!(out.contains("10.0%"), "missed_endpoint_rate must be surfaced: {out}");
         assert!(out.contains("endpoint_delay_ms"), "endpoint_delay_ms must be surfaced: {out}");

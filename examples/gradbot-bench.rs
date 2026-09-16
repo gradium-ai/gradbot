@@ -18,6 +18,14 @@
 //! previous turn), and the receive loop tags the first real-audio packet it
 //! sees after that with the same turn number.
 //!
+//! The receive loop outlives the send loop: once the last fixture turn (and
+//! its trailing silence) has been written, the session keeps receiving for
+//! `DRAIN_AFTER_LAST_TURN` before tearing down, so a late answer to the final
+//! turn is still observed rather than counted as a missed endpoint. A session
+//! loop that ends in an *error* is recorded as a `RunFailure` and printed to
+//! stderr — a dead session must never be reported as the agent declining to
+//! answer.
+//!
 //! `--repetitions` replays the manifest that many times, opening a **fresh
 //! session per repetition** (never more than one at a time — see
 //! `run_session`): prod backends carry shared load and network jitter, so a
@@ -207,6 +215,18 @@ pub fn residual_is_plausible(network_ms: f64, rtt_p50_ms: f64) -> bool {
 /// "simplify" the loop back to the brief's original unbounded sketch.
 const RTT_PING_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// How long the receive loop keeps running after the send loop has written
+/// the last fixture turn (and its trailing `gap_after_s` of silence), before
+/// the session is torn down.
+///
+/// Five seconds: comfortably longer than any end-to-end latency this harness
+/// is meant to measure, short enough that it costs seconds, not minutes, at
+/// high `--repetitions`. Without a drain the session died the instant
+/// playback ended, so an answer to the *last* turn that arrived after its
+/// `gap_after_s` was never observed — on a single-turn manifest that is a
+/// 100% `missed_endpoint_rate` for a server that answered correctly.
+const DRAIN_AFTER_LAST_TURN: Duration = Duration::from_secs(5);
+
 /// Number of ping/pong exchanges the RTT probe attempts. `summarize` refuses
 /// fewer than two samples, so this is sized to survive a handful of misses.
 const RTT_PROBE_PINGS: usize = 20;
@@ -301,6 +321,9 @@ struct BenchOutput {
     /// probe rides on repetition 0's connection, and a probe that cannot
     /// collect two samples is fatal rather than absent.
     rtt_probe_ms: Option<Summary>,
+    /// Repetitions whose session did not complete. Non-empty means the marks
+    /// below are incomplete — see [`RunFailure`].
+    failures: Vec<RunFailure>,
     marks: Vec<ClientMark>,
 }
 
@@ -310,6 +333,24 @@ struct SessionOutcome {
     /// `Some` only for the repetition that was asked to probe (see
     /// `run_session`'s `rtt_probe_pings`).
     rtt_probe_ms: Option<Summary>,
+    /// `Some` when this repetition's session did not complete cleanly (see
+    /// [`RunFailure`]). The marks it produced are still returned — they are
+    /// just incomplete, and the report must say so.
+    failure: Option<String>,
+}
+
+/// A repetition whose session ended before the manifest did.
+///
+/// This exists because the failure is otherwise invisible *and*
+/// indistinguishable from a real result: a server error or a dropped socket
+/// truncates the marks, and every turn that never played then has no
+/// `FirstAgentAudio` mark, which `missed_endpoint_rate` reports as "the agent
+/// never answered". The run must say "this session died" instead of blaming
+/// endpointing for it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RunFailure {
+    pub repetition: u64,
+    pub error: String,
 }
 
 /// Streams one full pass of `manifest` over a **fresh** connection and
@@ -484,15 +525,47 @@ async fn run_session(
         }
     };
 
-    tokio::select! {
-        res = send_loop => pp_err("send_loop", res),
-        res = recv_loop => pp_err("recv_loop", res),
+    // The receive loop is spawned rather than `select!`ed as a bare future:
+    // `select!` drops the loser, so the old code tore the receiver down the
+    // instant the send loop finished and never saw an answer to the last turn
+    // (see `DRAIN_AFTER_LAST_TURN`). Spawning keeps it alive for the drain
+    // below; it owns only `Arc`s and its own half of the socket, so it is
+    // `'static`. The send loop borrows `manifest` and stays inline.
+    let mut recv_task = tokio::spawn(recv_loop);
+    tokio::pin!(send_loop);
+
+    let (mut failure, recv_ended_first) = tokio::select! {
+        res = &mut send_loop => (loop_failure(repetition, "send_loop", res), false),
+        res = &mut recv_task => (join_failure(repetition, "recv_loop", res), true),
+    };
+
+    if recv_ended_first {
+        // The receiver finished while there was still audio to play: the
+        // server errored, closed, or the socket dropped. Even when the loop
+        // itself returned `Ok` (a clean `Close` frame is `Ok`), the session
+        // is truncated and every unplayed turn will look like a missed
+        // endpoint. Say so rather than letting the report blame endpointing.
+        failure = failure.or_else(|| {
+            let msg = "recv_loop ended before playback finished: the server closed \
+                       the connection mid-manifest, so the remaining turns never ran"
+                .to_string();
+            eprintln!("bench: repetition {repetition}: {msg}");
+            Some(msg)
+        });
+    } else {
+        match tokio::time::timeout(DRAIN_AFTER_LAST_TURN, &mut recv_task).await {
+            // Receiver stopped on its own inside the window.
+            Ok(res) => failure = failure.or_else(|| join_failure(repetition, "recv_loop", res)),
+            // Still receiving when the window closed — the normal ending.
+            Err(_) => recv_task.abort(),
+        }
     }
 
     let marks = marks.lock().unwrap().clone();
     Ok(SessionOutcome {
         marks,
         rtt_probe_ms,
+        failure,
     })
 }
 
@@ -509,6 +582,7 @@ async fn main() -> Result<()> {
     let mut rtt_probe_ms: Option<Summary> = None;
 
     let mut all_marks: Vec<ClientMark> = Vec::new();
+    let mut failures: Vec<RunFailure> = Vec::new();
     // e2e_ms pooled by fixture category across every repetition.
     let mut by_category: BTreeMap<String, Vec<f64>> = BTreeMap::new();
 
@@ -526,6 +600,12 @@ async fn main() -> Result<()> {
         };
         let outcome = run_session(&args.url, &manifest, rep as u64, probe_pings).await?;
         let marks = outcome.marks;
+        if let Some(error) = outcome.failure {
+            failures.push(RunFailure {
+                repetition: rep as u64,
+                error,
+            });
+        }
         if let Some(rtt) = outcome.rtt_probe_ms {
             println!(
                 "RTT probe (n={}): p50={:.2}ms p90={:.2}ms p99={:.2}ms",
@@ -574,6 +654,7 @@ async fn main() -> Result<()> {
             &category_summaries,
             &turn_taking,
             args.llm_local,
+            &failures,
         );
         std::fs::write(out_report, &markdown)
             .with_context(|| format!("writing report to {}", out_report.display()))?;
@@ -585,6 +666,7 @@ async fn main() -> Result<()> {
         out,
         &BenchOutput {
             rtt_probe_ms,
+            failures,
             marks: all_marks,
         },
     )?;
@@ -592,10 +674,37 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn pp_err(name: &str, res: Result<()>) {
+/// Reports a session loop's outcome and returns a failure description when it
+/// ended in error.
+///
+/// `eprintln!`, not `tracing::error!`: no example in this crate installs a
+/// `tracing_subscriber`, so the previous `tracing::error!` went nowhere at all
+/// and a dead session looked exactly like a server that never answered.
+fn loop_failure(repetition: u64, name: &str, res: Result<()>) -> Option<String> {
     match res {
-        Ok(()) => tracing::info!("{name} ended normally"),
-        Err(err) => tracing::error!("{name} error: {err}"),
+        Ok(()) => None,
+        Err(err) => {
+            let msg = format!("{name} error: {err}");
+            eprintln!("bench: repetition {repetition}: {msg}");
+            Some(msg)
+        }
+    }
+}
+
+/// [`loop_failure`] for a loop that was spawned, so a panic or a cancellation
+/// also counts as a failure rather than a clean finish.
+fn join_failure(
+    repetition: u64,
+    name: &str,
+    res: std::result::Result<Result<()>, tokio::task::JoinError>,
+) -> Option<String> {
+    match res {
+        Ok(inner) => loop_failure(repetition, name, inner),
+        Err(join_err) => {
+            let msg = format!("{name} task did not finish cleanly: {join_err}");
+            eprintln!("bench: repetition {repetition}: {msg}");
+            Some(msg)
+        }
     }
 }
 
@@ -688,6 +797,39 @@ mod tests {
             !residual_is_plausible(400.0, 20.0),
             "a residual 20x the RTT means unattributed server time, not network"
         );
+    }
+
+    /// A session loop that ends in error must produce a failure the report
+    /// can render. The bug this pins: the old `pp_err` logged via
+    /// `tracing::error!`, no example here installs a subscriber, so the
+    /// output went nowhere and `run_session` returned `Ok` regardless — a
+    /// dead session was reported as the agent never answering.
+    #[test]
+    fn a_loop_error_becomes_a_failure_naming_the_loop_and_the_cause() {
+        let f = loop_failure(3, "recv_loop", Err(anyhow::anyhow!("Error from server: boom")))
+            .expect("an errored loop must produce a failure");
+        assert!(f.contains("recv_loop"), "must name which loop died: {f}");
+        assert!(f.contains("boom"), "must carry the underlying cause: {f}");
+    }
+
+    #[test]
+    fn a_clean_loop_produces_no_failure() {
+        assert!(
+            loop_failure(0, "send_loop", Ok(())).is_none(),
+            "a clean run must not be flagged incomplete"
+        );
+    }
+
+    /// The receive loop is spawned, so "did not return an error" is not the
+    /// same as "finished": a panic or a cancellation arrives as a `JoinError`
+    /// and must not read as a clean session either.
+    #[tokio::test]
+    async fn a_join_error_counts_as_a_failure_not_a_clean_finish() {
+        let task = tokio::spawn(async { std::future::pending::<Result<()>>().await });
+        task.abort();
+        let f = join_failure(1, "recv_loop", task.await)
+            .expect("a cancelled task must produce a failure");
+        assert!(f.contains("recv_loop"), "got: {f}");
     }
 
     /// `--llm-local` must default to `true` (today's reality: every backend
