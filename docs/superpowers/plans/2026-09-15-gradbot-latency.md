@@ -2488,6 +2488,36 @@ Defaults match the previous hardcoded values exactly; p50 unchanged (n=20)."
 
 ---
 
+### Task 19b: Make the endpointing knobs reachable from the client
+
+**Why this task exists:** Task 18 added `min_listen_before_flush_s` and
+`vad_eot_threshold` to `SessionConfig`, but `src/openai_server.rs` hardcodes
+every endpointing field — including the pre-existing `flush_duration_s` — and
+the client's `session.update` carries only `voice_id`, `instructions` and
+`lang`. The OpenAI-compatible protocol has no endpointing fields at all. So
+Task 20's sweep cannot set the knobs it exists to sweep, on the very server the
+benchmark connects to. This was a plan defect: the sweep was specified without
+checking the sweeper could reach the dials.
+
+**Files:**
+- Modify: `src/openai_protocol.rs` (session-update payload), `src/openai_server.rs:141-156`
+
+**Interfaces:**
+- Produces: optional endpointing fields on the session-update payload —
+  `flush_duration_s`, `min_listen_before_flush_s`, `vad_eot_threshold`,
+  `padding_bonus`, `silence_timeout_s` — each `Option<T>`, each falling back to
+  today's hardcoded default when absent. Task 20 sets them per sweep point.
+
+Follow the pattern `gradbot_server/src/protocol.rs` already uses: `Option<T>`
+wire fields plus a pick-the-override-else-default step. Additive and optional,
+so every existing client keeps working byte-identically — a client that sends
+none of these must get exactly today's behaviour.
+
+Add a test asserting that a session update omitting all five yields the current
+defaults, and one asserting an override is actually applied. The first is the
+one that matters: a regression there would silently change behaviour for every
+existing consumer of this protocol.
+
 ### Task 19: Turn-taking quality metrics
 
 **Files:**
