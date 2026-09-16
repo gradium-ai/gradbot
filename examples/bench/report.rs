@@ -36,6 +36,7 @@
 //! repetition count found in `marks` and fails loudly rather than zipping the
 //! two lists to whichever is shorter.
 
+use super::fixtures::Manifest;
 use super::{ClientMark, MarkKind, Summary, summarize};
 use anyhow::{Context, Result};
 use gradbot::{Phase, TraceRecord};
@@ -301,6 +302,172 @@ pub fn breakdown_all(marks: &[ClientMark], trace_dir: &Path) -> Result<Vec<TurnB
     Ok(out)
 }
 
+/// Turn-taking quality metrics: how often the agent cut the user off, how
+/// long the server took to notice the user was done, and how often it never
+/// noticed at all. These get *worse* as endpointing is tuned more
+/// aggressively, which is why they must be read alongside latency — a lower
+/// `min_listen_before_flush_s` or `vad_eot_threshold` (see `SessionConfig`)
+/// can buy a better `e2e_ms` at the cost of these.
+#[derive(Debug, Clone)]
+pub struct TurnTaking {
+    /// Fraction of manifest turns where the agent's first audio arrived
+    /// before the user's ground-truth speech end — the agent talked over the
+    /// user. A turn with no agent audio at all is excluded here: that is a
+    /// missed endpoint, the opposite failure (see `is_premature_cut`).
+    pub premature_cut_rate: f64,
+    /// `V` (`endpoint.vad_eot`) minus the trace record whose `sample_idx`
+    /// matches each turn's `UserSpeechEnd` mark, summarized across every
+    /// turn with both anchors. `None` when fewer than two turns have a
+    /// measurement — same convention as `summarize`, and for the same
+    /// reason `detection_lag_ms` is `Option`, not a sentinel.
+    pub endpoint_delay_ms: Option<Summary>,
+    /// Fraction of manifest turns with no `FirstAgentAudio` mark at all —
+    /// the agent never answered.
+    pub missed_endpoint_rate: f64,
+}
+
+/// True when the agent's `FirstAgentAudio` mark for `(repetition, turn)`
+/// arrived strictly before the user's `UserSpeechEnd` mark for the same
+/// `(repetition, turn)` — the agent started talking over the user before
+/// they were done. Keyed on `(repetition, turn)`, not `turn` alone: `turn`
+/// resets every repetition (see module docs and `e2e_ms`), so matching on
+/// it alone would silently pick up marks from the wrong session.
+///
+/// A turn with no `FirstAgentAudio` mark at all is a *missed* endpoint, not
+/// a premature cut — the opposite failure mode — so this returns `false`
+/// for it, same as a turn missing its `UserSpeechEnd` mark.
+fn is_premature_cut(marks: &[ClientMark], repetition: u64, turn: u64) -> bool {
+    let user_speech_end = marks.iter().find(|m| {
+        m.repetition == repetition && m.turn == turn && m.kind == MarkKind::UserSpeechEnd
+    });
+    let first_agent_audio = marks.iter().find(|m| {
+        m.repetition == repetition && m.turn == turn && m.kind == MarkKind::FirstAgentAudio
+    });
+    match (user_speech_end, first_agent_audio) {
+        (Some(end), Some(audio)) => audio.t_us < end.t_us,
+        _ => false,
+    }
+}
+
+fn rate(count: u64, total: u64) -> f64 {
+    if total == 0 { 0.0 } else { count as f64 / total as f64 }
+}
+
+/// Raw counts behind [`TurnTaking`], shared by [`turn_taking`] (one
+/// repetition) and [`turn_taking_all`] (pooled across repetitions) so a
+/// multi-repetition run's `endpoint_delay_ms` is one percentile over every
+/// turn's delay, not an average of per-repetition percentiles.
+struct TurnTakingCounts {
+    premature_cuts: u64,
+    missed: u64,
+    total_turns: u64,
+    delays_ms: Vec<f64>,
+}
+
+fn turn_taking_counts(
+    marks: &[ClientMark],
+    trace: &[TraceRecord],
+    manifest: &Manifest,
+) -> TurnTakingCounts {
+    let repetition = marks.first().map(|m| m.repetition).unwrap_or(0);
+    let mut counts = TurnTakingCounts {
+        premature_cuts: 0,
+        missed: 0,
+        total_turns: manifest.turns.len() as u64,
+        delays_ms: Vec::new(),
+    };
+
+    for turn in 0..counts.total_turns {
+        if is_premature_cut(marks, repetition, turn) {
+            counts.premature_cuts += 1;
+        }
+        let has_agent_audio = marks.iter().any(|m| {
+            m.repetition == repetition && m.turn == turn && m.kind == MarkKind::FirstAgentAudio
+        });
+        if !has_agent_audio {
+            counts.missed += 1;
+        }
+        let user_speech_end = marks.iter().find(|m| {
+            m.repetition == repetition && m.turn == turn && m.kind == MarkKind::UserSpeechEnd
+        });
+        if let Some(end) = user_speech_end
+            && let Ok(i) = find_i(trace, end.sample_idx)
+            && let Some(v) = find_v(trace, i.t_us)
+        {
+            counts.delays_ms.push((v.t_us as f64 - i.t_us as f64) / 1000.0);
+        }
+    }
+    counts
+}
+
+/// Turn-taking quality metrics for one repetition's `marks` against its own
+/// `trace` — same single-repetition scoping as [`breakdown`] (see module
+/// docs) — with `manifest` supplying the full set of turns that were
+/// supposed to happen, so a turn with *no* marks at all (not just no
+/// `FirstAgentAudio`) still counts toward `missed_endpoint_rate`.
+pub fn turn_taking(marks: &[ClientMark], trace: &[TraceRecord], manifest: &Manifest) -> TurnTaking {
+    let c = turn_taking_counts(marks, trace, manifest);
+    TurnTaking {
+        premature_cut_rate: rate(c.premature_cuts, c.total_turns),
+        endpoint_delay_ms: summarize(&c.delays_ms),
+        missed_endpoint_rate: rate(c.missed, c.total_turns),
+    }
+}
+
+/// [`turn_taking`], pooled across every repetition, pairing repetition *i*'s
+/// marks with the *i*-th trace file exactly as [`breakdown_all`] does (see
+/// its docs for why a trace-file/repetition count mismatch is fatal rather
+/// than best-effort here too).
+pub fn turn_taking_all(marks: &[ClientMark], trace_dir: &Path, manifest: &Manifest) -> Result<TurnTaking> {
+    let trace_files = discover_trace_files(trace_dir)?;
+    let repetitions: BTreeSet<u64> = marks.iter().map(|m| m.repetition).collect();
+
+    anyhow::ensure!(
+        trace_files.len() == repetitions.len(),
+        "trace-file/repetition count mismatch: found {} trace file(s) in {} but the \
+         marks cover {} repetition(s). Refusing to pair them — see breakdown_all's error \
+         for why a mis-pairing here would silently produce plausible, wrong numbers.",
+        trace_files.len(),
+        trace_dir.display(),
+        repetitions.len(),
+    );
+
+    let mut premature_cuts = 0u64;
+    let mut missed = 0u64;
+    let mut total_turns = 0u64;
+    let mut delays_ms = Vec::new();
+
+    for (repetition, trace_path) in repetitions.into_iter().zip(trace_files.iter()) {
+        let trace = load_trace_file(trace_path)?;
+        let rep_marks: Vec<ClientMark> = marks
+            .iter()
+            .filter(|m| m.repetition == repetition)
+            .cloned()
+            .collect();
+        let rep_total = manifest.turns.len() as u64;
+        // `turn_taking` (rather than reaching for `turn_taking_counts`
+        // directly here) is the per-repetition unit this function pools —
+        // its rates convert back to exact counts since every repetition
+        // shares the same `rep_total` denominator.
+        let rep = turn_taking(&rep_marks, &trace, manifest);
+        premature_cuts += (rep.premature_cut_rate * rep_total as f64).round() as u64;
+        missed += (rep.missed_endpoint_rate * rep_total as f64).round() as u64;
+        total_turns += rep_total;
+        // Percentiles don't compose across repetitions' already-summarized
+        // `Summary`s, so the raw per-turn delays are pooled here, once,
+        // straight from the shared counting helper, and summarized only at
+        // the end — same principle as `render_markdown`'s
+        // `detection_lag_ms` pooling.
+        delays_ms.extend(turn_taking_counts(&rep_marks, &trace, manifest).delays_ms);
+    }
+
+    Ok(TurnTaking {
+        premature_cut_rate: rate(premature_cuts, total_turns),
+        endpoint_delay_ms: summarize(&delays_ms),
+        missed_endpoint_rate: rate(missed, total_turns),
+    })
+}
+
 /// Verbatim note appended to every span attributed to the LLM stage when the
 /// LLM under measurement is co-located with the harness (see `render_markdown`).
 const LLM_MEASURED_LOCAL_NOTE: &str =
@@ -370,6 +537,18 @@ fn render_stage_row(name: &str, values: &[f64]) -> String {
     }
 }
 
+/// Like `render_stage_row`, but for a `Summary` already computed by the
+/// caller (e.g. `TurnTaking::endpoint_delay_ms`) rather than a raw value
+/// slice to re-summarize.
+fn render_summary_row(name: &str, summary: &Option<Summary>) -> String {
+    match summary {
+        Some(Summary { n, p50, p90, p99 }) => {
+            format!("| {name} | n={n} | {p50:.2} | {p90:.2} | {p99:.2} |\n")
+        }
+        None => format!("| {name} | n=0 | (insufficient samples for a percentile) | | |\n"),
+    }
+}
+
 /// Renders the full markdown report, in order: a percentile table (one row
 /// per fixture category, each stating `n=`), one ASCII Gantt per turn, and
 /// the `detection_lag` / `server_internal` / `network` split.
@@ -389,6 +568,7 @@ fn render_stage_row(name: &str, values: &[f64]) -> String {
 pub fn render_markdown(
     breakdowns: &[TurnBreakdown],
     summaries: &BTreeMap<String, Summary>,
+    turn_taking: &TurnTaking,
     llm_local: bool,
 ) -> String {
     let mut out = String::new();
@@ -441,6 +621,28 @@ pub fn render_markdown(
     out.push_str(&render_stage_row("detection_lag", &detection_lag_ms));
     out.push_str(&render_stage_row("server_internal", &server_internal_ms));
     out.push_str(&render_stage_row("network", &network_ms));
+    out.push('\n');
+
+    out.push_str("## Turn-taking quality\n\n");
+    out.push_str(
+        "These get worse as endpointing is tuned more aggressively — read them \
+         alongside the latency numbers above, not instead of them.\n\n",
+    );
+    out.push_str(&format!(
+        "- premature_cut_rate: {:.1}% (agent's first audio arrived before the user \
+         actually finished speaking)\n",
+        turn_taking.premature_cut_rate * 100.0
+    ));
+    out.push_str(&format!(
+        "- missed_endpoint_rate: {:.1}% (agent never answered the turn at all)\n\n",
+        turn_taking.missed_endpoint_rate * 100.0
+    ));
+    out.push_str("| stage | n | p50 | p90 | p99 |\n");
+    out.push_str("| --- | --- | --- | --- | --- |\n");
+    out.push_str(&render_summary_row(
+        "endpoint_delay_ms",
+        &turn_taking.endpoint_delay_ms,
+    ));
 
     out
 }
@@ -458,6 +660,16 @@ mod tests {
             audio_time_s: 0.0,
             sample_idx,
             attrs: serde_json::Map::new(),
+        }
+    }
+
+    /// A `TurnTaking` value for tests that render a report but aren't
+    /// exercising turn-taking metrics themselves.
+    fn no_turn_taking() -> TurnTaking {
+        TurnTaking {
+            premature_cut_rate: 0.0,
+            endpoint_delay_ms: None,
+            missed_endpoint_rate: 0.0,
         }
     }
 
@@ -569,7 +781,7 @@ mod tests {
             network_ms: 100.0,
             spans: vec![("llm.push".to_string(), 10.0, 60.0)],
         };
-        let out = render_markdown(&[b], &BTreeMap::new(), true);
+        let out = render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), true);
         assert!(
             out.contains("measured-local"),
             "a locally-hosted LLM flatters its own stage and must be labelled: {out}"
@@ -588,7 +800,7 @@ mod tests {
             network_ms: 100.0,
             spans: vec![("llm.push".to_string(), 10.0, 60.0)],
         };
-        let out = render_markdown(&[b], &BTreeMap::new(), false);
+        let out = render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), false);
         assert!(!out.contains("measured-local"), "got: {out}");
     }
 
@@ -599,7 +811,7 @@ mod tests {
             "short_answer".to_string(),
             Summary { n: 20, p50: 800.0, p90: 950.0, p99: 1100.0 },
         );
-        let out = render_markdown(&[], &summaries, false);
+        let out = render_markdown(&[], &summaries, &no_turn_taking(), false);
         assert!(out.contains("n=20"), "every aggregate must state its n: {out}");
     }
 
@@ -626,7 +838,7 @@ mod tests {
             network_ms: 100.0,
             spans: vec![],
         };
-        let out = render_markdown(&[with_lag, without_lag], &BTreeMap::new(), false);
+        let out = render_markdown(&[with_lag, without_lag], &BTreeMap::new(), &no_turn_taking(), false);
         assert!(
             out.contains("1 of 2 turn(s) had no detection-lag measurement"),
             "the omission must be stated explicitly, not hidden: {out}"
@@ -746,5 +958,127 @@ mod tests {
         assert_eq!(breakdowns[1].server_internal_ms, 800.0, "repetition 0 must pair with its own (earlier) trace file");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // --- Task 19: turn-taking quality metrics ---
+
+    fn manifest_with_turns(n: usize) -> Manifest {
+        Manifest {
+            name: "test".to_string(),
+            turns: (0..n)
+                .map(|i| crate::fixtures::FixtureTurn {
+                    wav: PathBuf::from(format!("turn{i}.wav")),
+                    speech_start_sample: 0,
+                    speech_end_sample: 24_000,
+                    gap_after_s: 3.0,
+                    category: "short_answer".to_string(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Brief's Step 1 test, adapted: `ClientMark` requires `repetition` (it
+    /// has no `Default`), and `is_premature_cut` keys on `(repetition,
+    /// turn)`, not `turn` alone (see its doc comment), so it takes
+    /// `repetition` as an explicit third argument rather than the brief's
+    /// literal 2-arg call.
+    #[test]
+    fn agent_audio_before_ground_truth_speech_end_is_a_premature_cut() {
+        // The agent answered 100ms before the user had finished speaking.
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 1_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 900_000, sample_idx: 0 },
+        ];
+        assert!(is_premature_cut(&marks, 0, 0));
+    }
+
+    #[test]
+    fn answering_after_speech_end_is_not_a_cut() {
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 1_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 1_800_000, sample_idx: 0 },
+        ];
+        assert!(!is_premature_cut(&marks, 0, 0));
+    }
+
+    #[test]
+    fn a_turn_with_no_agent_audio_is_a_missed_endpoint_not_a_cut() {
+        let marks = vec![ClientMark {
+            repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 1_000_000, sample_idx: 24_000,
+        }];
+        assert!(!is_premature_cut(&marks, 0, 0));
+    }
+
+    /// The exact bug this codebase already caught once (see `e2e_ms`):
+    /// `turn` resets every repetition, so a premature cut in repetition 0's
+    /// turn 0 must not bleed into repetition 1's turn 0, which answered
+    /// late.
+    #[test]
+    fn is_premature_cut_keys_on_repetition_and_turn_not_turn_alone() {
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 1_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 900_000, sample_idx: 0 },
+            ClientMark { repetition: 1, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 1_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 1, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 1_800_000, sample_idx: 0 },
+        ];
+        assert!(is_premature_cut(&marks, 0, 0), "repetition 0 was a premature cut");
+        assert!(!is_premature_cut(&marks, 1, 0), "repetition 1 answered on time");
+    }
+
+    /// A turn with no marks at all (not even `UserSpeechEnd` — e.g. the
+    /// session dropped before the turn played) must still count toward
+    /// `missed_endpoint_rate`'s denominator via `manifest`, not just be
+    /// invisible because no mark ever named it.
+    #[test]
+    fn missed_endpoint_rate_counts_turns_absent_from_marks_entirely() {
+        let manifest = manifest_with_turns(2);
+        // Only turn 0 has any marks; turn 1 never appears anywhere.
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 1_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 1_800_000, sample_idx: 0 },
+        ];
+        let tt = turn_taking(&marks, &[], &manifest);
+        assert_eq!(tt.missed_endpoint_rate, 0.5, "1 of 2 manifest turns has no FirstAgentAudio mark");
+        assert_eq!(tt.premature_cut_rate, 0.0);
+    }
+
+    /// `endpoint_delay_ms` (`V - I`, anchored on the `UserSpeechEnd` mark's
+    /// sample index) does not require agent audio to exist at all — unlike
+    /// `breakdown`, which fails the whole turn without an `O` anchor. A
+    /// turn that missed its endpoint entirely can still tell us how late
+    /// detection was.
+    #[test]
+    fn endpoint_delay_ms_is_measured_even_when_the_endpoint_was_missed() {
+        // Two turns, neither ever answered, so `summarize` (which needs
+        // n>=2) has enough delay samples to produce a `Summary`.
+        let manifest = manifest_with_turns(2);
+        let trace = vec![
+            rec(500_000, 1, "audio_in.frame", Phase::Point, 24_000), // turn 0's I
+            rec(560_000, 1, "endpoint.vad_eot", Phase::Point, 25_920), // turn 0's V (delay 60ms)
+            rec(1_000_000, 2, "audio_in.frame", Phase::Point, 48_000), // turn 1's I
+            rec(1_100_000, 2, "endpoint.vad_eot", Phase::Point, 49_920), // turn 1's V (delay 100ms)
+        ];
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 9_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 1, kind: MarkKind::UserSpeechEnd, t_us: 19_000_000, sample_idx: 48_000 },
+        ];
+        let tt = turn_taking(&marks, &trace, &manifest);
+        assert_eq!(tt.missed_endpoint_rate, 1.0, "neither turn ever got a FirstAgentAudio mark");
+        let delay = tt.endpoint_delay_ms.expect("n=2 delay samples is enough for a Summary");
+        assert_eq!(delay.n, 2);
+    }
+
+    #[test]
+    fn render_markdown_surfaces_all_three_turn_taking_metrics() {
+        let tt = TurnTaking {
+            premature_cut_rate: 0.25,
+            endpoint_delay_ms: Some(Summary { n: 4, p50: 60.0, p90: 90.0, p99: 99.0 }),
+            missed_endpoint_rate: 0.1,
+        };
+        let out = render_markdown(&[], &BTreeMap::new(), &tt, false);
+        assert!(out.contains("25.0%"), "premature_cut_rate must be surfaced: {out}");
+        assert!(out.contains("10.0%"), "missed_endpoint_rate must be surfaced: {out}");
+        assert!(out.contains("endpoint_delay_ms"), "endpoint_delay_ms must be surfaced: {out}");
+        assert!(out.contains("60.00"), "endpoint_delay_ms's p50 must be surfaced: {out}");
     }
 }

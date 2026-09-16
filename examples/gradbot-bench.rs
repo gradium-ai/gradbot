@@ -508,11 +508,17 @@ async fn main() -> Result<()> {
             .as_ref()
             .context("--out-report requires --trace-dir (where the server wrote its trace files)")?;
         let breakdowns = report::breakdown_all(&all_marks, trace_dir)?;
+        let turn_taking = report::turn_taking_all(&all_marks, trace_dir, &manifest)?;
         // `--llm-local` is an operator statement, not a guess: the harness
         // has no way to detect whether the server's LLM is co-located (see
         // Args::llm_local's help text), and a wrong auto-detected label
         // would be worse than none.
-        let markdown = report::render_markdown(&breakdowns, &category_summaries, args.llm_local);
+        let markdown = report::render_markdown(
+            &breakdowns,
+            &category_summaries,
+            &turn_taking,
+            args.llm_local,
+        );
         std::fs::write(out_report, &markdown)
             .with_context(|| format!("writing report to {}", out_report.display()))?;
         println!("Report written to {}", out_report.display());
