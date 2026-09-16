@@ -1,6 +1,6 @@
 use crate::speech_to_text::{SttClient, SttStreamReceiver, SttStreamSender};
 use crate::text_to_speech::{TtsClient, TtsOut};
-use crate::trace::Tracer;
+use crate::trace::{AUDIO_TIME_NOT_APPLICABLE, Tracer};
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -16,6 +16,23 @@ pub const DEFAULT_MIN_LISTEN_BEFORE_FLUSH_S: f64 = 0.5;
 /// for the same reason as `DEFAULT_MIN_LISTEN_BEFORE_FLUSH_S`.
 pub const DEFAULT_VAD_EOT_THRESHOLD: f64 = 0.8;
 const INPUT_SAMPLE_RATE: usize = 24000;
+
+/// Puts a TTS stream's turn-relative timestamp onto the session audio clock.
+///
+/// The TTS backend reports `start_s`/`stop_s` relative to the start of the
+/// synthesis stream it opened for *this* turn, so those values restart near
+/// zero on every turn. `turn_start_time_s` is the session audio clock reading
+/// taken when the turn's `llm_tts` was entered; adding it is what makes two
+/// turns' TTS timestamps comparable — and what makes the `out.encode` /
+/// `out.first_audio` trace records session-relative, since they record the
+/// composed value (see `TraceRecord::audio_time_s`).
+///
+/// Named rather than inlined so the composition happens in exactly one place:
+/// applying it twice is as wrong as not applying it at all, and neither shows
+/// up as anything but plausible numbers.
+fn session_audio_time_s(turn_start_time_s: f64, tts_relative_s: f64) -> f64 {
+    turn_start_time_s + tts_relative_s
+}
 
 /// Minimum time an unanswered tool call may be outstanding before we inject a
 /// `PENDING` placeholder result and let the model speak a holding phrase while
@@ -568,16 +585,34 @@ impl Session {
                 let tts_model_name = std::env::var("GRADIUM_TTS_MODEL_NAME").ok();
                 // Finding A: a fresh, unpooled WebSocket handshake to prod on
                 // every turn, serialized behind the LLM request.
-                llm_tracer.begin(turn_idx, "tts.connect", 0.0, 0, serde_json::Map::new());
+                llm_tracer.begin(
+                    turn_idx,
+                    "tts.connect",
+                    AUDIO_TIME_NOT_APPLICABLE,
+                    0,
+                    serde_json::Map::new(),
+                );
                 let tts_result = tts_client
                     .tts_stream(tts_model_name, voice_id.clone(), padding_bonus, rewrite_rules.clone(), tts_extra_config.as_deref())
                     .await;
                 match &tts_result {
-                    Ok(_) => llm_tracer.end(turn_idx, "tts.connect", 0.0, 0, serde_json::Map::new()),
+                    Ok(_) => llm_tracer.end(
+                        turn_idx,
+                        "tts.connect",
+                        AUDIO_TIME_NOT_APPLICABLE,
+                        0,
+                        serde_json::Map::new(),
+                    ),
                     Err(_) => {
                         let mut attrs = serde_json::Map::new();
                         attrs.insert("error".to_string(), serde_json::json!(true));
-                        llm_tracer.end(turn_idx, "tts.connect", 0.0, 0, attrs);
+                        llm_tracer.end(
+                            turn_idx,
+                            "tts.connect",
+                            AUDIO_TIME_NOT_APPLICABLE,
+                            0,
+                            attrs,
+                        );
                     }
                 }
                 let (mut tts_tx, tts_rx) = tts_result.context("TTS: failed to create stream")?;
@@ -650,7 +685,13 @@ impl Session {
                                             "ttft_from_headers_ms".to_string(),
                                             serde_json::json!(ttft_ms),
                                         );
-                                        llm_tracer.point(turn_idx, "llm.ttft", 0.0, 0, attrs);
+                                        llm_tracer.point(
+                                            turn_idx,
+                                            "llm.ttft",
+                                            AUDIO_TIME_NOT_APPLICABLE,
+                                            0,
+                                            attrs,
+                                        );
                                         let time_s = stt_sender.current_time_s().await;
                                         msg_out_tx
                                             .send(MsgOut::Event { time_s, event: Event::FirstWord })
@@ -671,7 +712,7 @@ impl Session {
                                                 llm_to_tts_tracer.point(
                                                     turn_idx,
                                                     "tts.first_text",
-                                                    0.0,
+                                                    AUDIO_TIME_NOT_APPLICABLE,
                                                     0,
                                                     serde_json::Map::new(),
                                                 );
@@ -700,7 +741,7 @@ impl Session {
                                                 llm_to_tts_tracer.point(
                                                     turn_idx,
                                                     "tts.first_text",
-                                                    0.0,
+                                                    AUDIO_TIME_NOT_APPLICABLE,
                                                     0,
                                                     serde_json::Map::new(),
                                                 );
@@ -745,7 +786,13 @@ impl Session {
                         );
                         let mut attrs = serde_json::Map::new();
                         attrs.insert("total_ms".to_string(), serde_json::json!(llm_total_ms));
-                        llm_tracer.point(turn_idx, "llm.complete", 0.0, 0, attrs);
+                        llm_tracer.point(
+                            turn_idx,
+                            "llm.complete",
+                            AUDIO_TIME_NOT_APPLICABLE,
+                            0,
+                            attrs,
+                        );
                         tts_tx.send_end_of_stream().await?;
                         Ok::<(), anyhow::Error>(())
                     }
@@ -791,7 +838,7 @@ impl Session {
                                         tts_to_client_tracer.point(
                                             turn_idx,
                                             "tts.first_audio",
-                                            0.0,
+                                            AUDIO_TIME_NOT_APPLICABLE,
                                             0,
                                             serde_json::Map::new(),
                                         );
@@ -804,7 +851,7 @@ impl Session {
                                             .await?;
                                         first_audio = false;
                                     }
-                                    let adjusted_stop_s = start_time + stop_s;
+                                    let adjusted_stop_s = session_audio_time_s(start_time, stop_s);
                                     last_stop_s.store(adjusted_stop_s.to_bits(), Ordering::Release);
 
                                     // Check text queue BEFORE sending audio so we know if
@@ -825,11 +872,20 @@ impl Session {
                                     // Also check for user interruption
                                     done = done || user_interrupted.load(Ordering::Acquire);
 
-                                    // Send audio — marked interrupted if this is the last packet
+                                    // Send audio — marked interrupted if this is the last packet.
+                                    // `session_audio_time_s` is where the TTS
+                                    // stream's turn-relative clock is put onto
+                                    // the session audio clock, once, for every
+                                    // consumer downstream — including the
+                                    // `out.encode` / `out.first_audio` trace
+                                    // points, which record this field verbatim
+                                    // (see `TraceRecord::audio_time_s`). Drop
+                                    // the offset here and every `out.*` record
+                                    // silently restarts near 0 each turn.
                                     tts_out_tx
                                         .send(Ok(TtsOut::Audio {
                                             pcm,
-                                            start_s: start_time + start_s,
+                                            start_s: session_audio_time_s(start_time, start_s),
                                             stop_s: adjusted_stop_s,
                                             turn_idx,
                                             interrupted: done,
@@ -850,8 +906,8 @@ impl Session {
                                     // It will be sent after corresponding audio is sent
                                     text_queue.push_back(TtsOut::Text {
                                         text,
-                                        start_s: start_time + start_s,
-                                        stop_s: start_time + stop_s,
+                                        start_s: session_audio_time_s(start_time, start_s),
+                                        stop_s: session_audio_time_s(start_time, stop_s),
                                         turn_idx,
                                     });
                                 }
@@ -1624,12 +1680,20 @@ async fn run(
                         );
                         // Finding E: Opus buffers until a full page, so empty
                         // results here are the 80ms output quantization.
+                        //
+                        // `start_s` is already on the session audio clock: the
+                        // turn's `start_time` was added where this `TtsOut`
+                        // was forwarded (see `tts_to_client`). Adding it again
+                        // here would double-count it — the raw TTS value never
+                        // reaches this loop.
                         out_tracer.point(turn_idx, "out.encode", start_s, 0, attrs);
                         if !encoded.data.is_empty() {
                             if first_audio_turn != Some(turn_idx) {
                                 // Supplies `O`. Deliberately after the
                                 // is_empty check so Opus header packets, which
                                 // carry no audio, never set the anchor.
+                                // `start_s` is session-clock here, same as for
+                                // `out.encode` above.
                                 out_tracer.point(
                                     turn_idx,
                                     "out.first_audio",
@@ -1947,13 +2011,21 @@ mod trace_tests {
     async fn out_first_audio_fires_once_per_turn_and_never_for_empty_encodes() {
         let (tracer, collector) = Tracer::in_memory();
         // Simulate: a header (0 bytes of real audio) then two real packets.
-        for (turn, bytes_out, is_first_real) in [(1usize, 0usize, false), (1, 240, true), (1, 240, false)] {
+        // `audio_time_s` mirrors the producer: the turn's session-clock
+        // `start_time` plus the TTS stream's turn-relative offset.
+        let turn_start_s = 4.0;
+        for (turn, bytes_out, is_first_real, tts_rel_s) in [
+            (1usize, 0usize, false, 0.0f64),
+            (1, 240, true, 0.0),
+            (1, 240, false, 0.08),
+        ] {
+            let at_s = crate::multiplex::session_audio_time_s(turn_start_s, tts_rel_s);
             let mut attrs = serde_json::Map::new();
             attrs.insert("pcm_in".to_string(), serde_json::json!(3840));
             attrs.insert("bytes_out".to_string(), serde_json::json!(bytes_out));
-            tracer.point(turn as u64, "out.encode", 0.0, 0, attrs);
+            tracer.point(turn as u64, "out.encode", at_s, 0, attrs);
             if is_first_real {
-                tracer.point(turn as u64, "out.first_audio", 0.0, 0, serde_json::Map::new());
+                tracer.point(turn as u64, "out.first_audio", at_s, 0, serde_json::Map::new());
             }
         }
         drop(tracer);
@@ -1961,7 +2033,35 @@ mod trace_tests {
         let recs = collector.records().await;
         let firsts: Vec<_> = recs.iter().filter(|r| r.span == "out.first_audio").collect();
         assert_eq!(firsts.len(), 1, "out.first_audio must fire exactly once per turn");
+        assert_eq!(
+            firsts[0].audio_time_s, 4.0,
+            "out.* must carry the session audio clock, not the TTS stream's \
+             turn-relative 0.0"
+        );
         assert_well_formed(&recs);
+    }
+
+    /// `TraceRecord::audio_time_s` exists to be subtracted across records, and
+    /// the TTS backend's own clock restarts near zero on every turn. If the
+    /// turn's `start_time` were dropped (or added twice) at the one place the
+    /// two are composed, every `out.*` record would still look like a
+    /// plausible number of seconds — nothing downstream can detect it. Pin the
+    /// composition itself.
+    #[test]
+    fn tts_timestamps_are_anchored_to_the_turn_not_restarted_each_turn() {
+        use crate::multiplex::session_audio_time_s as at;
+        // Session start: the turn offset is zero, so the raw value passes through.
+        assert_eq!(at(0.0, 0.08), 0.08);
+        // A turn that began 12.5s into the session.
+        assert_eq!(at(12.5, 0.0), 12.5);
+        assert!((at(12.5, 0.08) - 12.58).abs() < 1e-9);
+        // The property that matters: a later turn's *first* TTS packet must
+        // land after an earlier turn's *last* one, even though both carry a
+        // turn-relative `start_s` that says otherwise (0.0 vs 1.9).
+        assert!(
+            at(12.5, 0.0) > at(4.0, 1.9),
+            "turn-relative TTS timestamps must not be comparable across turns"
+        );
     }
 
     #[test]

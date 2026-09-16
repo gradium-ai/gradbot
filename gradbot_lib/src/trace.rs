@@ -5,6 +5,14 @@
 //! side channel (a JSONL file), never to the client WebSocket — shipping them
 //! in-band would add traffic to the exact path being measured.
 
+/// Value to pass for [`TraceRecord::audio_time_s`] when a span marks a point
+/// in the processing pipeline with no position in the audio stream — a TTS
+/// handshake, a first LLM token. It is `0.0` on the wire (the field is a
+/// plain `f64` and stays one), but writing the name at the call site keeps
+/// "not applicable" distinguishable from "second zero" for anyone reading the
+/// producer rather than the record.
+pub const AUDIO_TIME_NOT_APPLICABLE: f64 = 0.0;
+
 /// Which edge of a span a record marks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -25,8 +33,43 @@ pub struct TraceRecord {
     pub turn: u64,
     pub span: String,
     pub phase: Phase,
-    /// The existing sample-count clock, recorded alongside wall time so the
-    /// drift documented at `multiplex.rs:947` becomes a measured quantity.
+    /// Position on the **session audio clock**, in seconds: zero at the start
+    /// of the session, monotonically non-decreasing, never reset by a turn
+    /// change, an interruption or an STT reconnect. Recorded alongside `t_us`
+    /// (wall time) so the drift between the two becomes a measured quantity
+    /// rather than an assumption.
+    ///
+    /// The contract is *one clock, three routes onto it* — subtracting two
+    /// records' `audio_time_s` is only meaningful because all three land in
+    /// the same timeline:
+    ///
+    /// - **Sample count** (`audio_in.frame`, `llm.push`): `samples_sent /
+    ///   INPUT_SAMPLE_RATE`, i.e. `Session::audio_time_s`. This is the
+    ///   reference clock; the other two are anchored to it.
+    /// - **STT-reported time** (`stt.text`, `endpoint.flush`,
+    ///   `endpoint.vad_eot`): the STT stream's own timestamp, already
+    ///   converted by `Session::stt_to_session_time` (STT restarts at 0 on
+    ///   every reconnect, so the raw value must never be recorded here). Its
+    ///   *precision* differs from the sample count — that difference is the
+    ///   drift this field exists to expose — but its *origin* is the same.
+    /// - **TTS-reported time** (`out.encode`, `out.first_audio`): the turn's
+    ///   `start_time` (itself a sample-count reading, taken when `llm_tts`
+    ///   was entered) plus the TTS stream's turn-relative `start_s`. The sum
+    ///   is composed once, where `TtsOut::Audio` is forwarded out of
+    ///   `tts_to_client`; by the time the out-send loop traces it, the value
+    ///   is already session-relative. **Do not add `start_time` again there**
+    ///   — the raw TTS value restarts near 0 every turn, but what reaches the
+    ///   tracer is not the raw value.
+    ///
+    /// A literal `0.0` means **not applicable**, not "second zero": some
+    /// spans (`tts.connect`, `tts.first_text`, `tts.first_audio`,
+    /// `llm.ttft`, `llm.complete`) mark a point in the *processing* pipeline
+    /// that has no position in the audio stream at all. Those sites pass
+    /// [`AUDIO_TIME_NOT_APPLICABLE`] rather than a bare literal so the
+    /// distinction survives a reader who only sees the call. A consumer that
+    /// subtracts `audio_time_s` must therefore skip those spans; it cannot
+    /// tell them apart from a genuine session start, which is exactly why
+    /// they are enumerated here.
     pub audio_time_s: f64,
     /// Cumulative input sample index — the join key against the benchmark
     /// client, which counts the same samples.
