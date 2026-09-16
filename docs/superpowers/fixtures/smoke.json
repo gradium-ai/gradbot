@@ -2,11 +2,11 @@
   "name": "smoke",
   "turns": [
     {
-      "wav": "/data/home/neil/datasets/gradbot-bench/short_yes.wav",
+      "wav": "/data/home/neil/datasets/gradbot-bench/short_utterance.wav",
       "speech_start_sample": 0,
-      "speech_end_sample": 12000,
-      "gap_after_s": 4.0,
-      "category": "short_answer"
+      "speech_end_sample": 142800,
+      "gap_after_s": 8.0,
+      "category": "smoke_real_speech"
     }
   ]
 }
