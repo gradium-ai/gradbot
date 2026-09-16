@@ -32,12 +32,19 @@
 //! `category` and reduced with `summarize`, which refuses to report a
 //! summary for fewer than two samples.
 //!
-//! A WebSocket RTT probe (`probe_rtt_ms`) runs once per invocation, before any
-//! fixture traffic, on its own short-lived connection so it never competes
-//! with the traffic being measured. It exists to sanity-check `network_ms`
-//! (Task 13), a residual computed as end-to-end minus everything the server
-//! can account for — trustworthy only if it lands near an independently
-//! measured transport cost (`residual_is_plausible`).
+//! A WebSocket RTT probe (`probe_rtt_ms`) runs once per invocation, on
+//! **repetition 0's own connection**, after the handshake but before that
+//! repetition's playback begins — so it still never competes with the traffic
+//! being measured, and still costs nothing in later repetitions. It must not
+//! run on a throwaway connection of its own: the server creates a tracer, and
+//! therefore a `trace_*.jsonl` file, per accepted connection, so a probe
+//! connection leaves an empty trace file that sorts *first* by timestamp.
+//! `breakdown_all` would then pair repetition *i* with repetition *i-1*'s
+//! trace — which is exactly why it refuses to run at all when the trace-file
+//! count does not match the repetition count. The probe exists to
+//! sanity-check `network_ms` (Task 13), a residual computed as end-to-end
+//! minus everything the server can account for — trustworthy only if it lands
+//! near an independently measured transport cost (`residual_is_plausible`).
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -200,6 +207,10 @@ pub fn residual_is_plausible(network_ms: f64, rtt_p50_ms: f64) -> bool {
 /// "simplify" the loop back to the brief's original unbounded sketch.
 const RTT_PING_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Number of ping/pong exchanges the RTT probe attempts. `summarize` refuses
+/// fewer than two samples, so this is sized to survive a handful of misses.
+const RTT_PROBE_PINGS: usize = 20;
+
 /// Waits for the pong matching an already-sent ping, draining and discarding
 /// any other frames that interleave. Factored out of `probe_rtt_ms` so the
 /// timeout in that function wraps a single, ordinary future.
@@ -213,8 +224,12 @@ async fn wait_for_pong(ws: &mut WebSocket) -> Result<()> {
 }
 
 /// Measures WebSocket round-trip time with up to `n` ping/pong exchanges. Run
-/// once per invocation, before fixture playback begins, so it never competes
-/// with the traffic being measured. A ping that does not get a pong back
+/// once per invocation, on repetition 0's connection before its fixture
+/// playback begins, so it never competes with the traffic being measured and
+/// never opens a connection of its own (see the module docs: an extra
+/// connection means an extra server-side trace file). Draining non-pong
+/// frames while waiting is safe here only because the server sends nothing
+/// before it receives audio. A ping that does not get a pong back
 /// within `RTT_PING_TIMEOUT` is skipped rather than treated as fatal; only
 /// ending up with fewer than two samples overall is an error, since a
 /// transport this harness cannot characterize must fail loudly rather than
@@ -282,8 +297,19 @@ struct Args {
 /// once-per-run RTT probe, for `--out-marks`.
 #[derive(Debug, Clone, serde::Serialize)]
 struct BenchOutput {
-    rtt_probe_ms: Summary,
+    /// `None` only when no repetition ran at all (`--repetitions 0`): the
+    /// probe rides on repetition 0's connection, and a probe that cannot
+    /// collect two samples is fatal rather than absent.
+    rtt_probe_ms: Option<Summary>,
     marks: Vec<ClientMark>,
+}
+
+/// Everything one `run_session` call produced.
+struct SessionOutcome {
+    marks: Vec<ClientMark>,
+    /// `Some` only for the repetition that was asked to probe (see
+    /// `run_session`'s `rtt_probe_pings`).
+    rtt_probe_ms: Option<Summary>,
 }
 
 /// Streams one full pass of `manifest` over a **fresh** connection and
@@ -297,8 +323,26 @@ struct BenchOutput {
 /// reusing a session across repetitions would let state from earlier turns
 /// bleed into later ones, and running two sessions at once would contend for
 /// the same backends and confound the very numbers being measured.
-async fn run_session(url: &str, manifest: &Manifest, repetition: u64) -> Result<Vec<ClientMark>> {
-    let connection = Connection::new(url).await?;
+///
+/// When `rtt_probe_pings` is `Some(n)`, the transport RTT probe runs on *this*
+/// connection, after the handshake and before any fixture audio is written.
+/// It deliberately does not get a connection of its own: the server creates a
+/// tracer — and eagerly creates its `trace_*.jsonl` file — per accepted
+/// connection, so a throwaway probe connection would leave an extra, empty
+/// trace file that sorts first by timestamp and breaks the strict
+/// trace-file-count-equals-repetition-count invariant `breakdown_all` relies
+/// on. Running before playback keeps the probe off the measured path.
+async fn run_session(
+    url: &str,
+    manifest: &Manifest,
+    repetition: u64,
+    rtt_probe_pings: Option<usize>,
+) -> Result<SessionOutcome> {
+    let mut connection = Connection::new(url).await?;
+    let rtt_probe_ms = match rtt_probe_pings {
+        Some(n) => Some(probe_rtt_ms(&mut connection.ws, n).await?),
+        None => None,
+    };
     let (mut sender, mut receiver) = connection.split();
 
     // One origin per session; every mark is stamped from it.
@@ -446,7 +490,10 @@ async fn run_session(url: &str, manifest: &Manifest, repetition: u64) -> Result<
     }
 
     let marks = marks.lock().unwrap().clone();
-    Ok(marks)
+    Ok(SessionOutcome {
+        marks,
+        rtt_probe_ms,
+    })
 }
 
 #[tokio::main]
@@ -454,16 +501,12 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let manifest = Manifest::load(&args.manifest)?;
 
-    // Measure transport RTT once, before any fixture traffic, on its own
-    // short-lived connection — dropped before the first repetition's session
-    // opens — so the probe can never compete with the traffic being measured.
-    let mut probe_conn = Connection::new(&args.url).await?;
-    let rtt_probe_ms = probe_rtt_ms(&mut probe_conn.ws, 20).await?;
-    println!(
-        "RTT probe (n={}): p50={:.2}ms p90={:.2}ms p99={:.2}ms",
-        rtt_probe_ms.n, rtt_probe_ms.p50, rtt_probe_ms.p90, rtt_probe_ms.p99
-    );
-    drop(probe_conn);
+    // Transport RTT is measured once, on repetition 0's own connection before
+    // its playback starts. Not on a connection of its own: the server writes
+    // one trace file per accepted connection, so a throwaway probe connection
+    // would leave an N+1st (empty, earliest) trace file and make every
+    // `--out-report` run abort on the trace-file/repetition count check.
+    let mut rtt_probe_ms: Option<Summary> = None;
 
     let mut all_marks: Vec<ClientMark> = Vec::new();
     // e2e_ms pooled by fixture category across every repetition.
@@ -476,7 +519,20 @@ async fn main() -> Result<()> {
             args.repetitions,
             args.url
         );
-        let marks = run_session(&args.url, &manifest, rep as u64).await?;
+        let probe_pings = if rep == 0 {
+            Some(RTT_PROBE_PINGS)
+        } else {
+            None
+        };
+        let outcome = run_session(&args.url, &manifest, rep as u64, probe_pings).await?;
+        let marks = outcome.marks;
+        if let Some(rtt) = outcome.rtt_probe_ms {
+            println!(
+                "RTT probe (n={}): p50={:.2}ms p90={:.2}ms p99={:.2}ms",
+                rtt.n, rtt.p50, rtt.p90, rtt.p99
+            );
+            rtt_probe_ms = Some(rtt);
+        }
         for (idx, fturn) in manifest.turns.iter().enumerate() {
             if let Some(ms) = e2e_ms(&marks, rep as u64, idx as u64) {
                 by_category.entry(fturn.category.clone()).or_default().push(ms);
