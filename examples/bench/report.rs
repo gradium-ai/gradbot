@@ -95,6 +95,52 @@ pub struct TurnBreakdown {
     pub spans: Vec<(String, f64, f64)>,
 }
 
+/// One turn that could not be decomposed at all, and why.
+///
+/// Recorded rather than propagated: a turn is unmeasurable for reasons local
+/// to that turn (most often a premature cut, where the server endpointed
+/// before the client's marked speech end and the turn's own `O` therefore
+/// falls outside the window — see `next_turn_ceiling_t_us`). Aborting the
+/// whole report for one such turn throws away every other turn in the run and
+/// makes the endpointing sweep impossible: the sweep drives
+/// `flush_duration_s` / `min_listen_before_flush_s` down *until* premature
+/// cuts appear, so every sweep point aggressive enough to be interesting
+/// would produce no output at all — and the Pareto operating point sits
+/// exactly in that region.
+///
+/// The correctness rule is unchanged: an unmeasurable turn still contributes
+/// **no number anywhere**. Only the blast radius shrank, from the whole report
+/// to the single turn.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TurnFailure {
+    /// Which repetition's session this turn belongs to.
+    pub repetition: u64,
+    /// The client's per-repetition turn index — see [`ClientMark::turn`].
+    pub turn: u64,
+    /// The full error chain from [`breakdown`], rendered with `{:#}`.
+    pub reason: String,
+}
+
+/// Everything [`breakdown_all`] produced: the turns that decomposed cleanly,
+/// and the ones that could not be measured.
+///
+/// Both halves travel together on purpose. A caller handed only `measured`
+/// cannot tell 19-of-20 from 20-of-20, and every aggregate the report draws
+/// from `measured` has to be able to state what it excluded.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Breakdowns {
+    pub measured: Vec<TurnBreakdown>,
+    pub unmeasurable: Vec<TurnFailure>,
+}
+
+impl Breakdowns {
+    /// Turns attempted: measured plus unmeasurable. The denominator every
+    /// aggregate over `measured` must state itself against.
+    pub fn attempted(&self) -> usize {
+        self.measured.len() + self.unmeasurable.len()
+    }
+}
+
 /// Finds the client's `kind` mark for `turn`, or errors naming what's missing.
 fn client_mark(marks: &[ClientMark], turn: u64, kind: MarkKind) -> Result<&ClientMark> {
     marks
@@ -346,7 +392,14 @@ pub fn load_trace_file(path: &Path) -> Result<Vec<TraceRecord>> {
 /// plausible anchors and return confident, wrong numbers. A count mismatch is
 /// the only signal available before that damage is done, so it is treated as
 /// fatal rather than best-effort.
-pub fn breakdown_all(marks: &[ClientMark], trace_dir: &Path) -> Result<Vec<TurnBreakdown>> {
+///
+/// A *per-turn* failure is a different animal and is **not** fatal: it is
+/// recorded in [`Breakdowns::unmeasurable`] and the remaining turns are
+/// returned normally (see [`TurnFailure`] for why one cut turn must not cost
+/// a 20-repetition run its other 19). The distinction is deliberate — a
+/// count mismatch is a whole-run configuration error that makes every number
+/// suspect; one turn being cut makes exactly that turn's numbers absent.
+pub fn breakdown_all(marks: &[ClientMark], trace_dir: &Path) -> Result<Breakdowns> {
     let trace_files = discover_trace_files(trace_dir)?;
     let repetitions: BTreeSet<u64> = marks.iter().map(|m| m.repetition).collect();
 
@@ -363,8 +416,10 @@ pub fn breakdown_all(marks: &[ClientMark], trace_dir: &Path) -> Result<Vec<TurnB
         repetitions.len(),
     );
 
-    let mut out = Vec::new();
+    let mut out = Breakdowns::default();
     for (repetition, trace_path) in repetitions.into_iter().zip(trace_files.iter()) {
+        // A trace file that will not load is a whole-run problem (wrong
+        // --trace-dir, a truncated write), not one turn's: still fatal.
         let trace = load_trace_file(trace_path)?;
         let rep_marks: Vec<ClientMark> = marks
             .iter()
@@ -373,9 +428,20 @@ pub fn breakdown_all(marks: &[ClientMark], trace_dir: &Path) -> Result<Vec<TurnB
             .collect();
         let turns: BTreeSet<u64> = rep_marks.iter().map(|m| m.turn).collect();
         for turn in turns {
-            out.push(breakdown(&rep_marks, &trace, turn).with_context(|| {
-                format!("repetition {repetition} (trace file {}), turn {turn}", trace_path.display())
-            })?);
+            let attempt = breakdown(&rep_marks, &trace, turn).with_context(|| {
+                format!("trace file {}", trace_path.display())
+            });
+            match attempt {
+                Ok(b) => out.measured.push(b),
+                // `{:#}` keeps the whole chain — which anchor was missing and
+                // the window it was missing from, not just the outermost
+                // sentence.
+                Err(err) => out.unmeasurable.push(TurnFailure {
+                    repetition,
+                    turn,
+                    reason: format!("{err:#}"),
+                }),
+            }
         }
     }
     Ok(out)
@@ -692,6 +758,48 @@ fn render_run_failures(run_failures: &[RunFailure]) -> String {
     out
 }
 
+/// States how many turns this report's numbers actually cover, and names
+/// every turn that could not be measured along with why.
+///
+/// Rendered before any number and unconditionally: 19-of-20 must never be
+/// readable as 20-of-20, and a section that only appears on failure leaves a
+/// reader unable to tell "all turns measured" from "coverage not reported".
+fn render_coverage(b: &Breakdowns) -> String {
+    let mut out = String::new();
+    out.push_str("## Turn measurement coverage\n\n");
+    if b.unmeasurable.is_empty() {
+        out.push_str(&format!(
+            "All {} turn(s) attempted in this run were measured; every aggregate below \
+             covers all of them.\n\n",
+            b.attempted()
+        ));
+        return out;
+    }
+    out.push_str(&format!(
+        "**{} of {} turn(s) could not be measured and contribute no number anywhere in \
+         this report.** Every per-turn aggregate below is over the remaining {}. An \
+         unmeasurable turn is excluded, never estimated: a missing number is recoverable, \
+         a wrong one is not.\n\n",
+        b.unmeasurable.len(),
+        b.attempted(),
+        b.measured.len()
+    ));
+    for f in &b.unmeasurable {
+        out.push_str(&format!(
+            "- **repetition {}, turn {}**: {}\n",
+            f.repetition, f.turn, f.reason
+        ));
+    }
+    out.push_str(
+        "\nThe usual cause is a premature cut — the server endpointed before the user's \
+         marked speech end, so the turn's own `out.first_audio` precedes its `I` and falls \
+         outside the one-turn search window. That is a real result, not a harness bug: see \
+         `premature_cut_rate` under *Turn-taking quality*, which counts these turns and is \
+         the axis the endpointing sweep trades latency against.\n\n",
+    );
+    out
+}
+
 /// The `network` row's plausibility audit: one line per turn whose residual
 /// fails `residual_is_plausible` against the run's own measured RTT.
 ///
@@ -716,15 +824,15 @@ fn render_residual_plausibility(breakdowns: &[TurnBreakdown], rtt_p50_ms: Option
         .collect();
     if complaints.is_empty() {
         out.push_str(&format!(
-            "All {} turn(s) pass `residual_is_plausible` against the measured p50 RTT of \
-             {rtt:.2}ms.\n\n",
+            "All {} measured turn(s) pass `residual_is_plausible` against the measured \
+             p50 RTT of {rtt:.2}ms.\n\n",
             breakdowns.len()
         ));
         return out;
     }
     out.push_str(&format!(
-        "**{} of {} turn(s) FAIL `residual_is_plausible`.** Their `network_ms` is not a \
-         transport cost and their stage split must not be used for any optimization \
+        "**{} of {} measured turn(s) FAIL `residual_is_plausible`.** Their `network_ms` is \
+         not a transport cost and their stage split must not be used for any optimization \
          decision; the `network` percentile row above pools them in with the rest.\n\n",
         complaints.len(),
         breakdowns.len()
@@ -758,8 +866,13 @@ fn render_residual_plausibility(breakdowns: &[TurnBreakdown], rtt_p50_ms: Option
 /// indistinguishable from turns the server genuinely failed to endpoint (see
 /// [`RunFailure`]). A reader who does not know the session died will read
 /// `missed_endpoint_rate` as an endpointing result.
+///
+/// `breakdowns` carries both halves of [`breakdown_all`]'s result. The
+/// unmeasurable turns get their own section, also before any number, and
+/// every aggregate over the measured ones states what it excluded — the same
+/// rule already applied to `None` detection lags.
 pub fn render_markdown(
-    breakdowns: &[TurnBreakdown],
+    breakdowns: &Breakdowns,
     summaries: &BTreeMap<String, Summary>,
     turn_taking: &TurnTaking,
     llm_local: bool,
@@ -767,9 +880,14 @@ pub fn render_markdown(
     run_failures: &[RunFailure],
 ) -> String {
     let mut out = String::new();
+    let unmeasurable = breakdowns.unmeasurable.len();
+    let attempted = breakdowns.attempted();
+    let breakdowns_all = breakdowns;
+    let breakdowns: &[TurnBreakdown] = &breakdowns_all.measured;
 
     out.push_str("# Gradbot latency report\n\n");
     out.push_str(&render_run_failures(run_failures));
+    out.push_str(&render_coverage(breakdowns_all));
 
     out.push_str("## End-to-end latency by fixture category (ms)\n\n");
     out.push_str("| category | n | p50 | p90 | p99 |\n");
@@ -785,7 +903,11 @@ pub fn render_markdown(
     }
     out.push('\n');
 
-    out.push_str("## Per-turn waterfalls\n\n");
+    out.push_str(&format!(
+        "## Per-turn waterfalls ({} of {} turn(s) measured)\n\n",
+        breakdowns.len(),
+        attempted
+    ));
     if breakdowns.is_empty() {
         out.push_str("_(no turns to render)_\n\n");
     } else {
@@ -798,9 +920,16 @@ pub fn render_markdown(
     let detection_lag_ms: Vec<f64> = breakdowns.iter().filter_map(|b| b.detection_lag_ms).collect();
     let missing = breakdowns.len() - detection_lag_ms.len();
     out.push_str(&format!(
-        "{missing} of {} turn(s) had no detection-lag measurement (no `endpoint.vad_eot` \
-         anchor found) and are excluded from the `detection_lag` row below — a percentile \
-         computed over fewer samples than the reader assumes would itself be misleading.\n\n",
+        "Every row below is over the {} measured turn(s) of {attempted} attempted; the \
+         {unmeasurable} unmeasurable turn(s) are in none of them (see *Turn measurement \
+         coverage*).\n\n",
+        breakdowns.len()
+    ));
+    out.push_str(&format!(
+        "{missing} of those {} measured turn(s) had no detection-lag measurement (no \
+         `endpoint.vad_eot` anchor found) and are excluded from the `detection_lag` row \
+         below as well — a percentile computed over fewer samples than the reader assumes \
+         would itself be misleading.\n\n",
         breakdowns.len()
     ));
     let server_internal_ms: Vec<f64> = breakdowns.iter().map(|b| b.server_internal_ms).collect();
@@ -858,6 +987,15 @@ mod tests {
             audio_time_s: 0.0,
             sample_idx,
             attrs: serde_json::Map::new(),
+        }
+    }
+
+    /// A `Breakdowns` with nothing unmeasurable, for tests that are not
+    /// exercising per-turn failure isolation themselves.
+    fn all_measured(measured: Vec<TurnBreakdown>) -> Breakdowns {
+        Breakdowns {
+            measured,
+            unmeasurable: Vec::new(),
         }
     }
 
@@ -1133,7 +1271,7 @@ mod tests {
             network_ms: 100.0,
             spans: vec![("llm.push".to_string(), 10.0, 60.0)],
         };
-        let out = render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), true, None, &[]);
+        let out = render_markdown(&all_measured(vec![b]), &BTreeMap::new(), &no_turn_taking(), true, None, &[]);
         assert!(
             out.contains("measured-local"),
             "a locally-hosted LLM flatters its own stage and must be labelled: {out}"
@@ -1152,7 +1290,7 @@ mod tests {
             network_ms: 100.0,
             spans: vec![("llm.push".to_string(), 10.0, 60.0)],
         };
-        let out = render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
+        let out = render_markdown(&all_measured(vec![b]), &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
         assert!(!out.contains("measured-local"), "got: {out}");
     }
 
@@ -1163,7 +1301,7 @@ mod tests {
             "short_answer".to_string(),
             Summary { n: 20, p50: 800.0, p90: 950.0, p99: 1100.0 },
         );
-        let out = render_markdown(&[], &summaries, &no_turn_taking(), false, None, &[]);
+        let out = render_markdown(&all_measured(vec![]), &summaries, &no_turn_taking(), false, None, &[]);
         assert!(out.contains("n=20"), "every aggregate must state its n: {out}");
     }
 
@@ -1190,9 +1328,9 @@ mod tests {
             network_ms: 100.0,
             spans: vec![],
         };
-        let out = render_markdown(&[with_lag, without_lag], &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
+        let out = render_markdown(&all_measured(vec![with_lag, without_lag]), &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
         assert!(
-            out.contains("1 of 2 turn(s) had no detection-lag measurement"),
+            out.contains("1 of those 2 measured turn(s) had no detection-lag measurement"),
             "the omission must be stated explicitly, not hidden: {out}"
         );
     }
@@ -1304,12 +1442,164 @@ mod tests {
         ];
 
         let mut breakdowns = breakdown_all(&marks, &dir).unwrap();
-        breakdowns.sort_by(|a, b| a.server_internal_ms.partial_cmp(&b.server_internal_ms).unwrap());
-        assert_eq!(breakdowns.len(), 2);
-        assert_eq!(breakdowns[0].server_internal_ms, 400.0, "repetition 1 must pair with its own (later) trace file");
-        assert_eq!(breakdowns[1].server_internal_ms, 800.0, "repetition 0 must pair with its own (earlier) trace file");
+        assert!(breakdowns.unmeasurable.is_empty(), "every turn here measures cleanly");
+        let measured = &mut breakdowns.measured;
+        measured.sort_by(|a, b| a.server_internal_ms.partial_cmp(&b.server_internal_ms).unwrap());
+        assert_eq!(measured.len(), 2);
+        assert_eq!(measured[0].server_internal_ms, 400.0, "repetition 1 must pair with its own (later) trace file");
+        assert_eq!(measured[1].server_internal_ms, 800.0, "repetition 0 must pair with its own (earlier) trace file");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The failure this follow-up exists to prevent: one turn that cannot be
+    /// decomposed used to abort the entire report via `?`. The endpointing
+    /// sweep drives `flush_duration_s` / `min_listen_before_flush_s` down
+    /// *until* premature cuts appear, so every sweep point aggressive enough
+    /// to be interesting produced no output at all — and the Pareto operating
+    /// point sits exactly there. One cut turn must cost that turn, not the
+    /// other nineteen.
+    #[test]
+    fn one_unmeasurable_turn_does_not_abort_the_other_turns() {
+        let dir = std::env::temp_dir().join(format!(
+            "gradbot-report-test-{}-{}",
+            std::process::id(),
+            "one_unmeasurable_turn"
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let rec_line = |t_us: u64, turn: u64, span: &str, sample_idx: u64| {
+            serde_json::to_string(&rec(t_us, turn, span, Phase::Point, sample_idx)).unwrap()
+        };
+
+        // Turn 0 measures cleanly (server_internal 800ms). Turn 1 was cut
+        // prematurely: its own `out.first_audio` precedes its `I`, so nothing
+        // lands in its window. Turn 2 measures cleanly again (400ms).
+        std::fs::write(
+            dir.join("trace_100_000000.jsonl"),
+            [
+                rec_line(500_000, 0, "audio_in.frame", 24_000), // turn 0's I
+                rec_line(1_300_000, 1, "out.first_audio", 0),   // turn 0's O
+                rec_line(2_000_000, 2, "out.first_audio", 0),   // turn 1's O — before turn 1's I
+                rec_line(3_000_000, 0, "audio_in.frame", 96_000), // turn 1's I
+                rec_line(6_000_000, 0, "audio_in.frame", 192_000), // turn 2's I
+                rec_line(6_400_000, 3, "out.first_audio", 0),   // turn 2's O
+            ]
+            .join("\n")
+                + "\n",
+        )
+        .unwrap();
+
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 1_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 1_900_000, sample_idx: 0 },
+            ClientMark { repetition: 0, turn: 1, kind: MarkKind::UserSpeechEnd, t_us: 4_000_000, sample_idx: 96_000 },
+            ClientMark { repetition: 0, turn: 1, kind: MarkKind::FirstAgentAudio, t_us: 3_800_000, sample_idx: 0 },
+            ClientMark { repetition: 0, turn: 2, kind: MarkKind::UserSpeechEnd, t_us: 7_000_000, sample_idx: 192_000 },
+            ClientMark { repetition: 0, turn: 2, kind: MarkKind::FirstAgentAudio, t_us: 7_500_000, sample_idx: 0 },
+        ];
+
+        let out = breakdown_all(&marks, &dir).expect("one cut turn must not abort the run");
+
+        // The successes are all present, and correct — not merely "no error".
+        assert_eq!(out.measured.len(), 2, "turns 0 and 2 measured: {:?}", out.measured);
+        assert_eq!(out.measured[0].turn, 0);
+        assert_eq!(out.measured[0].server_internal_ms, 800.0);
+        assert_eq!(out.measured[1].turn, 2);
+        assert_eq!(out.measured[1].server_internal_ms, 400.0);
+        assert_eq!(out.attempted(), 3);
+
+        // The failure is recorded, identified, and explained.
+        assert_eq!(out.unmeasurable.len(), 1, "got: {:?}", out.unmeasurable);
+        let f = &out.unmeasurable[0];
+        assert_eq!((f.repetition, f.turn), (0, 1));
+        assert!(f.reason.contains("out.first_audio"), "must name the anchor: {}", f.reason);
+        assert!(f.reason.contains("premature cut"), "must explain why: {}", f.reason);
+
+        // And no number for the unmeasurable turn leaked in anywhere.
+        assert!(
+            out.measured.iter().all(|b| b.turn != 1),
+            "an unmeasurable turn must contribute no number at all: {:?}",
+            out.measured
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 19-of-20 must never be readable as 20-of-20: the rendered report has to
+    /// state both counts, name the excluded turn and its reason, and say so
+    /// again wherever an aggregate is drawn over the shrunken sample.
+    #[test]
+    fn the_report_states_both_the_measured_and_the_excluded_counts() {
+        let measured = TurnBreakdown {
+            turn: 0,
+            e2e_ms: 900.0,
+            detection_lag_ms: Some(60.0),
+            server_internal_ms: 800.0,
+            network_ms: 100.0,
+            spans: vec![],
+        };
+        let breakdowns = Breakdowns {
+            measured: vec![measured],
+            unmeasurable: vec![TurnFailure {
+                repetition: 0,
+                turn: 1,
+                reason: "missing span: out.first_audio (O) — the usual cause is a premature cut"
+                    .to_string(),
+            }],
+        };
+        let out = render_markdown(
+            &breakdowns,
+            &BTreeMap::new(),
+            &no_turn_taking(),
+            false,
+            None,
+            &[],
+        );
+
+        assert!(
+            out.contains("1 of 2 turn(s) could not be measured"),
+            "both counts must be stated up front: {out}"
+        );
+        assert!(
+            out.contains("**repetition 0, turn 1**"),
+            "the excluded turn must be identified: {out}"
+        );
+        assert!(
+            out.contains("premature cut"),
+            "the reason must be shown, not just the count: {out}"
+        );
+        assert!(
+            out.contains("Per-turn waterfalls (1 of 2 turn(s) measured)"),
+            "the waterfall section must state its coverage: {out}"
+        );
+        assert!(
+            out.contains("over the 1 measured turn(s) of 2 attempted"),
+            "the stage table must state what it excluded: {out}"
+        );
+        // The coverage statement must precede every number it qualifies.
+        let coverage = out.find("could not be measured").unwrap();
+        assert!(coverage < out.find("Per-turn waterfalls").unwrap(), "{out}");
+    }
+
+    /// "All turns measured" and "coverage not reported" must not look alike —
+    /// the same rule the residual audit follows.
+    #[test]
+    fn a_fully_measured_run_still_states_its_coverage() {
+        let b = TurnBreakdown {
+            turn: 0,
+            e2e_ms: 900.0,
+            detection_lag_ms: Some(60.0),
+            server_internal_ms: 800.0,
+            network_ms: 100.0,
+            spans: vec![],
+        };
+        let out = render_markdown(&all_measured(vec![b]), &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
+        assert!(
+            out.contains("All 1 turn(s) attempted in this run were measured"),
+            "got: {out}"
+        );
+        assert!(!out.contains("could not be measured"), "got: {out}");
     }
 
     // --- Task 19: turn-taking quality metrics ---
@@ -1436,7 +1726,7 @@ mod tests {
             repetition: 2,
             error: "recv_loop error: Error from server: timeout".to_string(),
         }];
-        let out = render_markdown(&[], &BTreeMap::new(), &tt, false, None, &failures);
+        let out = render_markdown(&all_measured(vec![]), &BTreeMap::new(), &tt, false, None, &failures);
 
         assert!(out.contains("INCOMPLETE RUN"), "the banner must be present: {out}");
         assert!(out.contains("repetition 2"), "the failed repetition must be named: {out}");
@@ -1478,7 +1768,7 @@ mod tests {
             spans: vec![("llm.push".to_string(), 10.0, 60.0)],
         };
         let out = render_markdown(
-            &[bad, good],
+            &all_measured(vec![bad, good]),
             &BTreeMap::new(),
             &no_turn_taking(),
             false,
@@ -1487,7 +1777,7 @@ mod tests {
         );
 
         assert!(
-            out.contains("1 of 2 turn(s) FAIL"),
+            out.contains("1 of 2 measured turn(s) FAIL"),
             "the audit must count the failures: {out}"
         );
         assert!(
@@ -1521,17 +1811,17 @@ mod tests {
             spans: vec![],
         };
         let checked = render_markdown(
-            &[b.clone()],
+            &all_measured(vec![b.clone()]),
             &BTreeMap::new(),
             &no_turn_taking(),
             false,
             Some(20.0),
             &[],
         );
-        assert!(checked.contains("All 1 turn(s) pass"), "got: {checked}");
+        assert!(checked.contains("All 1 measured turn(s) pass"), "got: {checked}");
 
         let unchecked =
-            render_markdown(&[b], &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
+            render_markdown(&all_measured(vec![b]), &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
         assert!(unchecked.contains("Not checked"), "got: {unchecked}");
         assert!(
             !unchecked.contains("pass `residual_is_plausible`"),
@@ -1541,7 +1831,7 @@ mod tests {
 
     #[test]
     fn a_clean_run_renders_no_incomplete_run_banner() {
-        let out = render_markdown(&[], &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
+        let out = render_markdown(&all_measured(vec![]), &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
         assert!(!out.contains("INCOMPLETE RUN"), "got: {out}");
     }
 
@@ -1552,7 +1842,7 @@ mod tests {
             endpoint_delay_ms: Some(Summary { n: 4, p50: 60.0, p90: 90.0, p99: 99.0 }),
             missed_endpoint_rate: 0.1,
         };
-        let out = render_markdown(&[], &BTreeMap::new(), &tt, false, None, &[]);
+        let out = render_markdown(&all_measured(vec![]), &BTreeMap::new(), &tt, false, None, &[]);
         assert!(out.contains("25.0%"), "premature_cut_rate must be surfaced: {out}");
         assert!(out.contains("10.0%"), "missed_endpoint_rate must be surfaced: {out}");
         assert!(out.contains("endpoint_delay_ms"), "endpoint_delay_ms must be surfaced: {out}");

@@ -644,6 +644,17 @@ async fn main() -> Result<()> {
             .as_ref()
             .context("--out-report requires --trace-dir (where the server wrote its trace files)")?;
         let breakdowns = report::breakdown_all(&all_marks, trace_dir)?;
+        // A turn that could not be decomposed is recorded, not fatal (see
+        // `report::TurnFailure`) — but it must be visible without opening the
+        // report, since the endpointing sweep runs unattended.
+        if !breakdowns.unmeasurable.is_empty() {
+            eprintln!(
+                "bench: {} of {} turn(s) could not be measured and are excluded from every \
+                 aggregate — see the report's 'Turn measurement coverage' section",
+                breakdowns.unmeasurable.len(),
+                breakdowns.attempted()
+            );
+        }
         let turn_taking = report::turn_taking_all(&all_marks, trace_dir, &manifest)?;
         // `--llm-local` is an operator statement, not a guess: the harness
         // has no way to detect whether the server's LLM is co-located (see
