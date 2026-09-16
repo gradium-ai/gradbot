@@ -129,6 +129,7 @@ async fn msg_in_producer(
                 event_id: _,
             } => {
                 tracing::info!(?session, "session update");
+                let endpointing = session.resolve_endpointing();
                 let instructions = session.instructions;
                 let language = session
                     .lang
@@ -143,16 +144,16 @@ async fn msg_in_producer(
                         instructions,
                         language,
                         assistant_speaks_first: true,
-                        silence_timeout_s: 5.0,
+                        silence_timeout_s: endpointing.silence_timeout_s,
                         tools: vec![],
-                        flush_duration_s: gradbot::DEFAULT_FLUSH_FOR_S,
-                        padding_bonus: 0.0,
+                        flush_duration_s: endpointing.flush_duration_s,
+                        padding_bonus: endpointing.padding_bonus,
                         rewrite_rules: None,
                         stt_extra_config: None,
                         tts_extra_config: None,
                         llm_extra_config: None,
-                        min_listen_before_flush_s: 0.5,
-                        vad_eot_threshold: 0.8,
+                        min_listen_before_flush_s: endpointing.min_listen_before_flush_s,
+                        vad_eot_threshold: endpointing.vad_eot_threshold,
                     })
                     .await?;
             }

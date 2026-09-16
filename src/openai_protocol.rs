@@ -56,6 +56,45 @@ pub struct SessionConfig {
     pub allow_recording: bool,
     #[serde(rename = "gradium.lang")]
     pub lang: Option<String>,
+    /// Endpointing overrides. Each falls back to the current hardcoded
+    /// default in `openai_server.rs` when omitted -- see
+    /// [`SessionConfig::resolve_endpointing`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flush_duration_s: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_listen_before_flush_s: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vad_eot_threshold: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub padding_bonus: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub silence_timeout_s: Option<f64>,
+}
+
+/// Endpointing fields resolved from a client's optional overrides, falling
+/// back to the values `openai_server.rs` has always hardcoded.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EndpointingConfig {
+    pub flush_duration_s: f64,
+    pub min_listen_before_flush_s: f64,
+    pub vad_eot_threshold: f64,
+    pub padding_bonus: f64,
+    pub silence_timeout_s: f64,
+}
+
+impl SessionConfig {
+    /// Pick each endpointing override if present, else today's default.
+    pub fn resolve_endpointing(&self) -> EndpointingConfig {
+        EndpointingConfig {
+            flush_duration_s: self
+                .flush_duration_s
+                .unwrap_or(gradbot::DEFAULT_FLUSH_FOR_S),
+            min_listen_before_flush_s: self.min_listen_before_flush_s.unwrap_or(0.5),
+            vad_eot_threshold: self.vad_eot_threshold.unwrap_or(0.8),
+            padding_bonus: self.padding_bonus.unwrap_or(0.0),
+            silence_timeout_s: self.silence_timeout_s.unwrap_or(5.0),
+        }
+    }
 }
 
 /// Response object
@@ -370,6 +409,64 @@ mod tests {
             }
             _ => panic!("Expected SessionUpdate"),
         }
+    }
+
+    fn session_from_json(json: &str) -> SessionConfig {
+        let event: ClientEvent = serde_json::from_str(json).unwrap();
+        match event {
+            ClientEvent::SessionUpdate { session, .. } => session,
+            _ => panic!("Expected SessionUpdate"),
+        }
+    }
+
+    /// Regression guard: a session update that omits all five endpointing
+    /// fields must resolve to exactly today's hardcoded defaults. Every
+    /// existing client (demos, gradbot-client.rs, gradbot_py) sends none of
+    /// these fields, so a change here would silently change behaviour for
+    /// all of them at once.
+    #[test]
+    fn test_session_update_without_endpointing_fields_uses_current_defaults() {
+        let session = session_from_json(
+            r#"{
+                "type": "session.update",
+                "event_id": "event_123",
+                "session": {
+                    "allow_recording": true
+                }
+            }"#,
+        );
+
+        let endpointing = session.resolve_endpointing();
+        assert_eq!(endpointing.flush_duration_s, gradbot::DEFAULT_FLUSH_FOR_S);
+        assert_eq!(endpointing.min_listen_before_flush_s, 0.5);
+        assert_eq!(endpointing.vad_eot_threshold, 0.8);
+        assert_eq!(endpointing.padding_bonus, 0.0);
+        assert_eq!(endpointing.silence_timeout_s, 5.0);
+    }
+
+    /// An override that is present must actually be applied, while fields
+    /// left out of the same payload still fall back to the defaults above.
+    #[test]
+    fn test_session_update_endpointing_override_is_applied() {
+        let session = session_from_json(
+            r#"{
+                "type": "session.update",
+                "event_id": "event_123",
+                "session": {
+                    "allow_recording": true,
+                    "vad_eot_threshold": 0.42,
+                    "silence_timeout_s": 9.5
+                }
+            }"#,
+        );
+
+        let endpointing = session.resolve_endpointing();
+        assert_eq!(endpointing.vad_eot_threshold, 0.42);
+        assert_eq!(endpointing.silence_timeout_s, 9.5);
+        // Not overridden in this payload -- must still be today's defaults.
+        assert_eq!(endpointing.flush_duration_s, gradbot::DEFAULT_FLUSH_FOR_S);
+        assert_eq!(endpointing.min_listen_before_flush_s, 0.5);
+        assert_eq!(endpointing.padding_bonus, 0.0);
     }
 
     #[test]
