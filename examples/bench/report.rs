@@ -70,7 +70,16 @@ pub struct TurnBreakdown {
     pub network_ms: f64,
     /// `(span name, start_ms, end_ms)`, relative to `I`, one entry per
     /// closed Begin/End pair recorded under the server turn that produced
-    /// `I`. Spans left open (e.g. an abandoned `endpoint.flush`) are omitted
+    /// **`O`** — not the one that produced `I`. `audio_in.frame` (which
+    /// supplies `I`) is emitted from the input loop, which has no per-turn
+    /// context and hardcodes `turn: 0` (`multiplex.rs`); selecting on `I`'s
+    /// turn therefore rendered turn 0's spans under every turn, positioned
+    /// against a much later `I` and collapsing to 1-char bars. `O`
+    /// (`out.first_audio`) is emitted from the out-send loop with the
+    /// server's real `turn_idx`, so it is the only anchor here that carries
+    /// one. Offsets stay relative to `i.t_us`.
+    ///
+    /// Spans left open (e.g. an abandoned `endpoint.flush`) are omitted
     /// here — they have no end to draw — but never cause `breakdown` itself
     /// to fail; only a missing `I`, `V`, or `O` anchor does that.
     pub spans: Vec<(String, f64, f64)>,
@@ -118,7 +127,10 @@ fn find_o(trace: &[TraceRecord], t_us_floor: u64) -> Result<&TraceRecord> {
         .context("missing span: out.first_audio (O)")
 }
 
-/// Every closed Begin/End pair recorded under `server_turn`, as
+/// Every closed Begin/End pair recorded under `server_turn` — which must be
+/// a *real* server turn, i.e. one taken from a record the server stamped with
+/// its own `turn_idx`. `audio_in.frame` is not such a record: its producer
+/// hardcodes `turn: 0`. As
 /// `(span name, start_ms, end_ms)` relative to `i_t_us`. Pairing is FIFO per
 /// span name in time order, so repeated spans of the same name (e.g. a
 /// retried `tts.connect`) pair with their own end rather than each other's.
@@ -177,7 +189,10 @@ pub fn breakdown(marks: &[ClientMark], trace: &[TraceRecord], turn: u64) -> Resu
     let server_internal_ms = (o.t_us as f64 - i.t_us as f64) / 1000.0;
     let network_ms = e2e_ms - server_internal_ms;
 
-    let spans = collect_spans(trace, i.turn, i.t_us);
+    // Keyed on `O`'s turn, never `I`'s: `audio_in.frame` carries a
+    // hardcoded `turn: 0` (see `TurnBreakdown::spans`), so `i.turn` would
+    // select turn 0's spans for every turn in the session.
+    let spans = collect_spans(trace, o.turn, i.t_us);
 
     Ok(TurnBreakdown {
         turn,
@@ -677,7 +692,7 @@ mod tests {
     fn decomposition_needs_no_clock_sync() {
         // Server clock origin is deliberately unrelated to the client's.
         let trace = vec![
-            rec(500_000, 1, "audio_in.frame", Phase::Point, 24_000), // I
+            rec(500_000, 0, "audio_in.frame", Phase::Point, 24_000), // I
             rec(560_000, 1, "endpoint.vad_eot", Phase::Point, 25_920), // V
             rec(1_300_000, 1, "out.first_audio", Phase::Point, 0),   // O
         ];
@@ -698,8 +713,8 @@ mod tests {
         // The `I` anchor must be the frame carrying the marked sample index,
         // even when a later frame has a closer timestamp.
         let trace = vec![
-            rec(100_000, 1, "audio_in.frame", Phase::Point, 24_000),
-            rec(900_000, 1, "audio_in.frame", Phase::Point, 48_000),
+            rec(100_000, 0, "audio_in.frame", Phase::Point, 24_000),
+            rec(900_000, 0, "audio_in.frame", Phase::Point, 48_000),
             rec(950_000, 1, "out.first_audio", Phase::Point, 0),
         ];
         let marks = vec![
@@ -715,8 +730,10 @@ mod tests {
         // The client counts fixture turns; the server's turn_idx is its own
         // sequence that also advances on interruptions. A join that matched
         // them would mis-attribute every stage after the first interruption.
+        // `audio_in.frame` carries turn 0 because that is all its producer can
+        // emit — see `TurnBreakdown::spans`.
         let trace = vec![
-            rec(100_000, 7, "audio_in.frame", Phase::Point, 24_000),
+            rec(100_000, 0, "audio_in.frame", Phase::Point, 24_000),
             rec(160_000, 7, "endpoint.vad_eot", Phase::Point, 25_920),
             rec(900_000, 9, "out.first_audio", Phase::Point, 0),
         ];
@@ -730,6 +747,55 @@ mod tests {
         assert_eq!(b.server_internal_ms, 800.0);
     }
 
+    /// The bug this pins: `collect_spans` was keyed on `I`'s turn, and `I` is
+    /// an `audio_in.frame`, whose producer hardcodes `turn: 0` because the
+    /// input loop has no per-turn context. Every turn's waterfall therefore
+    /// rendered *turn 0's* spans, positioned against a much later `I` —
+    /// strongly negative offsets that `render_gantt` casts `as usize` and
+    /// saturates into 1-char bars. The fixtures that hid it used
+    /// `audio_in.frame` records with `turn: 1` / `turn: 7`, values the
+    /// producer cannot emit, so `I`'s turn happened to be the right one.
+    ///
+    /// Here turn 0 (an earlier turn, or the greeting) has its own spans and
+    /// the measured turn is server turn 3. The collected spans must be turn
+    /// 3's, and their offsets must still be relative to `I`.
+    #[test]
+    fn spans_come_from_the_turn_that_produced_o_not_from_audio_in_frames_turn_0() {
+        let trace = vec![
+            // Turn 0's spans — a previous turn, long finished.
+            rec(10_000, 0, "llm.push", Phase::Begin, 0),
+            rec(20_000, 0, "llm.push", Phase::End, 0),
+            // `I` — the producer can only ever stamp this with turn 0.
+            rec(500_000, 0, "audio_in.frame", Phase::Point, 24_000),
+            // The turn actually being measured, as the server numbered it.
+            rec(600_000, 3, "llm.push", Phase::Begin, 24_000),
+            rec(650_000, 3, "llm.push", Phase::End, 24_000),
+            rec(700_000, 3, "tts.connect", Phase::Begin, 0),
+            rec(900_000, 3, "tts.connect", Phase::End, 0),
+            rec(1_300_000, 3, "out.first_audio", Phase::Point, 0), // O
+        ];
+        let marks = vec![
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::UserSpeechEnd, t_us: 9_000_000, sample_idx: 24_000 },
+            ClientMark { repetition: 0, turn: 0, kind: MarkKind::FirstAgentAudio, t_us: 9_900_000, sample_idx: 0 },
+        ];
+
+        let b = breakdown(&marks, &trace, 0).unwrap();
+        assert_eq!(
+            b.spans,
+            vec![
+                // Relative to `I` at 500_000us, as `TurnBreakdown::spans` promises.
+                ("llm.push".to_string(), 100.0, 150.0),
+                ("tts.connect".to_string(), 200.0, 400.0),
+            ],
+            "must be server turn 3's spans, not turn 0's, and positioned against I"
+        );
+        assert!(
+            b.spans.iter().all(|(_, start, _)| *start >= 0.0),
+            "turn 0's spans precede I and would render as negative offsets: {:?}",
+            b.spans
+        );
+    }
+
     /// The case that used to produce a `NaN`: no `endpoint.vad_eot` anywhere
     /// in the trace. `detection_lag_ms` must come back `None` — never a
     /// number — while the rest of the breakdown, which does not depend on
@@ -738,7 +804,7 @@ mod tests {
     #[test]
     fn missing_vad_eot_yields_none_lag_but_the_rest_of_the_breakdown_survives() {
         let trace = vec![
-            rec(100_000, 1, "audio_in.frame", Phase::Point, 24_000), // I
+            rec(100_000, 0, "audio_in.frame", Phase::Point, 24_000), // I
             rec(950_000, 1, "out.first_audio", Phase::Point, 0),     // O
         ];
         let marks = vec![
@@ -925,7 +991,7 @@ mod tests {
             dir.join("trace_100_000000.jsonl"),
             format!(
                 "{}\n{}\n",
-                rec_line(500_000, 1, "audio_in.frame", 24_000),
+                rec_line(500_000, 0, "audio_in.frame", 24_000),
                 rec_line(1_300_000, 1, "out.first_audio", 0),
             ),
         )
@@ -938,7 +1004,7 @@ mod tests {
             dir.join("trace_200_000001.jsonl"),
             format!(
                 "{}\n{}\n",
-                rec_line(500_000, 1, "audio_in.frame", 24_000),
+                rec_line(500_000, 0, "audio_in.frame", 24_000),
                 rec_line(900_000, 1, "out.first_audio", 0),
             ),
         )
@@ -1053,9 +1119,9 @@ mod tests {
         // n>=2) has enough delay samples to produce a `Summary`.
         let manifest = manifest_with_turns(2);
         let trace = vec![
-            rec(500_000, 1, "audio_in.frame", Phase::Point, 24_000), // turn 0's I
+            rec(500_000, 0, "audio_in.frame", Phase::Point, 24_000), // turn 0's I
             rec(560_000, 1, "endpoint.vad_eot", Phase::Point, 25_920), // turn 0's V (delay 60ms)
-            rec(1_000_000, 2, "audio_in.frame", Phase::Point, 48_000), // turn 1's I
+            rec(1_000_000, 0, "audio_in.frame", Phase::Point, 48_000), // turn 1's I
             rec(1_100_000, 2, "endpoint.vad_eot", Phase::Point, 49_920), // turn 1's V (delay 100ms)
         ];
         let marks = vec![
