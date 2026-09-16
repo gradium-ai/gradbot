@@ -6,6 +6,15 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub const DEFAULT_FLUSH_FOR_S: f64 = 0.5;
+/// Minimum time the server listens to a turn before it is allowed to flush
+/// STT. Exported (like `DEFAULT_FLUSH_FOR_S`) because every protocol adapter
+/// that builds a `SessionConfig` needs the same value: `openai_protocol`,
+/// `gradbot_server::protocol`, `twilio_server` and `gradbot_py`. Duplicating
+/// it as a bare literal in each of them is how the four copies drift apart.
+pub const DEFAULT_MIN_LISTEN_BEFORE_FLUSH_S: f64 = 0.5;
+/// VAD end-of-turn probability threshold handed to the STT stream. Exported
+/// for the same reason as `DEFAULT_MIN_LISTEN_BEFORE_FLUSH_S`.
+pub const DEFAULT_VAD_EOT_THRESHOLD: f64 = 0.8;
 const INPUT_SAMPLE_RATE: usize = 24000;
 
 /// Minimum time an unanswered tool call may be outstanding before we inject a
@@ -204,7 +213,7 @@ impl Session {
             .and_then(|c| c.stt_extra_config.as_deref());
         let vad_eot_threshold = session_config
             .as_ref()
-            .map_or(0.8, |c| c.vad_eot_threshold);
+            .map_or(DEFAULT_VAD_EOT_THRESHOLD, |c| c.vad_eot_threshold);
         let stt_model_name = std::env::var("GRADIUM_STT_MODEL_NAME").ok();
         let (ss, stt_receiver) = stt_client
             .stt_stream(stt_model_name, stt_lang, stt_extra, vad_eot_threshold)
@@ -281,7 +290,9 @@ impl Session {
         let stt_extra = config_guard
             .as_ref()
             .and_then(|c| c.stt_extra_config.as_deref());
-        let vad_eot_threshold = config_guard.as_ref().map_or(0.8, |c| c.vad_eot_threshold);
+        let vad_eot_threshold = config_guard
+            .as_ref()
+            .map_or(DEFAULT_VAD_EOT_THRESHOLD, |c| c.vad_eot_threshold);
         let stt_model_name = std::env::var("GRADIUM_STT_MODEL_NAME").ok();
         let (ss, stt_receiver) = self
             .stt_client
@@ -948,7 +959,9 @@ impl Session {
                 .lock()
                 .await
                 .as_ref()
-                .map_or(0.5, |c| c.min_listen_before_flush_s);
+                .map_or(DEFAULT_MIN_LISTEN_BEFORE_FLUSH_S, |c| {
+                    c.min_listen_before_flush_s
+                });
             if stt_time - *since_s <= min_listen_s {
                 return Ok(());
             }
@@ -1988,13 +2001,18 @@ mod session_config_tests {
             stt_extra_config: None,
             tts_extra_config: None,
             llm_extra_config: None,
-            min_listen_before_flush_s: 0.5,
-            vad_eot_threshold: 0.8,
+            min_listen_before_flush_s: crate::DEFAULT_MIN_LISTEN_BEFORE_FLUSH_S,
+            vad_eot_threshold: crate::DEFAULT_VAD_EOT_THRESHOLD,
         };
+        // The literals here are the point of the test: they pin the exported
+        // constants to the values every protocol adapter used to duplicate.
         assert_eq!(
             c.min_listen_before_flush_s, 0.5,
-            "must match multiplex.rs:845"
+            "DEFAULT_MIN_LISTEN_BEFORE_FLUSH_S must stay 0.5"
         );
-        assert_eq!(c.vad_eot_threshold, 0.8, "must match speech_to_text.rs:105");
+        assert_eq!(
+            c.vad_eot_threshold, 0.8,
+            "DEFAULT_VAD_EOT_THRESHOLD must stay 0.8"
+        );
     }
 }

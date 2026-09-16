@@ -289,8 +289,8 @@ pub async fn serve(config: Config, twilio_config: TwilioConfig) -> Result<()> {
         stt_extra_config: None,
         tts_extra_config: None,
         llm_extra_config: None,
-        min_listen_before_flush_s: 0.5,
-        vad_eot_threshold: 0.8,
+        min_listen_before_flush_s: gradbot::DEFAULT_MIN_LISTEN_BEFORE_FLUSH_S,
+        vad_eot_threshold: gradbot::DEFAULT_VAD_EOT_THRESHOLD,
     };
     let config = Arc::new(config);
     let state = State {

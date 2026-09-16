@@ -89,8 +89,12 @@ impl SessionConfig {
             flush_duration_s: self
                 .flush_duration_s
                 .unwrap_or(gradbot::DEFAULT_FLUSH_FOR_S),
-            min_listen_before_flush_s: self.min_listen_before_flush_s.unwrap_or(0.5),
-            vad_eot_threshold: self.vad_eot_threshold.unwrap_or(0.8),
+            min_listen_before_flush_s: self
+                .min_listen_before_flush_s
+                .unwrap_or(gradbot::DEFAULT_MIN_LISTEN_BEFORE_FLUSH_S),
+            vad_eot_threshold: self
+                .vad_eot_threshold
+                .unwrap_or(gradbot::DEFAULT_VAD_EOT_THRESHOLD),
             padding_bonus: self.padding_bonus.unwrap_or(0.0),
             silence_timeout_s: self.silence_timeout_s.unwrap_or(5.0),
         }
