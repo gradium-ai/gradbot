@@ -26,6 +26,13 @@
 //! stderr — a dead session must never be reported as the agent declining to
 //! answer.
 //!
+//! The probe reads from the measured session's own socket, so whatever the
+//! server had already sent — starting with the Ogg Opus stream header, which
+//! it emits on accept without waiting for any client audio — is captured in
+//! `RttProbe::drained` and replayed into the receive loop ahead of the live
+//! stream. Discarding it would leave the decoder without a stream header and
+//! produce a 100% `missed_endpoint_rate` on repetition 0 of some runs.
+//!
 //! `--repetitions` replays the manifest that many times, opening a **fresh
 //! session per repetition** (never more than one at a time — see
 //! `run_session`): prod backends carry shared load and network jitter, so a
@@ -231,41 +238,99 @@ const DRAIN_AFTER_LAST_TURN: Duration = Duration::from_secs(5);
 /// fewer than two samples, so this is sized to survive a handful of misses.
 const RTT_PROBE_PINGS: usize = 20;
 
-/// Waits for the pong matching an already-sent ping, draining and discarding
-/// any other frames that interleave. Factored out of `probe_rtt_ms` so the
-/// timeout in that function wraps a single, ordinary future.
-async fn wait_for_pong(ws: &mut WebSocket) -> Result<()> {
+/// Waits for the pong matching an already-sent ping, **collecting** any other
+/// frames that interleave into `drained` rather than discarding them.
+///
+/// Discarding was a real defect, not a theoretical one: the probe runs on the
+/// measured session's own socket, and the server starts sending the instant it
+/// accepts the connection (see `probe_rtt_ms`). `drained` is borrowed from the
+/// caller rather than returned so that frames already collected survive the
+/// `RTT_PING_TIMEOUT` cancelling this future mid-await.
+///
+/// Factored out of `probe_rtt_ms` so that timeout wraps a single, ordinary
+/// future.
+async fn wait_for_pong(ws: &mut WebSocket, drained: &mut Vec<ws::Message>) -> Result<()> {
     while let Some(msg) = ws.next().await {
-        if let ws::Message::Pong(_) = msg? {
-            return Ok(());
+        match msg? {
+            ws::Message::Pong(_) => return Ok(()),
+            other => drained.push(other),
         }
     }
     anyhow::bail!("connection closed while waiting for a pong")
+}
+
+/// The receive loop's frame source: everything the RTT probe drained, in
+/// arrival order, before anything newly arriving on the socket.
+///
+/// Ordering is the whole point. The bench's Opus decoder is stateful and the
+/// first frame of a session is the stream header, so a drained frame replayed
+/// after a live one — or not at all — is as bad as never receiving it (see
+/// [`RttProbe::drained`]).
+async fn next_frame(
+    replay: &mut std::vec::IntoIter<ws::Message>,
+    receiver: &mut Receiver,
+) -> Option<Result<ws::Message>> {
+    match replay.next() {
+        Some(frame) => Some(Ok(frame)),
+        None => receiver.next().await,
+    }
+}
+
+/// What the RTT probe produced: the round-trip summary, and every non-pong
+/// frame it took off the socket while waiting for pongs.
+pub struct RttProbe {
+    pub summary: Summary,
+    /// Server frames that arrived during the probe, in arrival order.
+    ///
+    /// These **must** be handed to the receive loop ahead of anything that
+    /// arrives afterwards. They are not spare diagnostics: the very first
+    /// frame of a session is the Ogg Opus stream header, and a decoder that
+    /// never sees it decodes nothing, forever.
+    pub drained: Vec<ws::Message>,
 }
 
 /// Measures WebSocket round-trip time with up to `n` ping/pong exchanges. Run
 /// once per invocation, on repetition 0's connection before its fixture
 /// playback begins, so it never competes with the traffic being measured and
 /// never opens a connection of its own (see the module docs: an extra
-/// connection means an extra server-side trace file). Draining non-pong
-/// frames while waiting is safe here only because the server sends nothing
-/// before it receives audio. A ping that does not get a pong back
-/// within `RTT_PING_TIMEOUT` is skipped rather than treated as fatal; only
-/// ending up with fewer than two samples overall is an error, since a
-/// transport this harness cannot characterize must fail loudly rather than
-/// silently produce a bogus baseline.
-pub async fn probe_rtt_ms(ws: &mut WebSocket, n: usize) -> Result<Summary> {
+/// connection means an extra server-side trace file).
+///
+/// **The server does send frames before it receives any audio**, so the probe
+/// must not discard what it reads while waiting for a pong. On accept,
+/// `openai_server::realtime` starts a session with `Format::OggOpus`, and the
+/// out-send loop's first action is a `MsgOut::Audio` carrying
+/// `encoder.header()`, which `msg_out_consumer` forwards as a
+/// `response.audio.delta` — no client audio required. Whether that header
+/// lands inside the probe's window is a race between the server's STT
+/// handshake and ~20 client round trips, both in the tens of milliseconds, so
+/// it happens on some runs and not others. Swallowing it leaves
+/// `kaudio::ogg_opus::Decoder` without a stream header: at best a decode
+/// error, at worst a decoder that returns nothing for the rest of the
+/// session — no `FirstAgentAudio` marks and a 100% `missed_endpoint_rate` on
+/// repetition 0, reported as "the agent never answered" when the agent
+/// answered fine. Every frame read here is therefore returned in
+/// [`RttProbe::drained`] for the receive loop to process first.
+///
+/// A ping that does not get a pong back within `RTT_PING_TIMEOUT` is skipped
+/// rather than treated as fatal; only ending up with fewer than two samples
+/// overall is an error, since a transport this harness cannot characterize
+/// must fail loudly rather than silently produce a bogus baseline. Frames
+/// drained before such a miss are still kept.
+pub async fn probe_rtt_ms(ws: &mut WebSocket, n: usize) -> Result<RttProbe> {
     use futures_util::SinkExt;
     let mut samples = Vec::with_capacity(n);
+    let mut drained = Vec::new();
     for i in 0..n {
         let started = Instant::now();
         ws.send(ws::Message::Ping(vec![i as u8])).await?;
-        match tokio::time::timeout(RTT_PING_TIMEOUT, wait_for_pong(ws)).await {
+        match tokio::time::timeout(RTT_PING_TIMEOUT, wait_for_pong(ws, &mut drained)).await {
             Ok(Ok(())) => samples.push(started.elapsed().as_secs_f64() * 1000.0),
             Ok(Err(_)) | Err(_) => continue, // read error, close, or timeout: skip this sample
         }
     }
-    summarize(&samples).ok_or_else(|| anyhow::anyhow!("rtt probe collected < 2 samples"))
+    let summary =
+        summarize(&samples).ok_or_else(|| anyhow::anyhow!("rtt probe collected < 2 samples"))?;
+    Ok(RttProbe { summary, drained })
 }
 
 #[derive(Parser, Debug)]
@@ -380,9 +445,16 @@ async fn run_session(
     rtt_probe_pings: Option<usize>,
 ) -> Result<SessionOutcome> {
     let mut connection = Connection::new(url).await?;
-    let rtt_probe_ms = match rtt_probe_pings {
-        Some(n) => Some(probe_rtt_ms(&mut connection.ws, n).await?),
-        None => None,
+    // `probe_rtt_ms` reads from the socket, so anything the server had already
+    // sent comes back in `drained` and must be replayed into the receive loop
+    // before any newly-arriving frame. The first such frame is the Ogg Opus
+    // stream header; losing it silences the decoder for the whole session.
+    let (rtt_probe_ms, drained) = match rtt_probe_pings {
+        Some(n) => {
+            let probe = probe_rtt_ms(&mut connection.ws, n).await?;
+            (Some(probe.summary), probe.drained)
+        }
+        None => (None, Vec::new()),
     };
     let (mut sender, mut receiver) = connection.split();
 
@@ -490,8 +562,13 @@ async fn run_session(
             // reject, instead of silently absorbing it into the next batch.
             let mut opus_decoder = kaudio::ogg_opus::Decoder::new(OUT_SAMPLE_RATE, 0)?;
             let mut last_marked_turn: Option<u64> = None;
-            while let Some(msg) = receiver.next().await {
-                let msg: oai::ServerEvent = match msg? {
+            // Frames the RTT probe took off the socket come first, in arrival
+            // order, and only then the live stream. The decoder is stateful:
+            // replaying out of order, or not at all, is what loses the Ogg
+            // stream header.
+            let mut replay = drained.into_iter();
+            while let Some(frame) = next_frame(&mut replay, &mut receiver).await {
+                let msg: oai::ServerEvent = match frame? {
                     ws::Message::Text(b) => serde_json::from_str(&b)?,
                     ws::Message::Binary(b) => serde_json::from_slice(&b)?,
                     ws::Message::Close(_) => break,
@@ -811,6 +888,97 @@ mod tests {
             !residual_is_plausible(400.0, 20.0),
             "a residual 20x the RTT means unattributed server time, not network"
         );
+    }
+
+    /// The regression this pins: the RTT probe runs on the *measured*
+    /// session's socket, and the server sends the Ogg Opus stream header the
+    /// moment it accepts — `openai_server::realtime` starts a session with
+    /// `Format::OggOpus` and the out-send loop's first act is a `MsgOut::Audio`
+    /// carrying `encoder.header()`, forwarded as a `response.audio.delta` with
+    /// no client audio required. `wait_for_pong` used to discard every
+    /// non-pong frame for the whole 20-ping probe, so whether the header
+    /// survived was a race. Losing it leaves `kaudio::ogg_opus::Decoder`
+    /// without a stream header: no `FirstAgentAudio` marks and a 100%
+    /// `missed_endpoint_rate` on repetition 0, read as "the agent never
+    /// answered" when the agent answered fine.
+    ///
+    /// Drives a real loopback WebSocket rather than a mock, because the thing
+    /// under test is exactly the interleaving of server frames with ping/pong
+    /// on one socket.
+    #[tokio::test]
+    async fn frames_arriving_during_the_probe_reach_the_receive_path_before_live_ones() {
+        use futures_util::SinkExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            // Sent on accept, before any client audio — the stream header.
+            ws.send(ws::Message::Text(
+                r#"{"type":"response.audio.delta","delta":"HEADER"}"#.to_string(),
+            ))
+            .await
+            .unwrap();
+            // Keep polling so tungstenite answers the probe's pings; when the
+            // client signals it is past the probe, send one more frame.
+            while let Some(Ok(msg)) = ws.next().await {
+                match msg {
+                    ws::Message::Text(t) if t == "go" => {
+                        ws.send(ws::Message::Text(
+                            r#"{"type":"response.audio.delta","delta":"LIVE"}"#.to_string(),
+                        ))
+                        .await
+                        .unwrap();
+                    }
+                    ws::Message::Close(_) => break,
+                    _ => {}
+                }
+            }
+        });
+
+        let mut connection = Connection::new(&format!("ws://{addr}")).await.unwrap();
+        let probe = probe_rtt_ms(&mut connection.ws, 4).await.unwrap();
+        assert!(probe.summary.n >= 2, "probe needs samples to be meaningful");
+
+        // Handed back, not discarded.
+        let header_drained = probe.drained.iter().any(
+            |m| matches!(m, ws::Message::Text(t) if t.contains("HEADER")),
+        );
+        assert!(
+            header_drained,
+            "the header frame must survive the probe: {:?}",
+            probe.drained
+        );
+
+        // And it reaches the receive path ahead of anything arriving later.
+        let (mut sender, mut receiver) = connection.split();
+        let mut replay = probe.drained.into_iter();
+        sender
+            .ws_sender
+            .send(ws::Message::Text("go".to_string()))
+            .await
+            .unwrap();
+
+        let first = next_frame(&mut replay, &mut receiver).await.unwrap().unwrap();
+        assert!(
+            matches!(&first, ws::Message::Text(t) if t.contains("HEADER")),
+            "the drained header must be replayed first, before the live frame: {first:?}"
+        );
+        let second = loop {
+            let f = next_frame(&mut replay, &mut receiver).await.unwrap().unwrap();
+            if let ws::Message::Text(t) = &f
+                && t.contains("LIVE")
+            {
+                break f;
+            }
+        };
+        assert!(matches!(second, ws::Message::Text(_)));
+
+        drop(receiver);
+        drop(sender);
+        server.abort();
     }
 
     /// A session loop that ends in error must produce a failure the report

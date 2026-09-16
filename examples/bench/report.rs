@@ -55,6 +55,12 @@ use std::path::{Path, PathBuf};
 /// `server_internal_ms` for a Gantt-style render.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TurnBreakdown {
+    /// Which repetition's session this turn came from. Carried alongside
+    /// `turn` because `turn` alone does not identify a turn across a
+    /// multi-repetition run — it restarts at zero every repetition (see
+    /// [`ClientMark::repetition`]) — and a report bullet that cannot be
+    /// traced back to one specific turn is not actionable.
+    pub repetition: u64,
     pub turn: u64,
     /// First agent audio minus user speech end, on the client's own clock.
     pub e2e_ms: f64,
@@ -305,6 +311,9 @@ pub fn breakdown(marks: &[ClientMark], trace: &[TraceRecord], turn: u64) -> Resu
     let spans = collect_spans(trace, o.turn, i.t_us);
 
     Ok(TurnBreakdown {
+        // From the mark, not a parameter: `marks` is already scoped to one
+        // repetition (see this function's docs), so the mark is authoritative.
+        repetition: user_speech_end.repetition,
         turn,
         e2e_ms,
         detection_lag_ms,
@@ -644,10 +653,11 @@ fn residual_complaint(b: &TurnBreakdown, rtt_p50_ms: Option<f64>) -> Option<Stri
 
 /// Renders one turn's spans as a text Gantt chart, bars positioned by
 /// `(start_ms, end_ms)` relative to `I` (see `TurnBreakdown::spans`).
-/// `label` identifies the turn in the heading — since `TurnBreakdown.turn` is
-/// the *client's* per-repetition turn counter (see module docs), it repeats
-/// across repetitions and cannot uniquely label a turn across a whole
-/// multi-repetition run on its own.
+/// `label` is the turn's position in this report; the heading also spells out
+/// the `(repetition, fixture turn)` pair it came from, since
+/// `TurnBreakdown.turn` restarts every repetition and neither it nor the
+/// position identifies a turn on its own — the position shifts whenever an
+/// earlier turn is unmeasurable and drops out of `Breakdowns::measured`.
 ///
 /// A turn whose residual fails `residual_is_plausible` is called out in its
 /// own heading: the stage split below is an aggregate, and a reader scanning
@@ -665,8 +675,8 @@ fn render_gantt(
         None => String::new(),
     };
     out.push_str(&format!(
-        "### {label} (fixture turn {}, e2e={:.1}ms){complaint}\n\n",
-        b.turn, b.e2e_ms
+        "### {label} (repetition {}, fixture turn {}, e2e={:.1}ms){complaint}\n\n",
+        b.repetition, b.turn, b.e2e_ms
     ));
     if b.spans.is_empty() {
         out.push_str("_(no closed spans recorded for this turn)_\n\n");
@@ -817,10 +827,10 @@ fn render_residual_plausibility(breakdowns: &[TurnBreakdown], rtt_p50_ms: Option
         );
         return out;
     };
-    let complaints: Vec<(usize, String)> = breakdowns
+    let complaints: Vec<(usize, &TurnBreakdown, String)> = breakdowns
         .iter()
         .enumerate()
-        .filter_map(|(i, b)| residual_complaint(b, Some(rtt)).map(|c| (i, c)))
+        .filter_map(|(i, b)| residual_complaint(b, Some(rtt)).map(|c| (i, b, c)))
         .collect();
     if complaints.is_empty() {
         out.push_str(&format!(
@@ -837,8 +847,15 @@ fn render_residual_plausibility(breakdowns: &[TurnBreakdown], rtt_p50_ms: Option
         complaints.len(),
         breakdowns.len()
     ));
-    for (i, complaint) in complaints {
-        out.push_str(&format!("- Turn {i}: {complaint}\n"));
+    for (i, b, complaint) in complaints {
+        // Position alone is not traceable: it shifts when an earlier turn is
+        // unmeasurable, and it says nothing about which repetition. A
+        // residual complaint is the signal that a sweep point's data cannot
+        // be trusted, so it has to name the turn that produced it.
+        out.push_str(&format!(
+            "- Turn {i} (repetition {}, fixture turn {}): {complaint}\n",
+            b.repetition, b.turn
+        ));
     }
     out.push('\n');
     out
@@ -1264,6 +1281,7 @@ mod tests {
     #[test]
     fn report_labels_the_llm_stage_as_measured_local() {
         let b = TurnBreakdown {
+            repetition: 0,
             turn: 1,
             e2e_ms: 900.0,
             detection_lag_ms: Some(60.0),
@@ -1283,6 +1301,7 @@ mod tests {
     #[test]
     fn report_omits_the_local_label_when_llm_local_is_false() {
         let b = TurnBreakdown {
+            repetition: 0,
             turn: 1,
             e2e_ms: 900.0,
             detection_lag_ms: Some(60.0),
@@ -1313,6 +1332,7 @@ mod tests {
     #[test]
     fn report_filters_none_detection_lag_and_states_the_omission() {
         let with_lag = TurnBreakdown {
+            repetition: 0,
             turn: 0,
             e2e_ms: 900.0,
             detection_lag_ms: Some(60.0),
@@ -1321,6 +1341,7 @@ mod tests {
             spans: vec![],
         };
         let without_lag = TurnBreakdown {
+            repetition: 0,
             turn: 1,
             e2e_ms: 900.0,
             detection_lag_ms: None,
@@ -1448,6 +1469,10 @@ mod tests {
         assert_eq!(measured.len(), 2);
         assert_eq!(measured[0].server_internal_ms, 400.0, "repetition 1 must pair with its own (later) trace file");
         assert_eq!(measured[1].server_internal_ms, 800.0, "repetition 0 must pair with its own (earlier) trace file");
+        // Each breakdown must know which repetition it came from, or a report
+        // bullet naming it cannot be traced back to one turn.
+        assert_eq!(measured[0].repetition, 1);
+        assert_eq!(measured[1].repetition, 0);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1532,6 +1557,7 @@ mod tests {
     #[test]
     fn the_report_states_both_the_measured_and_the_excluded_counts() {
         let measured = TurnBreakdown {
+            repetition: 0,
             turn: 0,
             e2e_ms: 900.0,
             detection_lag_ms: Some(60.0),
@@ -1587,6 +1613,7 @@ mod tests {
     #[test]
     fn a_fully_measured_run_still_states_its_coverage() {
         let b = TurnBreakdown {
+            repetition: 0,
             turn: 0,
             e2e_ms: 900.0,
             detection_lag_ms: Some(60.0),
@@ -1742,8 +1769,6 @@ mod tests {
         );
     }
 
-    /// The banner must not appear on a clean run: one that shows up every
-    /// time is one the reader stops seeing.
     /// `residual_is_plausible` documented itself as the check that catches a
     /// broken join, and was referenced only by its own unit test: the measured
     /// RTT went to `--out-marks` and never reached the report, so a turn whose
@@ -1751,8 +1776,13 @@ mod tests {
     /// impossible to read such a turn as normal.
     #[test]
     fn an_implausible_residual_is_called_out_per_turn() {
+        // Deliberately not at position 0 of its own repetition, and not
+        // repetition 0: the report's positional index is *not* the turn's
+        // identity, and a complaint that carries only the position cannot be
+        // traced back to the turn that produced it.
         let bad = TurnBreakdown {
-            turn: 0,
+            repetition: 3,
+            turn: 4,
             e2e_ms: 700.0,
             detection_lag_ms: Some(60.0),
             server_internal_ms: 900.0,
@@ -1760,7 +1790,8 @@ mod tests {
             spans: vec![("llm.push".to_string(), 10.0, 60.0)],
         };
         let good = TurnBreakdown {
-            turn: 1,
+            repetition: 3,
+            turn: 5,
             e2e_ms: 900.0,
             detection_lag_ms: Some(60.0),
             server_internal_ms: 880.0,
@@ -1781,11 +1812,11 @@ mod tests {
             "the audit must count the failures: {out}"
         );
         assert!(
-            out.contains("Turn 0: IMPLAUSIBLE"),
-            "the failing turn must be named: {out}"
+            out.contains("- Turn 0 (repetition 3, fixture turn 4): IMPLAUSIBLE"),
+            "the audit bullet must identify the turn, not just its position: {out}"
         );
         assert!(
-            !out.contains("Turn 1: IMPLAUSIBLE"),
+            !out.contains("Turn 1 (repetition 3, fixture turn 5): IMPLAUSIBLE"),
             "the plausible turn must not be flagged: {out}"
         );
         // And the waterfall itself, not just the audit section.
@@ -1797,12 +1828,17 @@ mod tests {
             heading.contains("IMPLAUSIBLE"),
             "a reader scanning waterfalls must not take it for a normal turn: {heading}"
         );
+        assert!(
+            heading.contains("repetition 3, fixture turn 4"),
+            "the waterfall heading must identify the turn too: {heading}"
+        );
     }
 
     /// "Checked, all fine" and "never checked" must not look the same.
     #[test]
     fn the_residual_audit_distinguishes_all_clear_from_never_checked() {
         let b = TurnBreakdown {
+            repetition: 0,
             turn: 0,
             e2e_ms: 900.0,
             detection_lag_ms: Some(60.0),
@@ -1829,6 +1865,8 @@ mod tests {
         );
     }
 
+    /// The INCOMPLETE RUN banner must not appear on a clean run: one that
+    /// shows up every time is one the reader stops seeing.
     #[test]
     fn a_clean_run_renders_no_incomplete_run_banner() {
         let out = render_markdown(&all_measured(vec![]), &BTreeMap::new(), &no_turn_taking(), false, None, &[]);
