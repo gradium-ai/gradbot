@@ -6,6 +6,15 @@
 //! arrives. The gap between them is the number that matters to a user: how
 //! long after they stop speaking does the agent start talking.
 //!
+//! Every session opens with a `session.update` (`send_session_update`,
+//! `build_session_config`) before any audio is streamed -- the server
+//! rejects audio on an unconfigured session. That also means `assistant_speaks_first: true`
+//! (hardcoded server-side, see the `BENCHMARK TRAP` comment in
+//! `openai_server.rs`) fires an unsolicited greeting the instant the session
+//! is configured, so `drain_greeting` consumes and discards that audio,
+//! recording no marks, before playback starts -- otherwise the greeting gets
+//! mistaken for turn 0's answer.
+//!
 //! Pacing (the `sleep_until` against a fixed clock origin, computed from a
 //! cumulative sample count rather than per-chunk sleeps) is copied verbatim
 //! from `examples/gradbot-client.rs` — cumulative sleeps drift, and drift
@@ -376,6 +385,149 @@ struct Args {
     /// remote LLM.
     #[clap(long, action = clap::ArgAction::Set, default_value_t = true)]
     llm_local: bool,
+
+    /// Optional endpointing overrides, forwarded verbatim in the
+    /// `session.update` payload (see `SessionConfig` in `openai_protocol.rs`).
+    /// Left unset by default so the field is simply absent from the wire
+    /// payload and the server keeps its own hardcoded default -- see
+    /// `build_session_config`. Exists so a later sweep task can vary these to
+    /// find the latency/quality frontier.
+    #[clap(long)]
+    flush_duration_s: Option<f64>,
+
+    #[clap(long)]
+    min_listen_before_flush_s: Option<f64>,
+
+    #[clap(long)]
+    vad_eot_threshold: Option<f64>,
+
+    #[clap(long)]
+    padding_bonus: Option<f64>,
+
+    #[clap(long)]
+    silence_timeout_s: Option<f64>,
+}
+
+/// Builds the `session.update` payload from CLI flags. Only the endpointing
+/// fields the operator actually set are included in the struct as `Some`;
+/// `SessionConfig`'s `skip_serializing_if = "Option::is_none"` then leaves
+/// every unset field entirely absent from the wire payload, so
+/// `resolve_endpointing` (server-side) falls back to today's hardcoded
+/// default for it. Sending an explicit "default" value instead would
+/// silently override that default, which is exactly what must not happen for
+/// a field the operator never asked to change.
+fn build_session_config(args: &Args) -> oai::SessionConfig {
+    oai::SessionConfig {
+        instructions: None,
+        voice: None,
+        voice_id: None,
+        allow_recording: false,
+        lang: None,
+        flush_duration_s: args.flush_duration_s,
+        min_listen_before_flush_s: args.min_listen_before_flush_s,
+        vad_eot_threshold: args.vad_eot_threshold,
+        padding_bonus: args.padding_bonus,
+        silence_timeout_s: args.silence_timeout_s,
+    }
+}
+
+/// Sends the `session.update` client event. Must happen before any audio is
+/// streamed: the server rejects audio on an unconfigured session with
+/// "Session configuration required before sending audio".
+async fn send_session_update(ws: &mut WebSocket, session: oai::SessionConfig) -> Result<()> {
+    use futures_util::SinkExt;
+    let msg = serde_json::to_string(&oai::ClientEvent::session_update(session))?;
+    ws.send(ws::Message::Text(msg)).await?;
+    Ok(())
+}
+
+/// How long the agent's greeting audio must be quiet before fixture playback
+/// begins. `assistant_speaks_first: true` is hardcoded server-side (see the
+/// `BENCHMARK TRAP` comment in `openai_server.rs`), so the instant our
+/// `session.update` lands the agent starts speaking an unsolicited greeting.
+/// If that audio is still arriving when playback starts, it gets recorded as
+/// turn 0's `FirstAgentAudio` and turn 0's latency measures the greeting, not
+/// any answer -- a small, plausible-looking number that is pure fiction.
+const GREETING_QUIET_WINDOW: Duration = Duration::from_millis(1500);
+
+/// Hard cap on how long `drain_greeting` will wait, regardless of whether the
+/// greeting ever goes quiet. A server that greets forever must not be allowed
+/// to hang the whole benchmark; the run continues (and says so on stderr)
+/// rather than measuring nothing.
+const GREETING_DRAIN_CAP: Duration = Duration::from_secs(6);
+
+/// Consumes and discards inbound agent audio after the session update until
+/// it has been quiet for `GREETING_QUIET_WINDOW`, or `GREETING_DRAIN_CAP` is
+/// hit. Records no marks -- this phase must never be mistaken for a fixture
+/// turn.
+///
+/// Deliberately does **not** filter greeting audio out by comparing its
+/// arrival time to a turn's `UserSpeechEnd`. That is exactly what a premature
+/// cut looks like, and `is_premature_cut` (Task 13's report code) depends on
+/// being able to tell the two apart. Draining the greeting in its own phase,
+/// before playback starts, keeps them distinguishable; filtering by timing
+/// would silently destroy that signal instead.
+///
+/// There is no explicit "greeting done" event to wait on -- the server never
+/// emits `ResponseAudioDone` or `ResponseCreated` -- so a quiet-period
+/// heuristic is the only option.
+///
+/// `decoder` is the same decoder `recv_loop` goes on to use for the rest of
+/// the session: the Ogg Opus stream's header is sent exactly once, at the
+/// very start of the session, and a decoder created fresh after this phase
+/// would never see it.
+async fn drain_greeting(
+    repetition: u64,
+    ws: &mut WebSocket,
+    decoder: &mut kaudio::ogg_opus::Decoder,
+) -> Result<()> {
+    let cap_deadline = Instant::now() + GREETING_DRAIN_CAP;
+    let mut quiet_deadline = Instant::now() + GREETING_QUIET_WINDOW;
+    loop {
+        let now = Instant::now();
+        if now >= quiet_deadline {
+            return Ok(());
+        }
+        if now >= cap_deadline {
+            eprintln!(
+                "bench: repetition {repetition}: greeting drain hit its \
+                 {GREETING_DRAIN_CAP:?} cap without going quiet; starting playback anyway"
+            );
+            return Ok(());
+        }
+        let wait = quiet_deadline.min(cap_deadline) - now;
+        let frame = match tokio::time::timeout(wait, ws.next()).await {
+            // Neither deadline had a message to show for it; loop back to
+            // the top and re-check which one was actually hit.
+            Err(_) => continue,
+            Ok(frame) => frame,
+        };
+        let msg = match frame {
+            None => anyhow::bail!("connection closed while draining the greeting"),
+            Some(msg) => msg?,
+        };
+        let event: oai::ServerEvent = match msg {
+            ws::Message::Text(t) => serde_json::from_str(&t)?,
+            ws::Message::Binary(b) => serde_json::from_slice(&b)?,
+            ws::Message::Close(_) => {
+                anyhow::bail!("connection closed while draining the greeting")
+            }
+            ws::Message::Frame(_) | ws::Message::Ping(_) | ws::Message::Pong(_) => continue,
+        };
+        match event {
+            oai::ServerEvent::Error { event_id: _, error } => {
+                anyhow::bail!("Error from server while draining the greeting: {error:?}");
+            }
+            oai::ServerEvent::ResponseAudioDelta { event_id: _, delta } => {
+                if let Some(decoded) = decoder.decode(&delta)?
+                    && is_agent_audio(decoded)
+                {
+                    quiet_deadline = Instant::now() + GREETING_QUIET_WINDOW;
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Client marks recorded during a single fixture manifest replay, plus the
@@ -443,12 +595,29 @@ async fn run_session(
     manifest: &Manifest,
     repetition: u64,
     rtt_probe_pings: Option<usize>,
+    session_config: oai::SessionConfig,
 ) -> Result<SessionOutcome> {
     let mut connection = Connection::new(url).await?;
-    // `probe_rtt_ms` reads from the socket, so anything the server had already
-    // sent comes back in `drained` and must be replayed into the receive loop
-    // before any newly-arriving frame. The first such frame is the Ogg Opus
-    // stream header; losing it silences the decoder for the whole session.
+
+    // The server rejects audio on an unconfigured session ("Session
+    // configuration required before sending audio"), so this must land
+    // before any fixture audio -- and before the RTT probe, which itself
+    // sends nothing but does read from this same socket.
+    send_session_update(&mut connection.ws, session_config).await?;
+
+    // `assistant_speaks_first: true` is hardcoded server-side, so the agent
+    // greets unsolicited the instant the session is configured. This decoder
+    // is created here, rather than inside `recv_loop`, because it must be the
+    // one and only decoder for the whole session: the Ogg Opus stream's
+    // header is sent exactly once, right at the start, and it will be
+    // consumed here (whether it turns up before the greeting, during it, or
+    // interleaved with the RTT probe below).
+    let mut opus_decoder = kaudio::ogg_opus::Decoder::new(OUT_SAMPLE_RATE, 0)?;
+    drain_greeting(repetition, &mut connection.ws, &mut opus_decoder).await?;
+
+    // `probe_rtt_ms` reads from the socket, so anything the server sends
+    // during the probe comes back in `drained` and must be replayed into the
+    // receive loop before any newly-arriving frame.
     let (rtt_probe_ms, drained) = match rtt_probe_pings {
         Some(n) => {
             let probe = probe_rtt_ms(&mut connection.ws, n).await?;
@@ -560,7 +729,11 @@ async fn run_session(
             // also means a header-only packet decodes to `Some(&[])` rather
             // than `None` — exactly the case `is_agent_audio` exists to
             // reject, instead of silently absorbing it into the next batch.
-            let mut opus_decoder = kaudio::ogg_opus::Decoder::new(OUT_SAMPLE_RATE, 0)?;
+            //
+            // Continues the decoder `drain_greeting` already used, rather
+            // than starting a fresh one: the Ogg Opus stream header was fed
+            // to it back then, and a new decoder here would never see it.
+            let mut opus_decoder = opus_decoder;
             let mut last_marked_turn: Option<u64> = None;
             // Frames the RTT probe took off the socket come first, in arrival
             // order, and only then the live stream. The decoder is stateful:
@@ -650,6 +823,7 @@ async fn run_session(
 async fn main() -> Result<()> {
     let args = Args::parse();
     let manifest = Manifest::load(&args.manifest)?;
+    let session_config = build_session_config(&args);
 
     // Transport RTT is measured once, on repetition 0's own connection before
     // its playback starts. Not on a connection of its own: the server writes
@@ -675,7 +849,14 @@ async fn main() -> Result<()> {
         } else {
             None
         };
-        let outcome = run_session(&args.url, &manifest, rep as u64, probe_pings).await?;
+        let outcome = run_session(
+            &args.url,
+            &manifest,
+            rep as u64,
+            probe_pings,
+            session_config.clone(),
+        )
+        .await?;
         let marks = outcome.marks;
         if let Some(error) = outcome.failure {
             failures.push(RunFailure {
@@ -1034,5 +1215,74 @@ mod tests {
 
         let explicit_true = Args::try_parse_from(base.iter().chain(["--llm-local", "true"].iter())).unwrap();
         assert!(explicit_true.llm_local);
+    }
+
+    /// The endpointing fields the operator set must be present in the
+    /// `session.update` payload with their given values -- and just as
+    /// importantly, every field the operator did *not* set must be entirely
+    /// absent from the serialized payload, not present with some "default"
+    /// value. `resolve_endpointing` (server-side) only falls back to today's
+    /// hardcoded default when a field is *missing*; a field sent as an
+    /// explicit value, even one that happens to match the current default,
+    /// would silently pin that value on the wire and defeat the whole point
+    /// of leaving it unset.
+    #[test]
+    fn session_update_payload_carries_only_the_endpointing_flags_the_operator_set() {
+        let base = [
+            "gradbot-bench",
+            "--url",
+            "ws://x",
+            "--manifest",
+            "m.json",
+            "--out-marks",
+            "o.json",
+            "--vad-eot-threshold",
+            "0.42",
+            "--silence-timeout-s",
+            "9.5",
+        ];
+        let args = Args::try_parse_from(base).unwrap();
+        let session = build_session_config(&args);
+        let json = serde_json::to_value(&session).unwrap();
+        let obj = json.as_object().expect("session config serializes to an object");
+
+        assert_eq!(obj.get("vad_eot_threshold"), Some(&serde_json::json!(0.42)));
+        assert_eq!(obj.get("silence_timeout_s"), Some(&serde_json::json!(9.5)));
+
+        // Not set on the CLI -- must not appear in the payload at all.
+        assert!(
+            !obj.contains_key("flush_duration_s"),
+            "unset field leaked into the payload: {obj:?}"
+        );
+        assert!(
+            !obj.contains_key("min_listen_before_flush_s"),
+            "unset field leaked into the payload: {obj:?}"
+        );
+        assert!(
+            !obj.contains_key("padding_bonus"),
+            "unset field leaked into the payload: {obj:?}"
+        );
+    }
+
+    /// When the operator sets none of the five endpointing flags, none of
+    /// them may appear in the payload -- the server must see exactly what a
+    /// plain `session.update` without endpointing overrides has always sent.
+    #[test]
+    fn session_update_payload_omits_all_endpointing_fields_by_default() {
+        let base = ["gradbot-bench", "--url", "ws://x", "--manifest", "m.json", "--out-marks", "o.json"];
+        let args = Args::try_parse_from(base).unwrap();
+        let session = build_session_config(&args);
+        let json = serde_json::to_value(&session).unwrap();
+        let obj = json.as_object().expect("session config serializes to an object");
+
+        for field in [
+            "flush_duration_s",
+            "min_listen_before_flush_s",
+            "vad_eot_threshold",
+            "padding_bonus",
+            "silence_timeout_s",
+        ] {
+            assert!(!obj.contains_key(field), "{field} must be absent by default: {obj:?}");
+        }
     }
 }
