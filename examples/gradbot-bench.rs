@@ -166,6 +166,21 @@ pub fn is_agent_audio(decoded: &[f32]) -> bool {
     !decoded.is_empty()
 }
 
+/// Converts f32 PCM samples to raw little-endian i16 bytes -- the wire format
+/// `openai_server.rs` configures the session for (`Format::pcm(24000)`), not
+/// Ogg Opus. Each sample becomes exactly 2 bytes; callers computing sample
+/// counts (the pacing clock, `ClientMark.sample_idx`) must keep counting
+/// samples, never the byte length this function returns, or the join against
+/// the server's own `samples_sent` counter breaks silently.
+fn pcm_f32_to_i16le_bytes(samples: &[f32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(samples.len() * 2);
+    for &s in samples {
+        let v = (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
 /// End-to-end latency for one turn of one repetition: first agent audio
 /// minus user speech end, both on the harness's own monotonic clock. Returns
 /// `None` if the agent never answered. Matches on `(repetition, turn)`, not
@@ -642,11 +657,6 @@ async fn run_session(
             use futures_util::SinkExt;
             use oai::ClientEvent as CE;
 
-            let mut opus_encoder = kaudio::ogg_opus::Encoder::new(IN_SAMPLE_RATE as usize)?;
-            let header = opus_encoder.header_data().to_vec();
-            let msg = serde_json::to_string(&CE::input_audio_buffer_append(header))?;
-            sender.ws_sender.send(ws::Message::Text(msg)).await?;
-
             // Cumulative samples written to the socket across the whole
             // session (speech and silence, every turn) — this is what both
             // the pacing clock and `ClientMark.sample_idx` are measured
@@ -671,9 +681,9 @@ async fn run_session(
                     let target_time = origin + Duration::from_millis(millis);
                     tokio::time::sleep_until(target_time.into()).await;
 
-                    let encoded = opus_encoder.encode_page(chunk)?;
+                    let pcm_bytes = pcm_f32_to_i16le_bytes(chunk);
                     let out_msg =
-                        serde_json::to_string(&CE::input_audio_buffer_append(encoded))?;
+                        serde_json::to_string(&CE::input_audio_buffer_append(pcm_bytes))?;
                     sender.ws_sender.send(ws::Message::Text(out_msg)).await?;
 
                     wav_pos += chunk.len() as u64;
@@ -705,9 +715,9 @@ async fn run_session(
                     tokio::time::sleep_until(target_time.into()).await;
 
                     let silence = vec![0f32; chunk_len];
-                    let encoded = opus_encoder.encode_page(&silence)?;
+                    let pcm_bytes = pcm_f32_to_i16le_bytes(&silence);
                     let out_msg =
-                        serde_json::to_string(&CE::input_audio_buffer_append(encoded))?;
+                        serde_json::to_string(&CE::input_audio_buffer_append(pcm_bytes))?;
                     sender.ws_sender.send(ws::Message::Text(out_msg)).await?;
 
                     gap_streamed += chunk_len as u64;
@@ -1031,6 +1041,50 @@ mod tests {
     fn header_packets_are_not_first_audio() {
         assert!(!is_agent_audio(&[]), "an empty decode is not audio");
         assert!(is_agent_audio(&[0.0, 0.1]), "a non-empty decode is audio");
+    }
+
+    /// Pins the outbound wire format: `openai_server.rs` configures the
+    /// session with `Format::pcm(24000)`, raw little-endian i16, not Ogg
+    /// Opus -- so every sample must become exactly 2 bytes, low byte first.
+    /// A byte-order mistake (accidentally emitting big-endian) would produce
+    /// audio that decodes to near-silence or noise rather than an obvious
+    /// crash, so this checks the literal byte sequence, not just that the
+    /// output is non-empty.
+    ///
+    /// It also pins the detail the task calls out as the one most likely to
+    /// silently corrupt every measurement: encoding doubles the *byte*
+    /// count relative to the *sample* count. Anything downstream that feeds
+    /// `sample_idx` or the pacing clock (`total_samples` in the send loop)
+    /// must keep counting the input samples, never
+    /// `pcm_f32_to_i16le_bytes(..).len()` -- that length is sample count,
+    /// not byte count.
+    #[test]
+    fn pcm_f32_to_i16le_bytes_is_little_endian_and_doubles_only_the_byte_count() {
+        // 0.0, 1.0 (clamped max), -1.0 (clamped min), 0.5 -- chosen so low
+        // and high bytes differ, catching a byte-order swap.
+        let samples = [0.0f32, 1.0, -1.0, 0.5];
+        let bytes = pcm_f32_to_i16le_bytes(&samples);
+
+        assert_eq!(
+            bytes.len(),
+            samples.len() * 2,
+            "each f32 sample must become exactly 2 bytes"
+        );
+        // The byte count is not the sample count: a caller that mistakenly
+        // used `bytes.len()` as a sample count would silently double
+        // sample_idx and the pacing clock. Assert the two independently.
+        assert_eq!(samples.len(), 4, "sample count is unaffected by encoding");
+
+        assert_eq!(
+            bytes,
+            vec![
+                0x00, 0x00, // 0.0  -> 0i16
+                0xFF, 0x7F, // 1.0  -> i16::MAX = 32767, LE
+                0x01, 0x80, // -1.0 -> -32767, LE
+                0xFF, 0x3F, // 0.5  -> 16383, LE
+            ],
+            "bytes must be little-endian i16, in input sample order"
+        );
     }
 
     #[test]
