@@ -1,0 +1,89 @@
+{
+  "name": "turn_taking",
+  "turns": [
+    {
+      "wav": "/data/home/neil/datasets/gradbot-bench/short_answer_0.wav",
+      "speech_start_sample": 0,
+      "speech_end_sample": 50140,
+      "gap_after_s": 8.0,
+      "category": "short_answer"
+    },
+    {
+      "wav": "/data/home/neil/datasets/gradbot-bench/short_answer_1.wav",
+      "speech_start_sample": 0,
+      "speech_end_sample": 55744,
+      "gap_after_s": 8.0,
+      "category": "short_answer"
+    },
+    {
+      "wav": "/data/home/neil/datasets/gradbot-bench/medium_turn_0.wav",
+      "speech_start_sample": 0,
+      "speech_end_sample": 134522,
+      "gap_after_s": 8.0,
+      "category": "medium_turn"
+    },
+    {
+      "wav": "/data/home/neil/datasets/gradbot-bench/medium_turn_1.wav",
+      "speech_start_sample": 0,
+      "speech_end_sample": 89299,
+      "gap_after_s": 8.0,
+      "category": "medium_turn"
+    },
+    {
+      "wav": "/data/home/neil/datasets/gradbot-bench/question_0.wav",
+      "speech_start_sample": 0,
+      "speech_end_sample": 132071,
+      "gap_after_s": 8.0,
+      "category": "question"
+    },
+    {
+      "wav": "/data/home/neil/datasets/gradbot-bench/question_1.wav",
+      "speech_start_sample": 0,
+      "speech_end_sample": 91373,
+      "gap_after_s": 8.0,
+      "category": "question"
+    },
+    {
+      "wav": "/data/home/neil/datasets/gradbot-bench/digits_0.wav",
+      "speech_start_sample": 0,
+      "speech_end_sample": 92860,
+      "gap_after_s": 8.0,
+      "category": "digits"
+    },
+    {
+      "wav": "/data/home/neil/datasets/gradbot-bench/digits_1.wav",
+      "speech_start_sample": 0,
+      "speech_end_sample": 100313,
+      "gap_after_s": 8.0,
+      "category": "digits"
+    },
+    {
+      "wav": "/data/home/neil/datasets/gradbot-bench/hesitation_0.wav",
+      "speech_start_sample": 0,
+      "speech_end_sample": 131268,
+      "gap_after_s": 8.0,
+      "category": "hesitation"
+    },
+    {
+      "wav": "/data/home/neil/datasets/gradbot-bench/hesitation_1.wav",
+      "speech_start_sample": 0,
+      "speech_end_sample": 127466,
+      "gap_after_s": 8.0,
+      "category": "hesitation"
+    },
+    {
+      "wav": "/data/home/neil/datasets/gradbot-bench/long_turn_0.wav",
+      "speech_start_sample": 0,
+      "speech_end_sample": 271505,
+      "gap_after_s": 8.0,
+      "category": "long_turn"
+    },
+    {
+      "wav": "/data/home/neil/datasets/gradbot-bench/long_turn_1.wav",
+      "speech_start_sample": 0,
+      "speech_end_sample": 275884,
+      "gap_after_s": 8.0,
+      "category": "long_turn"
+    }
+  ]
+}
