@@ -102,6 +102,46 @@ async fn msg_out_consumer(
     Ok(())
 }
 
+/// Builds the `gradbot` `SessionConfig` from a client's `session.update`
+/// payload. Pulled out of `msg_in_producer` so the wire-to-library mapping is
+/// unit-testable without a real WebSocket connection.
+fn build_gradbot_session_config(session: openai_protocol::SessionConfig) -> SessionConfig {
+    let endpointing = session.resolve_endpointing();
+    let instructions = session.instructions;
+    let language = session
+        .lang
+        .as_deref()
+        .and_then(|s| serde_json::from_value(serde_json::Value::String(s.to_string())).ok())
+        .unwrap_or(Lang::En);
+    SessionConfig {
+        voice_id: session.voice_id,
+        instructions,
+        language,
+        // BENCHMARK TRAP: hardcoded, and there is no wire field to turn it
+        // off. `gradbot-bench` sends no `session.update` today, so it never
+        // reaches this line and never gets a greeting. The moment a sweep
+        // task sends one to reach the endpointing knobs below, the server
+        // will greet on `[start]` and that greeting becomes the first agent
+        // audio the harness sees — recorded as turn 0's `FirstAgentAudio`,
+        // with a latency that measures the greeting, not any answer. Turn 0
+        // of *every* repetition is poisoned, silently and plausibly. Before
+        // sending a `session.update` from the benchmark, either make this
+        // configurable from the wire and set it false, or discard turn 0
+        // explicitly in the report.
+        assistant_speaks_first: true,
+        silence_timeout_s: endpointing.silence_timeout_s,
+        tools: vec![],
+        flush_duration_s: endpointing.flush_duration_s,
+        padding_bonus: endpointing.padding_bonus,
+        rewrite_rules: None,
+        stt_extra_config: None,
+        tts_extra_config: None,
+        llm_extra_config: session.llm_extra_config,
+        min_listen_before_flush_s: endpointing.min_listen_before_flush_s,
+        vad_eot_threshold: endpointing.vad_eot_threshold,
+    }
+}
+
 /// Producer loop that reads from WebSocket and sends to the session.
 async fn msg_in_producer(
     mut ws: WebSocketReceiver,
@@ -129,46 +169,8 @@ async fn msg_in_producer(
                 event_id: _,
             } => {
                 tracing::info!(?session, "session update");
-                let endpointing = session.resolve_endpointing();
-                let instructions = session.instructions;
-                let language = session
-                    .lang
-                    .as_deref()
-                    .and_then(|s| {
-                        serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
-                    })
-                    .unwrap_or(Lang::En);
                 input
-                    .send_config(SessionConfig {
-                        voice_id: session.voice_id,
-                        instructions,
-                        language,
-                        // BENCHMARK TRAP: hardcoded, and there is no wire
-                        // field to turn it off. `gradbot-bench` sends no
-                        // `session.update` today, so it never reaches this
-                        // line and never gets a greeting. The moment a sweep
-                        // task sends one to reach the endpointing knobs
-                        // below, the server will greet on `[start]` and that
-                        // greeting becomes the first agent audio the harness
-                        // sees — recorded as turn 0's `FirstAgentAudio`, with
-                        // a latency that measures the greeting, not any
-                        // answer. Turn 0 of *every* repetition is poisoned,
-                        // silently and plausibly. Before sending a
-                        // `session.update` from the benchmark, either make
-                        // this configurable from the wire and set it false,
-                        // or discard turn 0 explicitly in the report.
-                        assistant_speaks_first: true,
-                        silence_timeout_s: endpointing.silence_timeout_s,
-                        tools: vec![],
-                        flush_duration_s: endpointing.flush_duration_s,
-                        padding_bonus: endpointing.padding_bonus,
-                        rewrite_rules: None,
-                        stt_extra_config: None,
-                        tts_extra_config: None,
-                        llm_extra_config: None,
-                        min_listen_before_flush_s: endpointing.min_listen_before_flush_s,
-                        vad_eot_threshold: endpointing.vad_eot_threshold,
-                    })
+                    .send_config(build_gradbot_session_config(session))
                     .await?;
             }
             ClientEvent::InputAudioBufferAppend { audio, event_id: _ } => {
@@ -340,4 +342,49 @@ pub async fn serve(config: Config) -> Result<()> {
         tracing::error!(?err, "axum server error");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wire_session(llm_extra_config: Option<String>) -> openai_protocol::SessionConfig {
+        openai_protocol::SessionConfig {
+            instructions: None,
+            voice: None,
+            voice_id: None,
+            allow_recording: false,
+            lang: None,
+            flush_duration_s: None,
+            min_listen_before_flush_s: None,
+            vad_eot_threshold: None,
+            padding_bonus: None,
+            silence_timeout_s: None,
+            llm_extra_config,
+        }
+    }
+
+    /// Regression guard: a session update omitting `llm_extra_config` must
+    /// still produce a `gradbot::SessionConfig` with `llm_extra_config:
+    /// None` -- exactly what this server has always hardcoded. Every
+    /// existing consumer (demos, `gradbot_py`, `examples/gradbot-client.rs`)
+    /// sends no such field.
+    #[test]
+    fn session_update_without_llm_extra_config_yields_none() {
+        let config = build_gradbot_session_config(wire_session(None));
+        assert_eq!(config.llm_extra_config, None);
+    }
+
+    /// An `llm_extra_config` set on the wire payload must be carried through
+    /// unchanged to the constructed `gradbot::SessionConfig`.
+    #[test]
+    fn session_update_llm_extra_config_is_carried_through() {
+        let config = build_gradbot_session_config(wire_session(Some(
+            r#"{"tool_choice":"none"}"#.to_string(),
+        )));
+        assert_eq!(
+            config.llm_extra_config,
+            Some(r#"{"tool_choice":"none"}"#.to_string())
+        );
+    }
 }

@@ -69,6 +69,12 @@ pub struct SessionConfig {
     pub padding_bonus: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub silence_timeout_s: Option<f64>,
+    /// JSON object (as a string) merged into the outgoing LLM request body --
+    /// see `gradbot::SessionConfig::llm_extra_config` and `llm.rs`'s `push`.
+    /// Falls back to `None` (no merge) when omitted, exactly as
+    /// `openai_server.rs` has always hardcoded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_extra_config: Option<String>,
 }
 
 /// Endpointing fields resolved from a client's optional overrides, falling
@@ -471,6 +477,47 @@ mod tests {
         assert_eq!(endpointing.flush_duration_s, gradbot::DEFAULT_FLUSH_FOR_S);
         assert_eq!(endpointing.min_listen_before_flush_s, 0.5);
         assert_eq!(endpointing.padding_bonus, 0.0);
+    }
+
+    /// Regression guard: a session update that omits `llm_extra_config` must
+    /// deserialize to `None`, exactly what `openai_server.rs` has always
+    /// hardcoded. Every existing client (demos, gradbot-client.rs,
+    /// gradbot_py) sends no such field, so a change here would silently
+    /// change behaviour for all of them at once.
+    #[test]
+    fn test_session_update_without_llm_extra_config_is_none() {
+        let session = session_from_json(
+            r#"{
+                "type": "session.update",
+                "event_id": "event_123",
+                "session": {
+                    "allow_recording": true
+                }
+            }"#,
+        );
+
+        assert_eq!(session.llm_extra_config, None);
+    }
+
+    /// An `llm_extra_config` present in the payload must be carried through
+    /// unchanged.
+    #[test]
+    fn test_session_update_llm_extra_config_is_applied() {
+        let session = session_from_json(
+            r#"{
+                "type": "session.update",
+                "event_id": "event_123",
+                "session": {
+                    "allow_recording": true,
+                    "llm_extra_config": "{\"tool_choice\":\"none\"}"
+                }
+            }"#,
+        );
+
+        assert_eq!(
+            session.llm_extra_config,
+            Some(r#"{"tool_choice":"none"}"#.to_string())
+        );
     }
 
     #[test]

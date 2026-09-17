@@ -421,6 +421,15 @@ struct Args {
 
     #[clap(long)]
     silence_timeout_s: Option<f64>,
+
+    /// JSON object (as a string) merged into the outgoing LLM request body,
+    /// e.g. `--llm-extra-config '{"tool_choice":"none"}'` to work against a
+    /// vLLM server started without `--enable-auto-tool-choice` (which
+    /// otherwise rejects gradbot's unconditional `tool_choice: "auto"` with a
+    /// 400). Left unset by default so the field is absent from the wire
+    /// payload, matching every existing client.
+    #[clap(long)]
+    llm_extra_config: Option<String>,
 }
 
 /// Builds the `session.update` payload from CLI flags. Only the endpointing
@@ -443,6 +452,7 @@ fn build_session_config(args: &Args) -> oai::SessionConfig {
         vad_eot_threshold: args.vad_eot_threshold,
         padding_bonus: args.padding_bonus,
         silence_timeout_s: args.silence_timeout_s,
+        llm_extra_config: args.llm_extra_config.clone(),
     }
 }
 
@@ -1335,8 +1345,38 @@ mod tests {
             "vad_eot_threshold",
             "padding_bonus",
             "silence_timeout_s",
+            "llm_extra_config",
         ] {
             assert!(!obj.contains_key(field), "{field} must be absent by default: {obj:?}");
         }
+    }
+
+    /// `--llm-extra-config` must be absent from the wire payload by default
+    /// (the regression guard for every existing consumer), and carried
+    /// through verbatim when the operator sets it -- e.g. to send
+    /// `{"tool_choice":"none"}` against a vLLM started without
+    /// `--enable-auto-tool-choice`.
+    #[test]
+    fn llm_extra_config_flag_is_forwarded_when_set() {
+        let base = [
+            "gradbot-bench",
+            "--url",
+            "ws://x",
+            "--manifest",
+            "m.json",
+            "--out-marks",
+            "o.json",
+            "--llm-extra-config",
+            r#"{"tool_choice":"none"}"#,
+        ];
+        let args = Args::try_parse_from(base).unwrap();
+        let session = build_session_config(&args);
+        let json = serde_json::to_value(&session).unwrap();
+        let obj = json.as_object().expect("session config serializes to an object");
+
+        assert_eq!(
+            obj.get("llm_extra_config"),
+            Some(&serde_json::json!(r#"{"tool_choice":"none"}"#))
+        );
     }
 }
