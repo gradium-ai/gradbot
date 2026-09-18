@@ -68,6 +68,19 @@ impl SttClient {
             .stt_stream(setup)
             .await
             .context("STT: failed to connect")?;
+        // Log the STT's own framing before `split()` consumes the stream.
+        // `frame_size / sample_rate` is the duration of one STT frame, which is
+        // the unit `delay_in_frames` is denominated in — you cannot reason about
+        // that knob, or about the floor under end-of-turn detection, without it.
+        // (`delay_in_frames` itself is parsed by the gradium crate but has no
+        // public accessor, so it can only be inferred by setting it and
+        // measuring the change.)
+        tracing::info!(
+            stt_sample_rate = stream.sample_rate(),
+            stt_frame_size = stream.frame_size(),
+            stt_frame_ms = 1000.0 * stream.frame_size() as f64 / stream.sample_rate().max(1) as f64,
+            "STT stream framing"
+        );
         let (tx, rx) = stream.split();
         Ok((
             SttStreamSender(tx),
