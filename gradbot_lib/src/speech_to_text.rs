@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 const VAD_INDEX: usize = 2;
 
 pub struct SttClient(gradium::Client);
-pub struct SttStreamReceiver(gradium::stt::SttStreamReceiver, f64);
+pub struct SttStreamReceiver(gradium::stt::SttStreamReceiver, f64, bool);
 pub struct SttStreamSender(gradium::stt::SttStreamSender);
 
 #[derive(Debug)]
@@ -84,7 +84,7 @@ impl SttClient {
         let (tx, rx) = stream.split();
         Ok((
             SttStreamSender(tx),
-            SttStreamReceiver(rx, vad_eot_threshold),
+            SttStreamReceiver(rx, vad_eot_threshold, false),
         ))
     }
 }
@@ -113,6 +113,23 @@ impl SttStreamReceiver {
         while let Some(msg) = self.0.next_message().await? {
             match msg {
                 Response::Vad(vad_event) => {
+                    // Log the head layout once per stream. `VAD_INDEX` selects
+                    // blindly out of this array, so how many heads arrive and at
+                    // what horizons decides whether a different head is even
+                    // selectable. Per the EP benchmark these are "no speech in
+                    // the next N seconds" predictors, so a LARGER horizon fires
+                    // earlier -- lower latency, more false cutoffs.
+                    if !self.2 {
+                        self.2 = true;
+                        let horizons: Vec<f64> =
+                            vad_event.vad.iter().map(|v| v.horizon_s).collect();
+                        tracing::info!(
+                            heads = vad_event.vad.len(),
+                            ?horizons,
+                            using_index = VAD_INDEX,
+                            "STT VAD heads"
+                        );
+                    }
                     // The probability of inactivity at the longest horizon guides us to detect end of turn
                     let inactivity_prob = vad_event
                         .vad
