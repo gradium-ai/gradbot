@@ -77,8 +77,28 @@ Reachable from the wire since `7a01712`.
 
 ## Operational finding
 
-Dropped clients appear to leak STT sessions. Every benchmark repetition ends
-`Connection reset without closing handshake`; sessions accumulate against a
-shared 20-session cap and drain only over several minutes. In production a
-dropped call would hold a session until timeout, and 20 concurrent is not much
-headroom. This blocked the `delay_in_frames` measurement.
+Measurement was repeatedly blocked by `1008: Concurrency limit exceeded: 20
+active sessions` on the shared API key.
+
+**An earlier version of this document claimed this was a gradbot session leak on
+abrupt client disconnect. That claim was not supported and is retracted.** It
+rested on a single observation (a failure at 07:54 followed by a success at
+07:59 after killing all local processes). The full timeline contradicts it: a
+330s cooldown still failed at 08:17, and a clean run at 08:22 was followed by a
+cap error 39 seconds later.
+
+What the evidence does support: every successful run opened **2** sessions and
+every failure attempted **3 or more**, with availability flickering on a
+roughly one-minute timescale. That is a cap sitting near-full from other
+traffic with a slot or two intermittently free — not sessions of ours draining
+slowly.
+
+Note for whoever measures next: one benchmark run is not one session. gradbot
+restarts the STT stream on silence timeouts and `reset_asr`, and opens a fresh
+TTS stream per turn, so a 3-repetition run over 12 turns is roughly 3 STT plus
+~39 TTS streams even though only one call is ever in flight. Budget
+accordingly, and prefer 2-repetition runs.
+
+Whether sessions are released promptly on abrupt disconnect remains untested —
+it would need server-side visibility into active sessions per key, which we do
+not have from the client.
