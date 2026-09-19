@@ -134,7 +134,7 @@ fn build_gradbot_session_config(session: openai_protocol::SessionConfig) -> Sess
         flush_duration_s: endpointing.flush_duration_s,
         padding_bonus: endpointing.padding_bonus,
         rewrite_rules: None,
-        stt_extra_config: None,
+        stt_extra_config: session.stt_extra_config,
         tts_extra_config: None,
         llm_extra_config: session.llm_extra_config,
         min_listen_before_flush_s: endpointing.min_listen_before_flush_s,
@@ -348,7 +348,10 @@ pub async fn serve(config: Config) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn wire_session(llm_extra_config: Option<String>) -> openai_protocol::SessionConfig {
+    fn wire_session(
+        llm_extra_config: Option<String>,
+        stt_extra_config: Option<String>,
+    ) -> openai_protocol::SessionConfig {
         openai_protocol::SessionConfig {
             instructions: None,
             voice: None,
@@ -361,6 +364,7 @@ mod tests {
             padding_bonus: None,
             silence_timeout_s: None,
             llm_extra_config,
+            stt_extra_config,
         }
     }
 
@@ -371,7 +375,7 @@ mod tests {
     /// sends no such field.
     #[test]
     fn session_update_without_llm_extra_config_yields_none() {
-        let config = build_gradbot_session_config(wire_session(None));
+        let config = build_gradbot_session_config(wire_session(None, None));
         assert_eq!(config.llm_extra_config, None);
     }
 
@@ -379,12 +383,38 @@ mod tests {
     /// unchanged to the constructed `gradbot::SessionConfig`.
     #[test]
     fn session_update_llm_extra_config_is_carried_through() {
-        let config = build_gradbot_session_config(wire_session(Some(
-            r#"{"tool_choice":"none"}"#.to_string(),
-        )));
+        let config = build_gradbot_session_config(wire_session(
+            Some(r#"{"tool_choice":"none"}"#.to_string()),
+            None,
+        ));
         assert_eq!(
             config.llm_extra_config,
             Some(r#"{"tool_choice":"none"}"#.to_string())
+        );
+    }
+
+    /// Regression guard: a session update omitting `stt_extra_config` must
+    /// still produce a `gradbot::SessionConfig` with `stt_extra_config:
+    /// None` -- exactly what this server has always hardcoded. Every
+    /// existing consumer (demos, `gradbot_py`, `examples/gradbot-client.rs`)
+    /// sends no such field.
+    #[test]
+    fn session_update_without_stt_extra_config_yields_none() {
+        let config = build_gradbot_session_config(wire_session(None, None));
+        assert_eq!(config.stt_extra_config, None);
+    }
+
+    /// An `stt_extra_config` set on the wire payload must be carried through
+    /// unchanged to the constructed `gradbot::SessionConfig`.
+    #[test]
+    fn session_update_stt_extra_config_is_carried_through() {
+        let config = build_gradbot_session_config(wire_session(
+            None,
+            Some(r#"{"delay_in_frames":4}"#.to_string()),
+        ));
+        assert_eq!(
+            config.stt_extra_config,
+            Some(r#"{"delay_in_frames":4}"#.to_string())
         );
     }
 }

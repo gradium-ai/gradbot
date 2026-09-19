@@ -430,6 +430,14 @@ struct Args {
     /// payload, matching every existing client.
     #[clap(long)]
     llm_extra_config: Option<String>,
+
+    /// JSON object (as a string) merged into the outgoing STT `json_config`,
+    /// e.g. `--stt-extra-config '{"delay_in_frames": 4}'` to try more
+    /// look-ahead before the STT finalizes end-of-turn, or a negative
+    /// `padding_bonus` to finalize sooner. Left unset by default so the field
+    /// is absent from the wire payload, matching every existing client.
+    #[clap(long)]
+    stt_extra_config: Option<String>,
 }
 
 /// Builds the `session.update` payload from CLI flags. Only the endpointing
@@ -453,6 +461,7 @@ fn build_session_config(args: &Args) -> oai::SessionConfig {
         padding_bonus: args.padding_bonus,
         silence_timeout_s: args.silence_timeout_s,
         llm_extra_config: args.llm_extra_config.clone(),
+        stt_extra_config: args.stt_extra_config.clone(),
     }
 }
 
@@ -1346,6 +1355,7 @@ mod tests {
             "padding_bonus",
             "silence_timeout_s",
             "llm_extra_config",
+            "stt_extra_config",
         ] {
             assert!(!obj.contains_key(field), "{field} must be absent by default: {obj:?}");
         }
@@ -1377,6 +1387,34 @@ mod tests {
         assert_eq!(
             obj.get("llm_extra_config"),
             Some(&serde_json::json!(r#"{"tool_choice":"none"}"#))
+        );
+    }
+
+    /// `--stt-extra-config` must be absent from the wire payload by default
+    /// (the regression guard for every existing consumer), and carried
+    /// through verbatim when the operator sets it -- e.g. to send
+    /// `{"delay_in_frames": 4}` to try more STT look-ahead.
+    #[test]
+    fn stt_extra_config_flag_is_forwarded_when_set() {
+        let base = [
+            "gradbot-bench",
+            "--url",
+            "ws://x",
+            "--manifest",
+            "m.json",
+            "--out-marks",
+            "o.json",
+            "--stt-extra-config",
+            r#"{"delay_in_frames": 4}"#,
+        ];
+        let args = Args::try_parse_from(base).unwrap();
+        let session = build_session_config(&args);
+        let json = serde_json::to_value(&session).unwrap();
+        let obj = json.as_object().expect("session config serializes to an object");
+
+        assert_eq!(
+            obj.get("stt_extra_config"),
+            Some(&serde_json::json!(r#"{"delay_in_frames": 4}"#))
         );
     }
 }

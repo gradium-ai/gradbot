@@ -75,6 +75,13 @@ pub struct SessionConfig {
     /// `openai_server.rs` has always hardcoded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llm_extra_config: Option<String>,
+    /// JSON object (as a string) merged into the outgoing STT `json_config`
+    /// -- see `gradbot::SessionConfig::stt_extra_config` and
+    /// `speech_to_text.rs`'s `config.extend(map)`. Falls back to `None` (no
+    /// merge) when omitted, exactly as `openai_server.rs` has always
+    /// hardcoded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stt_extra_config: Option<String>,
 }
 
 /// Endpointing fields resolved from a client's optional overrides, falling
@@ -517,6 +524,47 @@ mod tests {
         assert_eq!(
             session.llm_extra_config,
             Some(r#"{"tool_choice":"none"}"#.to_string())
+        );
+    }
+
+    /// Regression guard: a session update that omits `stt_extra_config` must
+    /// deserialize to `None`, exactly what `openai_server.rs` has always
+    /// hardcoded. Every existing client (demos, gradbot-client.rs,
+    /// gradbot_py) sends no such field, so a change here would silently
+    /// change behaviour for all of them at once.
+    #[test]
+    fn test_session_update_without_stt_extra_config_is_none() {
+        let session = session_from_json(
+            r#"{
+                "type": "session.update",
+                "event_id": "event_123",
+                "session": {
+                    "allow_recording": true
+                }
+            }"#,
+        );
+
+        assert_eq!(session.stt_extra_config, None);
+    }
+
+    /// An `stt_extra_config` present in the payload must be carried through
+    /// unchanged.
+    #[test]
+    fn test_session_update_stt_extra_config_is_applied() {
+        let session = session_from_json(
+            r#"{
+                "type": "session.update",
+                "event_id": "event_123",
+                "session": {
+                    "allow_recording": true,
+                    "stt_extra_config": "{\"delay_in_frames\":4}"
+                }
+            }"#,
+        );
+
+        assert_eq!(
+            session.stt_extra_config,
+            Some(r#"{"delay_in_frames":4}"#.to_string())
         );
     }
 
