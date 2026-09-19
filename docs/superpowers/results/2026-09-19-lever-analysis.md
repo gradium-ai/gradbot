@@ -31,8 +31,19 @@ Every gap is ~zero except the last: the first LLM token waits in gradbot's
 buffer for a word boundary before TTS may start. Across n=161 turns: p50 45.5,
 p75 172, p90 297, p95 413 ms; **48% of turns wait >50 ms**. Fixed in `6869f65`
 (first chunk flushes immediately; the mid-number stash still takes precedence so
-"$50,000" cannot be split). **Not yet validated against live backends** — prod
-STT was at its session cap.
+"$50,000" cannot be split).
+
+**Validated against live backends.** Same span pair, measured after the fix:
+
+| | n | p50 | p75 | p90 | turns >50 ms |
+|---|---|---|---|---|---|
+| before | 161 | 45.5 ms | 172.2 ms | 296.6 ms | 48% |
+| after | 15 | **0.0 ms** | **0.0 ms** | **0.1 ms** | **0%** |
+
+The gap is eliminated, not reduced. n=15 is small, but the distribution
+collapsed from a long tail to a hard zero — the mechanism working by
+construction, not a noisy improvement. Worth ~45 ms at p50 and ~300 ms at p90
+against a ~1550 ms budget; the p90 is the real prize.
 
 ## Levers closed by measurement
 
