@@ -14,6 +14,7 @@ Then open http://localhost:8060/
 import json
 import logging
 import pathlib
+import uuid
 from datetime import datetime
 
 import fastapi
@@ -29,8 +30,11 @@ import gradbot  # noqa: E402
 from keenable_search import (  # noqa: E402
     KeenableNotConfiguredError,
     KeenableSearchError,
-    keenable_search,
 )
+
+from web_search import ParallelSearchError, search, selected_provider  # noqa: E402
+
+SEARCH_PROVIDER = selected_provider()
 
 gradbot.init_logging()
 logger = logging.getLogger(__name__)
@@ -131,7 +135,12 @@ async def handle_tool_call(handle, input_handle, websocket: fastapi.WebSocket):
     logger.info("web_search: %r", query)
 
     try:
-        results = await keenable_search(query, limit=5)
+        results = await search(
+            query,
+            provider=SEARCH_PROVIDER,
+            session_id=websocket.state.search_session_id,
+            limit=5,
+        )
     except KeenableNotConfiguredError as exc:
         await handle.send(
             json.dumps(
@@ -146,7 +155,7 @@ async def handle_tool_call(handle, input_handle, websocket: fastapi.WebSocket):
         )
         logger.warning("web_search not configured: %s", exc)
         return
-    except KeenableSearchError as exc:
+    except (KeenableSearchError, ParallelSearchError) as exc:
         await handle.send(
             json.dumps(
                 {
@@ -199,6 +208,7 @@ async def handle_tool_call(handle, input_handle, websocket: fastapi.WebSocket):
 
 @app.websocket("/ws/chat")
 async def ws_chat(websocket: fastapi.WebSocket):
+    websocket.state.search_session_id = uuid.uuid4().hex
     await gradbot.websocket.handle_session(
         websocket,
         config=cfg,
