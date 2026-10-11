@@ -15,3 +15,9 @@ demo = "main:app"
 
 [tool.uv.sources]
 gradbot = { path = "../../gradbot_py" }
+
+[tool.uv]
+exclude-newer = "7 days"
+
+[tool.uv.audit]
+malware-check = true
