@@ -9,6 +9,7 @@ demos/
   app.py                 # Combined launcher — discovers and mounts demos at /<demo_name>
   config.example.yaml    # Example shared config for the combined launcher
   simple_chat/           # Minimal voice chat reference
+  flashdata_research/    # Web/YouTube research with FlashData MCP; protected download handoff
   fantasy_shop/          # Voice haggling game with tools and persona swaps
   business_bank/         # Voice banking workflow with multi-step tools
   hotel/                 # Hotel booking agent with deferred search tools
