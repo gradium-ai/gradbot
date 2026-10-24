@@ -1,0 +1,67 @@
+{
+  "google_search": {
+    "query": "battery recycling research",
+    "gl": "us",
+    "hl": "en",
+    "num": 10
+  },
+  "google_news": {
+    "query": "battery recycling",
+    "gl": "us",
+    "hl": "en",
+    "num": 10
+  },
+  "google_images": {
+    "query": "solar panel diagram",
+    "num": 20
+  },
+  "google_shopping": {
+    "query": "wireless headphones",
+    "gl": "us",
+    "hl": "en",
+    "num": 10
+  },
+  "google_videos": {
+    "query": "battery recycling process",
+    "num": 10
+  },
+  "google_places": {
+    "query": "coffee shops in Singapore",
+    "num": 20
+  },
+  "youtube_search": {
+    "query": "battery recycling",
+    "max_results": 10
+  },
+  "youtube_search_extended": {
+    "query": "battery recycling",
+    "max_results": 100
+  },
+  "youtube_metadata": {
+    "video_id": "dQw4w9WgXcQ",
+    "include_formats": false,
+    "include_chapters": true
+  },
+  "youtube_transcript": {
+    "video_id": "dQw4w9WgXcQ",
+    "language": "en",
+    "auto": true
+  },
+  "youtube_captions": {
+    "video_id": "dQw4w9WgXcQ",
+    "language": "en",
+    "auto": false
+  },
+  "youtube_trainability": {
+    "video_id": "dQw4w9WgXcQ"
+  },
+  "youtube_channel": {
+    "handle": "@jawed",
+    "video_limit": 10
+  },
+  "youtube_suggestions": {
+    "query": "battery recycling",
+    "language": "en",
+    "region": "US"
+  }
+}

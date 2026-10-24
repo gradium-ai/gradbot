@@ -1,0 +1,16 @@
+[project]
+name = "gradbot-flashdata-research"
+version = "0.1.0"
+description = "Voice research with FlashData web and YouTube evidence"
+requires-python = ">=3.12"
+dependencies = ["gradbot", "mcp==1.30.0", "httpx==0.28.1"]
+
+[tool.uv.sources]
+gradbot = { path = "../../gradbot_py" }
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
