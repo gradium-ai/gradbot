@@ -78,10 +78,8 @@ impl TtsClient {
             voice_id,
             voice: None,
             output_format: gradium::protocol::AudioFormat::Pcm,
-            client_req_id: None,
-            close_ws_on_eos: None,
-            pronunciation_id: None,
             json_config,
+            ..Default::default()
         };
         let stream = self
             .0
@@ -150,6 +148,10 @@ impl TtsStreamReceiver {
                 Response::EndOfStream { client_req_id: _ } => {
                     tracing::debug!("TTS EndOfStream received");
                 }
+                Response::Log(log) => {
+                    tracing::warn!(level = log.level, "TTS server log: {}", log.message);
+                }
+                Response::Flushed { .. } | Response::NeedMoreText { .. } | Response::Unknown => {}
             }
         }
         tracing::debug!("TTS stream ended (no more messages)");
