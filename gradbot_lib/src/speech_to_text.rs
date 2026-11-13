@@ -61,6 +61,7 @@ impl SttClient {
             model_name: model_name.unwrap_or_else(|| "default".to_string()),
             input_format: gradium::protocol::AudioFormat::Pcm,
             json_config: Some(json_config),
+            ..Default::default()
         };
         let stream = self
             .0
@@ -109,17 +110,23 @@ impl SttStreamReceiver {
                         inactivity_prob,
                     }));
                 }
-                Response::Error { code, message } => {
+                Response::Error { code, message, .. } => {
                     anyhow::bail!("STT Error {code:?}: {message}")
                 }
-                Response::Ready(_) | Response::EndText(_) => {}
+                Response::Log(log) => {
+                    tracing::warn!(level = log.level, "STT server log: {}", log.message);
+                }
+                Response::Ready(_)
+                | Response::EndText(_)
+                | Response::Flushed { .. }
+                | Response::Unknown => {}
                 Response::Text(text) => {
                     return Ok(Some(Msg::Text {
                         text: text.text,
                         start_s: text.start_s,
                     }));
                 }
-                Response::EndOfStream => break,
+                Response::EndOfStream { .. } => break,
             }
         }
         Ok(None)
