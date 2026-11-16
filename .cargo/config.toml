@@ -1,0 +1,5 @@
+[env]
+# NOTE(NVT): CMake 4.x dropped support for projects declaring `cmake_minimum_required` below 3.5,
+# but the vendored Opus source in audiopus_sys 0.2.2 still declares an older minimum. We work around
+# this by explicitly setting `CMAKE_POLICY_VERSION_MINIMUM`, to support CMake >= 4.x.
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
