@@ -6,6 +6,9 @@ mod remote;
 
 /// Initialize tracing subscriber for logging.
 /// Call this once at startup to enable logging via RUST_LOG.
+///
+/// Set `GRADBOT_LOG_FORMAT=json` to emit one JSON object per line (fields
+/// flattened at the top level), e.g. for Loki or `analyze_logs.py`.
 #[pyfunction]
 fn init_logging() -> PyResult<()> {
     let env_filter = if std::env::var("RUST_LOG").is_ok() {
@@ -13,11 +16,15 @@ fn init_logging() -> PyResult<()> {
     } else {
         tracing_subscriber::EnvFilter::new("gradbot=info,gradbot_py=info")
     };
-    tracing_subscriber::fmt()
+    let json = std::env::var("GRADBOT_LOG_FORMAT").is_ok_and(|v| v.eq_ignore_ascii_case("json"));
+    let builder = tracing_subscriber::fmt()
         .with_env_filter(env_filter)
-        .with_target(true)
-        .try_init()
-        .ok(); // Ignore error if already initialized
+        .with_target(true);
+    if json {
+        builder.json().flatten_event(true).try_init().ok();
+    } else {
+        builder.try_init().ok(); // Ignore error if already initialized
+    }
     Ok(())
 }
 
@@ -428,16 +435,18 @@ pub struct Event {
     pub data: Option<PyObject>,
 }
 
-fn event_from_lib(py: Python<'_>, event: gradbot::Event) -> Event {
+pub(crate) fn event_from_lib(py: Python<'_>, event: gradbot::Event) -> Event {
     use gradbot::Event::*;
     match event {
         Flushing {
             started_listening,
             text_chunks,
+            last_text_start_s,
         } => {
             let dict = pyo3::types::PyDict::new(py);
             dict.set_item("started_listening", started_listening).ok();
             dict.set_item("text_chunks", text_chunks).ok();
+            dict.set_item("last_text_start_s", last_text_start_s).ok();
             Event {
                 event_type: "flushing".to_string(),
                 data: Some(dict.unbind().into_any()),
@@ -473,6 +482,14 @@ fn event_from_lib(py: Python<'_>, event: gradbot::Event) -> Event {
         },
         FirstWord => Event {
             event_type: "first_word".to_string(),
+            data: None,
+        },
+        TtsConnected => Event {
+            event_type: "tts_connected".to_string(),
+            data: None,
+        },
+        FirstTtsText => Event {
+            event_type: "first_tts_text".to_string(),
             data: None,
         },
         FirstTtsAudio => Event {
@@ -682,7 +699,11 @@ fn msgout_from_lib(py: Python<'_>, msg: gradbot::MsgOut) -> PyResult<MsgOut> {
             tool_call_handle: None,
             interrupted: false,
         }),
-        Event { time_s, event } => {
+        Event {
+            time_s,
+            turn_idx,
+            event,
+        } => {
             let event_obj = event_from_lib(py, event);
             let event_py = Py::new(py, event_obj)?;
             Ok(MsgOut {
@@ -691,7 +712,7 @@ fn msgout_from_lib(py: Python<'_>, msg: gradbot::MsgOut) -> PyResult<MsgOut> {
                 text: None,
                 start_s: None,
                 stop_s: None,
-                turn_idx: None,
+                turn_idx: Some(turn_idx),
                 time_s: Some(time_s),
                 event: Some(event_py),
                 tool_call: None,

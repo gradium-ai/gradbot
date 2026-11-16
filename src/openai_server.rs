@@ -31,6 +31,7 @@ pub struct State {
 struct TimedEvent {
     wall_time_s: f64,
     time_s: f64,
+    turn_idx: u64,
     #[serde(flatten)]
     event: Event,
 }
@@ -67,13 +68,18 @@ async fn msg_out_consumer(
                 let msg = serde_json::to_string(&event)?;
                 ws.send(ws::Message::Text(msg.into())).await?;
             }
-            MsgOut::Event { time_s, event } => {
+            MsgOut::Event {
+                time_s,
+                turn_idx,
+                event,
+            } => {
                 if let Some(log) = &mut log {
                     use tokio::io::AsyncWriteExt;
                     let wall_time_s = (timens::Time::now() - start_time).to_sec();
                     let timed_event = TimedEvent {
                         wall_time_s,
                         time_s,
+                        turn_idx,
                         event,
                     };
                     let log_line = serde_json::to_string(&timed_event)? + "\n";

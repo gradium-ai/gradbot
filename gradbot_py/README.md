@@ -124,7 +124,8 @@ async def ws(websocket: fastapi.WebSocket):
 - **`ToolDef`:** `name`, `description`, `parameters_json`
 - **`SessionInputHandle`:** `send_audio(bytes)`, `send_config(SessionConfig)`, `close()`
 - **`SessionOutputHandle`:** `receive() -> MsgOut | None`
-- **`MsgOut`:** `msg_type` is one of `"audio"`, `"tts_text"`, `"stt_text"`, `"event"`, `"tool_call"`
+- **`MsgOut`:** `msg_type` is one of `"audio"`, `"tts_text"`, `"stt_text"`, `"event"`, `"tool_call"`. Events also carry the `turn_idx` they belong to
+- **`Event`:** `event_type` is one of `flushing`, `end_of_turn`, `push_to_llm`, `llm_started`, `tts_connected`, `first_word`, `first_tts_text`, `first_tts_audio`, `end_tts_audio`, `interrupted`, `previous_llm_gen`; `data` holds extra fields when present. See [`benchmarks/latency`](../benchmarks/latency/README.md) for using them to measure latency
 - **`ToolCallInfo`:** `call_id`, `tool_name`, `args_json`
 - **`ToolCallHandlePy`:** `send(result_json)`, `send_error(error_message)`
 

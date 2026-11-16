@@ -164,7 +164,11 @@ async fn msg_out_consumer(
                     .send(ws::Message::Text(json.into()))
                     .await?;
             }
-            MsgOut::Event { time_s, event } => {
+            MsgOut::Event {
+                time_s,
+                turn_idx,
+                event,
+            } => {
                 let event_str = serde_json::to_string(&event)?;
 
                 // Log events
@@ -174,6 +178,7 @@ async fn msg_out_consumer(
                     let log_line = serde_json::json!({
                         "wall_time_s": wall_time_s,
                         "time_s": time_s,
+                        "turn_idx": turn_idx,
                         "event": event,
                     });
                     let line = serde_json::to_string(&log_line)? + "\n";
@@ -183,6 +188,7 @@ async fn msg_out_consumer(
                 let json_msg = ServerMessage::Event {
                     time_s,
                     event: event_str,
+                    turn_idx,
                 };
                 let json = serde_json::to_string(&json_msg)?;
                 ws_tx

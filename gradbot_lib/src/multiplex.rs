@@ -62,25 +62,157 @@ pub const MSG_OUT_CHANNEL_CAPACITY: usize = 100;
 /// Channel capacity for internal TTS output queue.
 const TTS_OUT_CHANNEL_CAPACITY: usize = 100;
 
+/// Session lifecycle events.
+///
+/// Every event is delivered as [`MsgOut::Event`] together with the `turn_idx`
+/// it belongs to, and is logged at `info` level on target `gradbot::events`
+/// (see [`log_event`]) when it happens: the timestamp of the log line is the
+/// time of the event. In the order they happen during a turn, the latency
+/// milestones are:
+///
+/// | event              | moment                                                    |
+/// |--------------------|-----------------------------------------------------------|
+/// | `Flushing`         | STT detected the end of the user's turn; flush starts     |
+/// | `EndOfTurn`        | flush silence processed; the turn goes to the LLM         |
+/// | `PushToLlm`        | LLM request about to be sent                              |
+/// | `LlmStarted`       | LLM HTTP response headers received                        |
+/// | `TtsConnected`     | TTS websocket for this response is ready                  |
+/// | `FirstWord`        | first text token received from the LLM                    |
+/// | `FirstTtsText`     | first word sent to TTS                                    |
+/// | `FirstTtsAudio`    | first audio chunk received from TTS                       |
+/// | `EndTtsAudio`      | all audio of the response sent                            |
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
 pub enum Event {
+    /// STT reported the end of the user's turn; trailing silence is being
+    /// flushed through STT.
     Flushing {
         started_listening: f64,
         text_chunks: usize,
+        /// Session time (audio clock) at which the last transcribed word
+        /// started. `time_s - last_text_start_s` is an upper bound of the
+        /// time between the user's last word and the end-of-turn detection.
+        last_text_start_s: Option<f64>,
     },
+    /// Flush done: the user's turn is handed to the LLM.
     EndOfTurn,
+    /// The user interrupted the response of this turn.
     Interrupted,
+    /// The LLM request for this turn is about to be sent. `user_text` is
+    /// `"[start]"` for the greeting, `"..."` for a silence re-engagement and
+    /// `""` for a follow-up completion after tool results.
     PushToLlm {
         user_text: String,
     },
     PreviousLlmGen {
         agent_text: String,
     },
+    /// LLM HTTP response headers received.
     LlmStarted,
+    /// TTS websocket for this response connected.
+    TtsConnected,
+    /// First text token received from the LLM.
     FirstWord,
+    /// First text (a complete word) sent to TTS.
+    FirstTtsText,
+    /// First audio chunk received from TTS.
     FirstTtsAudio,
+    /// All audio of the response sent.
     EndTtsAudio,
+}
+
+/// Some models (e.g. Qwen) write tool calls as plain text instead of
+/// structured `tool_calls`; such text must not reach TTS.
+fn looks_like_tool_call(chunk: &str) -> bool {
+    [
+        "<tool_call>",
+        "</tool_call>",
+        "<function=",
+        "</function>",
+        "<parameter=",
+        "</parameter>",
+        "\"tool_calls\"",
+    ]
+    .iter()
+    .any(|tag| chunk.contains(tag))
+}
+
+static SESSION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A short id, unique within the process and unlikely to collide across
+/// processes, used to tell sessions apart in logs.
+fn new_session_id() -> String {
+    let n = SESSION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    format!("{:x}-{:x}-{n}", std::process::id(), ms & 0xffffff)
+}
+
+/// Log an event on target `gradbot::events`.
+///
+/// One line per event with the fields `session`, `turn_idx`, `event` (snake
+/// case name) and `time_s` (audio clock), plus `user_text` for `push_to_llm`
+/// and `last_text_start_s` for `flushing`. Call it when the event happens:
+/// the line's timestamp is the event's time. With `GRADBOT_LOG_FORMAT=json`
+/// (Python `init_logging`) each line is a JSON object, which is what
+/// `benchmarks/latency/analyze_logs.py` consumes.
+pub fn log_event(session: &str, turn_idx: u64, time_s: f64, event: &Event) {
+    macro_rules! log {
+        ($name:literal $(, $($fields:tt)+)?) => {
+            tracing::info!(
+                target: "gradbot::events",
+                session, turn_idx, event = $name, time_s, $($($fields)+,)?
+                "gradbot event"
+            )
+        };
+    }
+    match event {
+        Event::Flushing {
+            started_listening,
+            text_chunks,
+            last_text_start_s,
+        } => log!(
+            "flushing",
+            started_listening,
+            text_chunks,
+            // NaN (null in JSON) when nothing was transcribed.
+            last_text_start_s = last_text_start_s.unwrap_or(f64::NAN)
+        ),
+        Event::EndOfTurn => log!("end_of_turn"),
+        Event::Interrupted => log!("interrupted"),
+        Event::PushToLlm { user_text } => log!("push_to_llm", user_text = user_text.as_str()),
+        Event::PreviousLlmGen { .. } => log!("previous_llm_gen"),
+        Event::LlmStarted => log!("llm_started"),
+        Event::TtsConnected => log!("tts_connected"),
+        Event::FirstWord => log!("first_word"),
+        Event::FirstTtsText => log!("first_tts_text"),
+        Event::FirstTtsAudio => log!("first_tts_audio"),
+        Event::EndTtsAudio => log!("end_tts_audio"),
+    }
+}
+
+/// Emits events: logs them and sends them to the client. Cheap to clone.
+#[derive(Clone)]
+struct EventSender {
+    session: Arc<str>,
+    tx: tokio::sync::mpsc::Sender<MsgOut>,
+}
+
+impl EventSender {
+    /// Emit `event` for `turn_idx`. Call it when the event happens.
+    async fn emit(&self, turn_idx: u64, time_s: f64, event: Event) -> Result<()> {
+        log_event(&self.session, turn_idx, time_s, &event);
+        self.tx
+            .send(MsgOut::Event {
+                time_s,
+                turn_idx,
+                event,
+            })
+            .await?;
+        Ok(())
+    }
 }
 
 #[allow(dead_code)]
@@ -180,6 +312,10 @@ struct Session {
     /// Holds the JoinHandle of a user-interrupted LLM/TTS task while it winds down.
     /// Dropped when the next task starts.
     interrupted_task_jh: Option<crate::utils::JoinHandleAbortOnDrop>,
+    /// Logs and sends lifecycle events.
+    events: EventSender,
+    /// Session time at which the last STT text segment started.
+    last_text_start_s: Option<f64>,
 }
 
 impl Session {
@@ -191,6 +327,7 @@ impl Session {
         msg_out_tx: tokio::sync::mpsc::Sender<MsgOut>,
         session_config: Option<SessionConfig>,
     ) -> Result<(Self, SttSender)> {
+        let msg_out_tx_events = msg_out_tx.clone();
         let stt_lang = session_config
             .as_ref()
             .map(|c| c.language)
@@ -248,7 +385,13 @@ impl Session {
                 .unwrap_or(false),
             user_interrupted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             interrupted_task_jh: None,
+            events: EventSender {
+                session: new_session_id().into(),
+                tx: msg_out_tx_events,
+            },
+            last_text_start_s: None,
         };
+        tracing::info!(target: "gradbot::events", session = &*slf.events.session, "session started");
         Ok((slf, stt_sender))
     }
 
@@ -452,15 +595,21 @@ impl Session {
         };
         if let Some(previous_gen) = previous_gen {
             let _ = self
-                .send_event(Event::PreviousLlmGen {
-                    agent_text: previous_gen,
-                })
+                .send_event(
+                    turn_idx,
+                    Event::PreviousLlmGen {
+                        agent_text: previous_gen,
+                    },
+                )
                 .await;
         }
         let _ = self
-            .send_event(Event::PushToLlm {
-                user_text: text.to_string(),
-            })
+            .send_event(
+                turn_idx,
+                Event::PushToLlm {
+                    user_text: text.to_string(),
+                },
+            )
             .await;
         let streaming_session = match self
             .llm
@@ -486,7 +635,8 @@ impl Session {
         let msg_out_tx = self.msg_out_tx.clone();
         let start_time = self.audio_time_s().await;
         let llm_request_start = std::time::Instant::now();
-        let _ = self.send_event(Event::LlmStarted).await;
+        let _ = self.send_event(turn_idx, Event::LlmStarted).await;
+        let events = self.events.clone();
         let stt_sender = self.stt_sender.clone();
         let session_config = self.session_config.clone();
         let internal_cmd_tx = self.internal_cmd_tx.clone();
@@ -511,20 +661,50 @@ impl Session {
                 };
                 tracing::info!(?voice_id, "creating TTS stream");
                 let tts_model_name = std::env::var("GRADIUM_TTS_MODEL_NAME").ok();
-                let (mut tts_tx, tts_rx) =
-                    tts_client.tts_stream(tts_model_name, voice_id.clone(), padding_bonus, rewrite_rules.clone(), tts_extra_config.as_deref()).await
+                let mut streaming_session = streaming_session;
+                // Connect to TTS while waiting for the first LLM item, so that
+                // `FirstWord` is emitted when the token arrives rather than
+                // once the TTS stream is ready. Text still goes to TTS only
+                // after both are done, as before.
+                let connect_tts = async {
+                    let stream = tts_client
+                        .tts_stream(tts_model_name, voice_id.clone(), padding_bonus, rewrite_rules.clone(), tts_extra_config.as_deref())
+                        .await
                         .context("TTS: failed to create stream")?;
-                tracing::info!("TTS stream created successfully");
+                    tracing::info!("TTS stream created successfully");
+                    let time_s = stt_sender.current_time_s().await;
+                    events.emit(turn_idx, time_s, Event::TtsConnected).await?;
+                    Ok::<_, anyhow::Error>(stream)
+                };
+                let first_llm_item = async {
+                    let item = streaming_session.recv().await;
+                    let is_first_word = matches!(
+                        &item,
+                        Some(crate::llm::LlmResponseItem::Text(chunk)) if !looks_like_tool_call(chunk)
+                    );
+                    if is_first_word {
+                        let ttft_ms = llm_request_start.elapsed().as_millis();
+                        tracing::info!(ttft_ms, "LLM time-to-first-token");
+                        let time_s = stt_sender.current_time_s().await;
+                        events.emit(turn_idx, time_s, Event::FirstWord).await?;
+                    }
+                    Ok::<_, anyhow::Error>((item, is_first_word))
+                };
+                let (tts_stream, first_llm_item) = tokio::join!(connect_tts, first_llm_item);
+                let (mut tts_tx, tts_rx) = tts_stream?;
+                let (first_llm_item, first_word_sent) = first_llm_item?;
                 // Shared state for tracking last stop_s across futures
                 let last_stop_s =
                     Arc::new(std::sync::atomic::AtomicU64::new(start_time.to_bits()));
                 let llm_to_tts = {
                     let msg_out_tx = msg_out_tx.clone();
+                    let events = events.clone();
                     let stt_sender = stt_sender.clone();
                     let internal_cmd_tx = internal_cmd_tx.clone();
                     async move {
-                        let mut streaming_session = streaming_session;
-                        let mut first_word = true;
+                        let mut first_word = !first_word_sent;
+                        // The item already read while connecting to TTS.
+                        let mut first_llm_item = Some(first_llm_item);
                         let mut buffer = String::new();
                         // When the buffer ends with "<digit>." or "<digit>,", we can't
                         // tell if the punctuation is mid-number ($50,000 or 6.1%) or a
@@ -532,7 +712,23 @@ impl Session {
                         // and decide when the next chunk arrives.
                         let mut pending_numeric: Option<String> = None;
                         let mut tool_call_as_text = false;
-                        while let Some(item) = streaming_session.recv().await {
+                        // `Some` until the first text has been sent to TTS.
+                        let mut first_tts_text = Some(());
+                        macro_rules! send_to_tts {
+                            ($text:expr) => {{
+                                if first_tts_text.take().is_some() {
+                                    let time_s = stt_sender.current_time_s().await;
+                                    events.emit(turn_idx, time_s, Event::FirstTtsText).await?;
+                                }
+                                tts_tx.send_text($text).await?;
+                            }};
+                        }
+                        loop {
+                            let item = match first_llm_item.take() {
+                                Some(item) => item,
+                                None => streaming_session.recv().await,
+                            };
+                            let Some(item) = item else { break };
                             tracing::debug!(?item, "LLM stream item received");
                             match item {
                                 crate::llm::LlmResponseItem::Text(chunk) => {
@@ -548,14 +744,7 @@ impl Session {
                                         );
                                         continue;
                                     }
-                                    if chunk.contains("<tool_call>")
-                                        || chunk.contains("</tool_call>")
-                                        || chunk.contains("<function=")
-                                        || chunk.contains("</function>")
-                                        || chunk.contains("<parameter=")
-                                        || chunk.contains("</parameter>")
-                                        || chunk.contains("\"tool_calls\"")
-                                    {
+                                    if looks_like_tool_call(&chunk) {
                                         tracing::warn!(
                                             text = %chunk,
                                             "LLM emitted tool call as plain text — suppressing this and all remaining text"
@@ -570,9 +759,7 @@ impl Session {
                                             "LLM time-to-first-token"
                                         );
                                         let time_s = stt_sender.current_time_s().await;
-                                        msg_out_tx
-                                            .send(MsgOut::Event { time_s, event: Event::FirstWord })
-                                            .await?;
+                                        events.emit(turn_idx, time_s, Event::FirstWord).await?;
                                         first_word = false;
                                     }
                                     // Resolve any pending numeric: check if this chunk
@@ -584,7 +771,7 @@ impl Session {
                                             buffer.push_str(&held);
                                         } else {
                                             // Real boundary — flush it
-                                            tts_tx.send_text(&held).await?;
+                                            send_to_tts!(&held);
                                         }
                                     }
                                     buffer.push_str(&chunk);
@@ -603,7 +790,7 @@ impl Session {
                                             Some(' ' | '.' | '!' | '?' | ',' | '\n')
                                         );
                                         if is_word_boundary {
-                                            tts_tx.send_text(&buffer).await?;
+                                            send_to_tts!(&buffer);
                                             buffer.clear();
                                         }
                                     }
@@ -634,7 +821,7 @@ impl Session {
                             buffer.insert_str(0, &held);
                         }
                         if !buffer.is_empty() {
-                            tts_tx.send_text(&buffer).await?;
+                            send_to_tts!(&buffer);
                         }
                         let llm_total_ms = llm_request_start.elapsed().as_millis();
                         tracing::info!(
@@ -647,6 +834,7 @@ impl Session {
                 };
                 let tts_to_client = {
                     let tts_out_tx = tts_out_tx.clone();
+                    let events = events.clone();
                     let last_stop_s = last_stop_s.clone();
                     let llm = llm.clone();
                     async move {
@@ -679,19 +867,13 @@ impl Session {
                             message_count += 1;
                             match event {
                                 TtsOut::Audio { pcm, start_s, stop_s, turn_idx, .. } => {
-                                    // Send audio 300ms early so client jitter buffer can fill
-                                    wait_until(start_s - 0.3).await;
-
                                     if first_audio && stop_s > 0.0 {
                                         let time_s = stt_sender.current_time_s().await;
-                                        msg_out_tx
-                                            .send(MsgOut::Event {
-                                                time_s,
-                                                event: Event::FirstTtsAudio,
-                                            })
-                                            .await?;
+                                        events.emit(turn_idx, time_s, Event::FirstTtsAudio).await?;
                                         first_audio = false;
                                     }
+                                    // Send audio 300ms early so client jitter buffer can fill
+                                    wait_until(start_s - 0.3).await;
                                     let adjusted_stop_s = start_time + stop_s;
                                     last_stop_s.store(adjusted_stop_s.to_bits(), Ordering::Release);
 
@@ -755,9 +937,7 @@ impl Session {
                         }
                         tracing::info!(message_count, "TTS receiver finished");
                         let time_s = stt_sender.current_time_s().await;
-                        msg_out_tx
-                            .send(MsgOut::Event { time_s, event: Event::EndTtsAudio })
-                            .await?;
+                        events.emit(turn_idx, time_s, Event::EndTtsAudio).await?;
                         Ok::<(), anyhow::Error>(())
                     }
                 };
@@ -789,12 +969,9 @@ impl Session {
         Some(jh)
     }
 
-    async fn send_event(&mut self, event: Event) -> Result<()> {
+    async fn send_event(&mut self, turn_idx: u64, event: Event) -> Result<()> {
         let time_s = self.audio_time_s().await;
-        self.msg_out_tx
-            .send(MsgOut::Event { time_s, event })
-            .await?;
-        Ok(())
+        self.events.emit(turn_idx, time_s, event).await
     }
 
     /// Handle end-of-turn signal from STT.
@@ -857,10 +1034,14 @@ impl Session {
             let texts = std::mem::take(texts);
             // Release lock before async operations
             drop(state);
-            self.send_event(Event::Flushing {
-                started_listening,
-                text_chunks: texts.len(),
-            })
+            self.send_event(
+                turn_idx,
+                Event::Flushing {
+                    started_listening,
+                    text_chunks: texts.len(),
+                    last_text_start_s: self.last_text_start_s,
+                },
+            )
             .await?;
             self.stt_sender.send_flush(flush_duration_s).await?;
             *self.state.lock().await = State::Flushing {
@@ -919,7 +1100,7 @@ impl Session {
                 let turn_idx = *turn_idx;
                 // Release lock before async operations
                 drop(state);
-                let _ = self.send_event(Event::EndOfTurn).await;
+                let _ = self.send_event(turn_idx, Event::EndOfTurn).await;
                 self.llm_tts(&text, turn_idx).await
             } else if let State::Listening {
                 since_s,
@@ -1029,6 +1210,7 @@ impl Session {
                 start_s: stt_time,
             })
             .await?;
+        self.last_text_start_s = Some(stt_time);
         // User spoke - reset silence prompt counter
         self.silence_prompts = 0;
         self.min_inactivity_prob = 1.0;
@@ -1062,7 +1244,8 @@ impl Session {
                     self.interrupted_task_jh = Some(_jh);
                 }
 
-                self.send_event(Event::Interrupted).await?;
+                self.send_event(new_turn_idx - 1, Event::Interrupted)
+                    .await?;
             }
         }
         Ok(())
@@ -1146,7 +1329,15 @@ pub enum MsgOut {
     /// Transcription of user speech.
     SttText { text: String, start_s: f64 },
     /// Lifecycle event.
-    Event { time_s: f64, event: Event },
+    Event {
+        /// Audio clock: seconds of input audio received when the event fired.
+        time_s: f64,
+        /// Turn the event belongs to (same `turn_idx` as the response's
+        /// `Audio`/`TtsText`). A turn whose LLM completion only made tool
+        /// calls is followed by a turn with `PushToLlm { user_text: "" }`.
+        turn_idx: u64,
+        event: Event,
+    },
     /// Tool call from the LLM. Client should execute the tool and send result via the handle.
     ToolCall {
         call: crate::llm::ToolCall,
@@ -1237,8 +1428,14 @@ impl SessionOutputHandle {
                     MsgOut::SttText { text, start_s } => {
                         tracing::debug!(start_s, text, "OUT SttText");
                     }
-                    MsgOut::Event { time_s, event } => {
-                        tracing::info!(time_s, ?event, "OUT Event");
+                    MsgOut::Event {
+                        time_s,
+                        turn_idx,
+                        event,
+                        ..
+                    } => {
+                        // Events are logged when emitted (target gradbot::events).
+                        tracing::debug!(time_s, turn_idx, ?event, "OUT Event");
                     }
                     MsgOut::ToolCall { call, .. } => {
                         tracing::info!(tool_name = call.tool_name, "OUT ToolCall");
@@ -1587,5 +1784,31 @@ async fn run(
             }
         },
         res = &mut recv_loop => res.context("audio input loop failed"),
+    }
+}
+
+#[cfg(test)]
+mod event_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn event_sender_stamps_turn() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let sender = EventSender {
+            session: new_session_id().into(),
+            tx,
+        };
+        sender.emit(7, 1.5, Event::EndOfTurn).await.unwrap();
+        match rx.recv().await.unwrap() {
+            MsgOut::Event {
+                turn_idx,
+                time_s,
+                event: Event::EndOfTurn,
+            } => {
+                assert_eq!(turn_idx, 7);
+                assert_eq!(time_s, 1.5);
+            }
+            _ => panic!("unexpected message"),
+        }
     }
 }

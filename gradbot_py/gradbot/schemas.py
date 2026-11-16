@@ -96,6 +96,18 @@ class SessionEvent(BaseMessage):
     )
     type: typing.Literal["event"] = "event"
     event: str
+    # Turn the event belongs to.
+    turn_idx: int | None = None
+    # Extra fields of events that have some (flushing, push_to_llm,
+    # previous_llm_gen). Omitted from the wire format when absent.
+    data: dict[str, typing.Any] | None = None
+
+    @pydantic.model_serializer(mode="wrap")
+    def _drop_empty_data(self, handler):
+        out = handler(self)
+        if out.get("data") is None:
+            out.pop("data", None)
+        return out
 
 
 class Error(BaseMessage):
@@ -128,6 +140,9 @@ def from_msg(msg: typing.Any) -> BaseMessage | None:
     }
     if msg.event is not None:
         data["event"] = msg.event.event_type
+        event_data = getattr(msg.event, "data", None)
+        if isinstance(event_data, dict):
+            data["data"] = event_data
     try:
         return adapter.validate_python(data)
     except pydantic.ValidationError:

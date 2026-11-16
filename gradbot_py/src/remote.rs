@@ -10,7 +10,7 @@ use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
-use crate::{Event, MsgOut, ToolCallHandleInner, ToolCallHandlePy, ToolCallInfo};
+use crate::{MsgOut, ToolCallHandleInner, ToolCallHandlePy, ToolCallInfo};
 
 // ---------------------------------------------------------------------------
 // Wire protocol types (mirrors gradbot_server/src/protocol.rs)
@@ -64,7 +64,11 @@ pub enum ServerMessage {
     },
 
     #[serde(rename = "event")]
-    Event { time_s: f64, event: String },
+    Event {
+        time_s: f64,
+        event: String,
+        turn_idx: u64,
+    },
 
     #[serde(rename = "error")]
     Error { message: String },
@@ -147,6 +151,7 @@ pub enum RemoteMsgOut {
     Event {
         time_s: f64,
         event: String,
+        turn_idx: u64,
     },
     Error {
         message: String,
@@ -287,12 +292,17 @@ pub fn msgout_from_remote(
                 interrupted: false,
             })
         }
-        RemoteMsgOut::Event { time_s, event } => {
-            // Parse event string — it's a JSON-serialized gradbot::Event
-            let event_obj = Event {
-                event_type: event,
-                data: None,
-            };
+        RemoteMsgOut::Event {
+            time_s,
+            event,
+            turn_idx,
+        } => {
+            // The event string is a JSON-serialized gradbot::Event: decode it
+            // so remote events look the same as local ones.
+            let event: gradbot::Event = serde_json::from_str(&event).map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("invalid remote event: {e}"))
+            })?;
+            let event_obj = crate::event_from_lib(py, event);
             let event_py = Py::new(py, event_obj)?;
             Ok(MsgOut {
                 msg_type: "event".to_string(),
@@ -300,7 +310,7 @@ pub fn msgout_from_remote(
                 text: None,
                 start_s: None,
                 stop_s: None,
-                turn_idx: None,
+                turn_idx: Some(turn_idx),
                 time_s: Some(time_s),
                 event: Some(event_py),
                 tool_call: None,
@@ -531,7 +541,15 @@ async fn ws_reader_loop(mut ws_stream: WsStream, tx: mpsc::Sender<RemoteMsgOut>)
                         tool_name,
                         args,
                     },
-                    ServerMessage::Event { time_s, event } => RemoteMsgOut::Event { time_s, event },
+                    ServerMessage::Event {
+                        time_s,
+                        event,
+                        turn_idx,
+                    } => RemoteMsgOut::Event {
+                        time_s,
+                        event,
+                        turn_idx,
+                    },
                     ServerMessage::Error { message } => RemoteMsgOut::Error { message },
                     ServerMessage::SessionConfigApplied { pinned_fields } => {
                         if !pinned_fields.is_empty() {

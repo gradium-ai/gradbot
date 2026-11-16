@@ -24,6 +24,7 @@ pub struct State {
 struct TimedEvent {
     wall_time_s: f64,
     time_s: f64,
+    turn_idx: u64,
     #[serde(flatten)]
     event: gradbot::Event,
 }
@@ -55,13 +56,18 @@ async fn msg_out_consumer(
             MsgOut::TtsText { .. } | MsgOut::SttText { .. } => {
                 // Twilio doesn't support text messages
             }
-            MsgOut::Event { time_s, event } => {
+            MsgOut::Event {
+                time_s,
+                turn_idx,
+                event,
+            } => {
                 if let Some(log) = &mut log {
                     use tokio::io::AsyncWriteExt;
                     let wall_time_s = (timens::Time::now() - start_time).to_sec();
                     let timed_event = TimedEvent {
                         wall_time_s,
                         time_s,
+                        turn_idx,
                         event,
                     };
                     let log_line = serde_json::to_string(&timed_event)? + "\n";

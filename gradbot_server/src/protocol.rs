@@ -56,7 +56,12 @@ pub enum ServerMessage {
     },
 
     #[serde(rename = "event")]
-    Event { time_s: f64, event: String },
+    Event {
+        time_s: f64,
+        event: String,
+        /// Turn the event belongs to.
+        turn_idx: u64,
+    },
 
     #[serde(rename = "error")]
     Error { message: String },
