@@ -152,3 +152,46 @@ pub fn system_prompt(lang: Lang, additional_instructions: Option<&str>) -> Strin
         .replace("{language_instructions}", language_instructions)
         .replace("{who_are_you}", who_are_you)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_prompt_has_no_leftover_template_placeholders() {
+        for lang in [Lang::En, Lang::Fr, Lang::Es, Lang::De, Lang::Pt] {
+            let prompt = system_prompt(lang, None);
+            assert!(!prompt.contains("{SYSTEM_PROMPT_BASICS}"));
+            assert!(!prompt.contains("{additional_instructions}"));
+            assert!(!prompt.contains("{language_instructions}"));
+            assert!(!prompt.contains("{who_are_you}"));
+        }
+    }
+
+    #[test]
+    fn system_prompt_selects_language_instructions_per_lang() {
+        assert!(system_prompt(Lang::En, None).contains("Speak English"));
+        assert!(system_prompt(Lang::Fr, None).contains("Speak French"));
+        assert!(system_prompt(Lang::Es, None).contains("Speak Spanish"));
+        assert!(system_prompt(Lang::De, None).contains("Speak German"));
+        assert!(system_prompt(Lang::Pt, None).contains("Speak Portuguese"));
+    }
+
+    #[test]
+    fn system_prompt_uses_default_identity_and_instructions_when_none_given() {
+        let prompt = system_prompt(Lang::En, None);
+        assert!(prompt.contains(DEFAULT_ADDITIONAL_INSTRUCTIONS.trim()));
+        assert!(prompt.contains(WHO_ARE_YOU_DEFAULT.trim()));
+        assert!(!prompt.contains(WHO_ARE_YOU_CUSTOM.trim()));
+    }
+
+    #[test]
+    fn system_prompt_uses_custom_identity_and_instructions_when_given() {
+        let custom = "Only ever respond in haiku.";
+        let prompt = system_prompt(Lang::En, Some(custom));
+        assert!(prompt.contains(custom));
+        assert!(prompt.contains(WHO_ARE_YOU_CUSTOM.trim()));
+        assert!(!prompt.contains(WHO_ARE_YOU_DEFAULT.trim()));
+        assert!(!prompt.contains(DEFAULT_ADDITIONAL_INSTRUCTIONS.trim()));
+    }
+}
