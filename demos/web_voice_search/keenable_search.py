@@ -1,13 +1,14 @@
 """Tiny async client for the Keenable Search API (realtime mode).
 
 API reference: https://docs.keenable.ai/api-reference/search
-    POST https://api.keenable.ai/v1/search
-    Header: X-API-Key: keen_...
+    POST https://api.keenable.ai/v1/search          (with X-API-Key: keen_...)
+    POST https://api.keenable.ai/v1/search/public   (no key, X-Keenable-Title)
     Body:   {"query": "...", "mode": "realtime"}
     Returns: {"results": [{"title", "url", "description", "snippet"}]}
 
 Realtime mode is the fastest Keenable search mode — ideal for a low-latency
-voice agent. The API key is read from the ``KEENABLE_API_KEY`` env var.
+voice agent. ``KEENABLE_API_KEY`` is optional: without it the demo uses the
+keyless public endpoint, which is rate-limited per IP; a key raises the limits.
 """
 
 from __future__ import annotations
@@ -22,10 +23,9 @@ import httpx
 logger = logging.getLogger(__name__)
 
 KEENABLE_API_URL = "https://api.keenable.ai/v1/search"
-
-
-class KeenableNotConfiguredError(RuntimeError):
-    """Raised when the Keenable API key is missing."""
+KEENABLE_PUBLIC_URL = "https://api.keenable.ai/v1/search/public"
+# The keyless endpoint requires an app name; it identifies the demo, not the user.
+KEENABLE_APP_TITLE = "gradbot"
 
 
 class KeenableSearchError(RuntimeError):
@@ -45,28 +45,27 @@ async def keenable_search(query: str, limit: int = 5) -> list[dict[str, Any]]:
     Each row: ``{"title", "url", "source", "snippet"}``.
 
     Raises:
-        KeenableNotConfiguredError: if KEENABLE_API_KEY is not set.
         KeenableSearchError: if the request fails (auth, rate limit, network…).
     """
     api_key = (os.environ.get("KEENABLE_API_KEY") or "").strip()
-    if not api_key:
-        raise KeenableNotConfiguredError(
-            "KEENABLE_API_KEY is not set. Add it to .env to enable web search."
-        )
-
     payload = {"query": query, "mode": "realtime"}
-    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+    if api_key:
+        url = KEENABLE_API_URL
+        headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+    else:
+        url = KEENABLE_PUBLIC_URL
+        headers = {"X-Keenable-Title": KEENABLE_APP_TITLE, "Content-Type": "application/json"}
 
     try:
         async with httpx.AsyncClient() as client:
-            r = await client.post(
-                KEENABLE_API_URL, json=payload, headers=headers, timeout=30.0
-            )
+            r = await client.post(url, json=payload, headers=headers, timeout=30.0)
             r.raise_for_status()
             data = r.json()
     except httpx.HTTPStatusError as e:
         body = e.response.text[:200] if e.response is not None else ""
         msg = f"Keenable HTTP {e.response.status_code}: {body}"
+        if e.response.status_code == 429 and not api_key:
+            msg += " (keyless rate limit; set KEENABLE_API_KEY for higher limits)"
         logger.warning("Keenable search failed for %r: %s", query, msg)
         raise KeenableSearchError(msg) from e
     except Exception as e:

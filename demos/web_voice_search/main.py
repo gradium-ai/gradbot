@@ -6,7 +6,7 @@ two while streaming the source cards to the browser.
 
 Run locally:
     uv sync
-    cp .env.example .env   # fill in KEENABLE_API_KEY, GRADIUM_API_KEY, LLM_*
+    cp .env.example .env   # fill in GRADIUM_API_KEY, LLM_*; KEENABLE_API_KEY is optional
     uv run uvicorn main:app --reload --port 8060
 Then open http://localhost:8060/
 """
@@ -21,13 +21,12 @@ from dotenv import load_dotenv
 
 # Populate os.environ from .env BEFORE importing gradbot — gradbot reads its keys
 # (GRADIUM_API_KEY, LLM_API_KEY/LLM_BASE_URL/LLM_MODEL) and keenable_search reads
-# KEENABLE_API_KEY directly from the environment.
+# the optional KEENABLE_API_KEY directly from the environment.
 load_dotenv(pathlib.Path(__file__).parent / ".env")
 
 import gradbot  # noqa: E402
 
 from keenable_search import (  # noqa: E402
-    KeenableNotConfiguredError,
     KeenableSearchError,
     keenable_search,
 )
@@ -132,20 +131,6 @@ async def handle_tool_call(handle, input_handle, websocket: fastapi.WebSocket):
 
     try:
         results = await keenable_search(query, limit=5)
-    except KeenableNotConfiguredError as exc:
-        await handle.send(
-            json.dumps(
-                {
-                    "success": False,
-                    "message": (
-                        "Web search isn't configured right now — tell the caller you "
-                        "can't reach the web at the moment."
-                    ),
-                }
-            )
-        )
-        logger.warning("web_search not configured: %s", exc)
-        return
     except KeenableSearchError as exc:
         await handle.send(
             json.dumps(

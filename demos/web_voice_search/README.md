@@ -29,7 +29,7 @@ Open http://localhost:8060/ and tap the mic.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `KEENABLE_API_KEY` | Yes | Keenable web search. Get one at https://keenable.ai. |
+| `KEENABLE_API_KEY` | No | Keenable web search works without a key, on the keyless public endpoint (rate-limited per IP). A key from https://keenable.ai raises the limits. |
 | `GRADIUM_API_KEY` | Yes | Gradium voice (STT + TTS). |
 | `LLM_API_KEY` | Yes | OpenAI-compatible LLM key. **Must support tool calling.** |
 | `LLM_BASE_URL` | No | Defaults to OpenRouter (`https://openrouter.ai/api/v1`). |
@@ -47,6 +47,6 @@ that gradbot and the Keenable client read from.
 - `main.py` — FastAPI app, the gradbot voice session, the `web_search` tool
   definition, and the `on_tool_call` handler that calls Keenable and streams
   results to both the LLM and the browser.
-- `keenable_search.py` — small async client for `POST /v1/search` (realtime).
+- `keenable_search.py` — small async client for `POST /v1/search` (realtime), or `/v1/search/public` when no key is set.
 - `static/index.html` — mic UI, live transcript, and the web-sources panel
   (reuses gradbot's bundled audio JS served under `static/js/`).
