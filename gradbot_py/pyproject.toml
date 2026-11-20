@@ -54,3 +54,9 @@ single-line-exclusions = ["typing"]
 features = ["extension"]
 module-name = "gradbot._gradbot"
 include = ["gradbot/js_audio/**"]
+
+[tool.uv]
+exclude-newer = "7 days"
+
+[tool.uv.audit]
+malware-check = true
