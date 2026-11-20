@@ -1,0 +1,40 @@
+services:
+  proxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
+    container_name: gradbot-proxy
+    environment:
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:?MINIMAX_API_KEY is required}
+      UPSTREAM_BASE_URL: ${UPSTREAM_BASE_URL:-https://api.minimax.io/v1}
+      STALL_MODEL: ${STALL_MODEL:-M2-her}
+      BRAIN_MODEL: ${BRAIN_MODEL:-MiniMax-M2.7}
+      STALL_TIMEOUT_S: ${STALL_TIMEOUT_S:-8.0}
+      BRAIN_TIMEOUT_S: ${BRAIN_TIMEOUT_S:-30.0}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/healthz').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  gradbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gradbot
+    environment:
+      GRADIUM_API_KEY: ${GRADIUM_API_KEY:?GRADIUM_API_KEY is required}
+      LLM_API_KEY: ${MINIMAX_API_KEY:?MINIMAX_API_KEY is required}
+      LLM_BASE_URL: http://proxy:8080/v1
+      LLM_MODEL: routed
+    ports:
+      - "8000:8000"
+    depends_on:
+      proxy:
+        condition: service_healthy
+    restart: unless-stopped
